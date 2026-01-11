@@ -1,0 +1,826 @@
+import { useState, useEffect } from 'react';
+import { useServers, type MikrotikServer } from '@/context/ServerContext';
+import { MikrotikApi } from '@/services/mikrotikApi';
+import { DownloadCloud, Search, AlertCircle, CheckCircle2, Pencil, Lock, Unlock, Plus, Save, ChevronLeft, ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+interface Customer {
+    id: string; // Mikrotik ID (*1)
+    name: string; // Username
+    password?: string;
+    service: string;
+    profile: string;
+    "remote-address"?: string;
+    "last-logged-out"?: string;
+    disabled: boolean;
+    comment?: string; // Customer Name
+    serverName: string; // To know which router it came from
+    serverId: string;
+    // CRM Fields (from simple DB)
+    whatsapp?: string;
+    lat?: string;
+    long?: string;
+    photos?: string[]; // URLs
+    ktp?: string;
+    activationDate?: string;
+}
+
+export function Customers() {
+    const { servers } = useServers();
+    const [customers, setCustomers] = useState<Customer[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [filter, setFilter] = useState('');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
+    const [serverFilter, setServerFilter] = useState<string>('all');
+    const [profileFilter, setProfileFilter] = useState<string>('all');
+    const [sortConfig, setSortConfig] = useState<{ key: keyof Customer | 'serverName' | 'comment' | 'activationDate', direction: 'asc' | 'desc' } | null>(null);
+    const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+
+    // Modal State
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+
+    // ... (rest of helper functions)
+
+    // Calculate unique profiles based on current server filter
+    const uniqueProfiles = Array.from(new Set(
+        customers
+            .filter(c => serverFilter === 'all' || c.serverId === serverFilter)
+            .map(c => c.profile)
+    )).sort();
+
+    // Rest of useEffects...
+
+    // Combined Filter & Sort Logic
+    const filteredAndSortedCustomers = customers
+        .filter(c => {
+            const matchesSearch = c.name.toLowerCase().includes(filter.toLowerCase()) ||
+                (c.comment || '').toLowerCase().includes(filter.toLowerCase()) ||
+                c.serverName.toLowerCase().includes(filter.toLowerCase());
+
+            const matchesStatus = statusFilter === 'all'
+                ? true
+                : statusFilter === 'active' ? !c.disabled : c.disabled;
+
+            const matchesServer = serverFilter === 'all' ? true : c.serverId === serverFilter;
+
+            const matchesProfile = profileFilter === 'all' ? true : c.profile === profileFilter;
+
+            return matchesSearch && matchesStatus && matchesServer && matchesProfile;
+        })
+        .sort((a, b) => {
+            // ... existing sort logic
+            if (!sortConfig) return 0;
+            const { key, direction } = sortConfig;
+
+            let aValue: any = a[key as keyof Customer];
+            let bValue: any = b[key as keyof Customer];
+
+            // Handle specific keys if needed, e.g., if undefined
+            if (aValue === undefined) aValue = '';
+            if (bValue === undefined) bValue = '';
+
+            if (typeof aValue === 'string') {
+                return direction === 'asc'
+                    ? aValue.localeCompare(bValue)
+                    : bValue.localeCompare(aValue);
+            }
+
+            // Boolean comparison
+            if (typeof aValue === 'boolean') {
+                if (aValue === bValue) return 0;
+                return direction === 'asc'
+                    ? (aValue ? 1 : -1) // true comes after false
+                    : (aValue ? -1 : 1); // true comes before false
+            }
+
+            // Fallback for other types (numbers, etc.)
+            if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+            if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+    // Reset pagination when filters change (including profileFilter)
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filter, statusFilter, serverFilter, profileFilter, itemsPerPage]);
+
+    // Fetch all customers (Pull)
+    const handlePull = async () => {
+        setLoading(true);
+        setSyncStatus(null);
+        const newCustomers: Customer[] = [];
+
+        try {
+            if (servers.length === 0) {
+                setSyncStatus({ type: 'error', message: "No servers available to pull from." });
+                return;
+            }
+
+            // Fetch Meta Data Checkpoint
+            const metaData = await MikrotikApi.getExtendedData(); // returns object { "serverId_username": { ... } }
+
+            await Promise.all(servers.map(async (server) => {
+                if (!server.isOnline) return;
+                try {
+                    // Parse disabled status robustly
+                    const isDisabled = (raw: any) => {
+                        const val = raw.disabled;
+                        if (val === true || val === 'true' || val === 'yes' || val === '1') return true;
+                        return false;
+                    };
+
+                    const secrets = await MikrotikApi.getPPPSecrets(server);
+                    secrets.forEach((s: any) => {
+                        const key = `${server.id}_${s.name}`;
+                        const meta = metaData[key] || {};
+
+                        newCustomers.push({
+                            id: s['.id'],
+                            name: s.name,
+                            password: s.password,
+                            service: s.service || 'any',
+                            profile: s.profile || 'default',
+                            "remote-address": s['remote-address'],
+                            "last-logged-out": s['last-logged-out'],
+                            disabled: isDisabled(s),
+                            comment: s.comment,
+                            serverName: server.name,
+                            serverId: server.id,
+                            // Merged Meta Data
+                            whatsapp: meta.whatsapp,
+                            lat: meta.lat,
+                            long: meta.long,
+                            photos: meta.photos || [],
+                            ktp: meta.ktp,
+                            activationDate: meta.activationDate
+                        });
+                    });
+                } catch (e) {
+                    console.error(`Failed to pull from ${server.name}`, e);
+                }
+            }));
+
+            setCustomers(newCustomers);
+            setSyncStatus({ type: 'success', message: `Pulled ${newCustomers.length} customers from ${servers.length} servers.` });
+        } catch (e) {
+            setSyncStatus({ type: 'error', message: "Failed to pull data." });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleEdit = (customer: Customer) => {
+        setEditingCustomer(customer);
+        setIsModalOpen(true);
+    };
+
+    const handleAdd = () => {
+        setEditingCustomer(null);
+        setIsModalOpen(true);
+    };
+
+    const handleSave = async (data: any, targetServerId: string) => {
+        setLoading(true);
+        try {
+            const server = servers.find(s => s.id === targetServerId);
+            if (!server) throw new Error("Target server not found");
+
+            if (editingCustomer) {
+                // Update
+                await MikrotikApi.updatePPPSecret(server, editingCustomer.id, data);
+                setSyncStatus({ type: 'success', message: "Customer updated successfully." });
+            } else {
+                // Create
+                await MikrotikApi.addPPPSecret(server, data);
+                setSyncStatus({ type: 'success', message: "Customer created successfully." });
+            }
+
+            setIsModalOpen(false);
+            handlePull(); // Refresh list associated with this context? Or just push to local state? Pull is safer.
+        } catch (e: any) {
+            console.error(e);
+            setSyncStatus({ type: 'error', message: `Operation failed: ${e.message}` });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const toggleCustomer = async (customer: Customer) => {
+        const server = servers.find(s => s.id === customer.serverId);
+        if (!server) return;
+
+        try {
+            const newDisabledState = !customer.disabled;
+            await MikrotikApi.togglePPPSecret(server, customer.id, newDisabledState);
+
+            // If blocking, also remove active session to kick the user
+            if (newDisabledState) {
+                await MikrotikApi.removeActivePppSession(server, customer.name);
+                setSyncStatus({ type: 'success', message: `Blocked ${customer.name} and terminated active session.` });
+            } else {
+                setSyncStatus({ type: 'success', message: `Unblocked ${customer.name}.` });
+            }
+
+            // Optimistic Update
+            setCustomers(prev => prev.map(c =>
+                c.id === customer.id && c.serverId === customer.serverId
+                    ? { ...c, disabled: newDisabledState }
+                    : c
+            ));
+        } catch (e: any) {
+            console.error(e);
+            setSyncStatus({ type: 'error', message: `Failed to toggle status: ${e.message}` });
+        }
+    };
+
+    const handlePush = async (customer: Customer) => {
+        const server = servers.find(s => s.id === customer.serverId);
+        if (!server) return;
+
+        // Show loading state for this specific action if possible, or global loading
+        // For now, using global sync status to notify start
+        setSyncStatus({ type: 'success', message: `Pushing ${customer.name} to ${server.name}...` });
+
+        try {
+            // Construct payload from customer object
+            // Note: We need to ensure we send all relevant fields that might have changed or simply enforce current state
+            const payload = {
+                name: customer.name,
+                password: customer.password,
+                service: customer.service || 'any',
+                profile: customer.profile,
+                "remote-address": customer["remote-address"] || "",
+                comment: customer.comment || "",
+                disabled: customer.disabled ? 'yes' : 'no'
+            };
+
+            await MikrotikApi.updatePPPSecret(server, customer.id, payload);
+            setSyncStatus({ type: 'success', message: `Successfully pushed ${customer.name} to ${server.name}.` });
+        } catch (e: any) {
+            console.error(e);
+            setSyncStatus({ type: 'error', message: `Failed to push ${customer.name}: ${e.message}` });
+        }
+    };
+
+    useEffect(() => {
+        handlePull();
+    }, []); // Initial pull on mount
+
+    const handleSort = (key: keyof Customer | 'serverName' | 'comment') => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    // Pagination Logic
+    const totalPages = itemsPerPage === -1
+        ? 1
+        : Math.ceil(filteredAndSortedCustomers.length / itemsPerPage);
+
+    const startIndex = (currentPage - 1) * (itemsPerPage === -1 ? filteredAndSortedCustomers.length : itemsPerPage);
+
+    const paginatedCustomers = itemsPerPage === -1
+        ? filteredAndSortedCustomers
+        : filteredAndSortedCustomers.slice(startIndex, startIndex + itemsPerPage);
+
+    return (
+        <div className="p-8 space-y-6">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-900">Customers</h1>
+                    <p className="text-slate-500">Manage PPP Secrets (Active: {customers.filter(c => !c.disabled).length}, Blocked: {customers.filter(c => c.disabled).length})</p>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={handlePull} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
+                        <DownloadCloud className={cn("w-4 h-4", loading && "animate-bounce")} />
+                        Pull All
+                    </button>
+                    <button onClick={handleAdd} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+                        <Plus className="w-4 h-4" />
+                        Add Customer
+                    </button>
+                </div>
+            </div>
+
+            {/* Status Bar */}
+            {syncStatus && (
+                <div className={cn("p-4 rounded-lg flex items-center gap-2 text-sm",
+                    syncStatus.type === 'success' ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
+                    {syncStatus.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                    {syncStatus.message}
+                </div>
+            )}
+
+            {/* Filters */}
+            <div className="flex flex-col md:flex-row gap-4">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                        className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                        placeholder="Search username, name..."
+                        value={filter}
+                        onChange={e => setFilter(e.target.value)}
+                    />
+                </div>
+
+                <select
+                    className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[150px]"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'blocked')}
+                >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="blocked">Blocked</option>
+                </select>
+
+                <select
+                    className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[200px]"
+                    value={serverFilter}
+                    onChange={(e) => {
+                        setServerFilter(e.target.value);
+                        setProfileFilter('all'); // Reset profile filter when server changes
+                    }}
+                >
+                    <option value="all">All Servers</option>
+                    {servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+
+                <select
+                    className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[200px]"
+                    value={profileFilter}
+                    onChange={(e) => setProfileFilter(e.target.value)}
+                >
+                    <option value="all">All Profiles</option>
+                    {uniqueProfiles.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+            </div>
+
+            {/* Table */}
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                {[
+                                    { label: 'Username', key: 'name' },
+                                    { label: 'Customer', key: 'comment' },
+                                    { label: 'Profile', key: 'profile' },
+                                    { label: 'WhatsApp', key: 'whatsapp' },
+                                    { label: 'IP', key: 'remote-address' },
+                                    { label: 'Server', key: 'serverName' },
+                                    { label: 'Status', key: 'disabled' },
+                                    { label: 'Last Logout', key: 'last-logged-out' },
+                                ].map((col) => (
+                                    <th
+                                        key={col.key}
+                                        className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100 transition-colors select-none group"
+                                        onClick={() => handleSort(col.key as any)}
+                                    >
+                                        <div className="flex items-center gap-1">
+                                            {col.label}
+                                            {sortConfig?.key === col.key && (
+                                                <span className="text-xs">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                                            )}
+                                        </div>
+                                    </th>
+                                ))}
+                                <th className="px-6 py-3 font-medium text-slate-500 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {filteredAndSortedCustomers.length === 0 ? (
+                                <tr>
+                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-400">
+                                        No customers found matching your filters.
+                                    </td>
+                                </tr>
+                            ) : (
+                                paginatedCustomers.map((customer) => (
+                                    <tr key={`${customer.serverId}-${customer.id}`} className="hover:bg-slate-50/50 group">
+                                        <td className="px-6 py-3 font-medium text-slate-900">{customer.name}</td>
+                                        <td className="px-6 py-3 text-slate-600">{customer.comment || '-'}</td>
+                                        <td className="px-6 py-3">
+                                            <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
+                                                {customer.profile}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-3">
+                                            {customer.whatsapp ? (
+                                                <a
+                                                    href={`https://wa.me/${customer.whatsapp.replace(/^0/, '62').replace(/\D/g, '')}`}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-medium text-xs px-2 py-1 bg-emerald-50 rounded-full transition-colors"
+                                                >
+                                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" /></svg>
+                                                    {customer.whatsapp}
+                                                </a>
+                                            ) : (
+                                                <span className="text-slate-400 text-xs">-</span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-3 font-mono text-xs text-slate-600">{customer["remote-address"] || '-'}</td>
+                                        <td className="px-6 py-3 text-slate-500 text-xs">{customer.serverName}</td>
+                                        <td className="px-6 py-3">
+                                            {customer.disabled ? (
+                                                <span className="inline-flex items-center gap-1 text-red-600 text-xs font-medium bg-red-50 px-2 py-1 rounded-full">
+                                                    <Lock className="w-3 h-3" /> Blocked
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium bg-emerald-50 px-2 py-1 rounded-full">
+                                                    <CheckCircle2 className="w-3 h-3" /> Active
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-3 text-slate-500">{customer["last-logged-out"] || '-'}</td>
+                                        <td className="px-6 py-3 text-right">
+                                            {/* Actions... */}
+                                            <div className="flex justify-end gap-2">
+                                                {customer.whatsapp ? (
+                                                    <a
+                                                        href={`https://wa.me/${customer.whatsapp.replace(/^0/, '62').replace(/\D/g, '')}`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                                                        title="Chat on WhatsApp"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" /></svg>
+                                                    </a>
+                                                ) : (
+                                                    <button
+                                                        disabled
+                                                        className="p-1.5 text-slate-200 cursor-not-allowed rounded-lg"
+                                                        title="No WhatsApp Number"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" /></svg>
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => toggleCustomer(customer)}
+                                                    className={cn("p-1.5 rounded-lg transition-colors", customer.disabled ? "text-emerald-600 hover:bg-emerald-50" : "text-red-500 hover:bg-red-50")}
+                                                    title={customer.disabled ? "Unblock" : "Block"}
+                                                >
+                                                    {customer.disabled ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                                                </button>
+                                                <button
+                                                    onClick={() => handlePush(customer)}
+                                                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                                                    title="Push to Router"
+                                                >
+                                                    <DownloadCloud className="w-4 h-4 rotate-180" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleEdit(customer)}
+                                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                                    title="Edit Customer & CRM Data"
+                                                >
+                                                    <Pencil className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Pagination Controls */}
+                <div className="px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50">
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <span>Show</span>
+                        <select
+                            className="bg-white border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            value={itemsPerPage}
+                            onChange={(e) => {
+                                setItemsPerPage(Number(e.target.value));
+                                setCurrentPage(1);
+                            }}
+                        >
+                            <option value={10}>10</option>
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
+                            <option value={-1}>All</option>
+                        </select>
+                        <span>entries</span>
+                        <span className="text-slate-400 mx-2">|</span>
+                        <span>
+                            Showing {filteredAndSortedCustomers.length === 0 ? 0 : startIndex + 1} to{' '}
+                            {itemsPerPage === -1 ? filteredAndSortedCustomers.length : Math.min(startIndex + itemsPerPage, filteredAndSortedCustomers.length)} of {filteredAndSortedCustomers.length} entries
+                        </span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                            disabled={currentPage === 1}
+                            className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600"
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex items-center gap-1">
+                            <span className="px-3 py-1 bg-white border border-slate-200 rounded-md text-sm font-medium text-slate-700">
+                                Page {currentPage} of {totalPages === 0 ? 1 : totalPages}
+                            </span>
+                        </div>
+
+                        <button
+                            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                            disabled={currentPage === totalPages || totalPages === 0}
+                            className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600"
+                        >
+                            <ChevronRight className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <CustomerModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                onSave={handleSave}
+                initialData={editingCustomer}
+                servers={servers}
+            />
+        </div >
+    );
+}
+
+function CustomerModal({ isOpen, onClose, onSave, initialData, servers }: { isOpen: boolean; onClose: () => void; onSave: (data: any, serverId: string) => void, initialData?: Customer | null, servers: MikrotikServer[] }) {
+    if (!isOpen) return null;
+
+    const [formData, setFormData] = useState({
+        name: '',
+        password: '',
+        comment: '',
+        profile: 'default',
+        "remote-address": '',
+        serverId: servers[0]?.id || '',
+        // CRM
+        whatsapp: '',
+        lat: '',
+        long: '',
+        ktp: '',
+        activationDate: '',
+        photos: [] as string[]
+    });
+
+    const [uploading, setUploading] = useState(false);
+    const [availableProfiles, setAvailableProfiles] = useState<any[]>([]);
+    const [availablePools, setAvailablePools] = useState<any[]>([]);
+    const [loadingProfiles, setLoadingProfiles] = useState(false);
+
+    // Fetch profiles and pools when serverId changes
+    useEffect(() => {
+        const fetchData = async () => {
+            if (!formData.serverId) return;
+            const server = servers.find(s => s.id === formData.serverId);
+            if (!server || !server.isOnline) {
+                setAvailableProfiles([]);
+                setAvailablePools([]);
+                return;
+            }
+
+            setLoadingProfiles(true);
+            try {
+                const [profiles, pools] = await Promise.all([
+                    MikrotikApi.getPPPProfiles(server),
+                    MikrotikApi.getIPPools(server)
+                ]);
+                setAvailableProfiles(profiles);
+                setAvailablePools(pools);
+            } catch (error) {
+                console.error("Failed to fetch master data", error);
+            } finally {
+                setLoadingProfiles(false);
+            }
+        };
+
+        fetchData();
+    }, [formData.serverId, servers]);
+
+    useEffect(() => {
+        if (initialData) {
+            setFormData({
+                name: initialData.name,
+                password: initialData.password || '',
+                comment: initialData.comment || '',
+                profile: initialData.profile,
+                "remote-address": initialData["remote-address"] || '',
+                serverId: initialData.serverId,
+                whatsapp: initialData.whatsapp || '',
+                lat: initialData.lat || '',
+                long: initialData.long || '',
+                ktp: initialData.ktp || '',
+                activationDate: initialData.activationDate || '',
+                photos: initialData.photos || []
+            });
+        } else {
+            setFormData({
+                name: '',
+                password: '',
+                comment: '',
+                profile: 'default',
+                "remote-address": '',
+                serverId: servers[0]?.id || '',
+                whatsapp: '',
+                lat: '',
+                long: '',
+                ktp: '',
+                activationDate: '',
+                photos: []
+            });
+        }
+    }, [initialData, isOpen, servers]);
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files?.length) return;
+        setUploading(true);
+        try {
+            const files = Array.from(e.target.files);
+            const urls = await MikrotikApi.uploadPhotos(files);
+            setFormData(prev => ({ ...prev, photos: [...prev.photos, ...urls] }));
+        } catch (error) {
+            alert("Failed to upload photos");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+
+        // Save to Mikrotik
+        await onSave({
+            name: formData.name,
+            password: formData.password,
+            comment: formData.comment,
+            profile: formData.profile,
+            ...(formData["remote-address"] ? { "remote-address": formData["remote-address"] } : {})
+        }, formData.serverId);
+
+        // Save Extended Meta Data
+        if (formData.serverId && formData.name) {
+            await MikrotikApi.updateExtendedData(formData.serverId, formData.name, {
+                whatsapp: formData.whatsapp,
+                lat: formData.lat,
+                long: formData.long,
+                ktp: formData.ktp,
+                activationDate: formData.activationDate,
+                photos: formData.photos
+            });
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                {/* ... Header ... */}
+                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                    <h2 className="text-lg font-semibold">{initialData ? 'Edit Customer' : 'Add New Customer'}</h2>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600">×</button>
+                </div>
+                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                    {/* ... Server Select ... */}
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700">Server (Router)</label>
+                        <select
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
+                            value={formData.serverId}
+                            onChange={e => setFormData({ ...formData, serverId: e.target.value })}
+                            disabled={!!initialData}
+                        >
+                            {servers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.ip})</option>)}
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">Username</label>
+                            <input required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">Password</label>
+                            <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} />
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700">Customer Name (Comment)</label>
+                        <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            value={formData.comment} onChange={e => setFormData({ ...formData, comment: e.target.value })} placeholder="Full Name" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">Profile (Package)</label>
+                            {loadingProfiles ? (
+                                <div className="text-sm text-slate-400 py-2">Loading...</div>
+                            ) : (
+                                <select
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
+                                    value={formData.profile}
+                                    onChange={e => setFormData({ ...formData, profile: e.target.value })}
+                                >
+                                    <option value="default">default</option>
+                                    {availableProfiles.map((p: any) => (
+                                        <option key={p['.id']} value={p.name}>{p.name}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">Remote Address</label>
+                            <input
+                                list="ip-pools"
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData["remote-address"]}
+                                onChange={e => setFormData({ ...formData, "remote-address": e.target.value })}
+                                placeholder="IP or Pool Name"
+                            />
+                            <datalist id="ip-pools">
+                                {availablePools.map((pool: any) => (
+                                    <option key={pool['.id']} value={pool.name}>Pool: {pool.ranges}</option>
+                                ))}
+                            </datalist>
+                        </div>
+                    </div>
+
+                    <div className="border-t border-slate-100 pt-4 mt-2">
+                        <h3 className="text-sm font-semibold text-slate-900 mb-3">CRM Data</h3>
+
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-700">WhatsApp</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">62</span>
+                                    <input className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                        value={formData.whatsapp} onChange={e => setFormData({ ...formData, whatsapp: e.target.value })} placeholder="81234567890" />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-700">No. KTP</label>
+                                <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                    value={formData.ktp} onChange={e => setFormData({ ...formData, ktp: e.target.value })} placeholder="16 Digits" />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-700">Latitude</label>
+                                <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                    value={formData.lat} onChange={e => setFormData({ ...formData, lat: e.target.value })} placeholder="-6.200000" />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-700">Longitude</label>
+                                <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                    value={formData.long} onChange={e => setFormData({ ...formData, long: e.target.value })} placeholder="106.800000" />
+                            </div>
+                        </div>
+
+                        <div className="space-y-2 mb-4">
+                            <label className="text-sm font-medium text-slate-700">Activation Date</label>
+                            <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData.activationDate} onChange={e => setFormData({ ...formData, activationDate: e.target.value })} />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">Installation Photos</label>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                                {formData.photos.map((url, i) => (
+                                    <a key={i} href={`http://localhost:3001${url}`} target="_blank" rel="noreferrer" className="block w-16 h-16 rounded overflow-hidden border border-slate-200 hover:opacity-80">
+                                        <img src={`http://localhost:3001${url}`} alt="Install" className="w-full h-full object-cover" />
+                                    </a>
+                                ))}
+                                <label className="w-16 h-16 rounded border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-colors">
+                                    <Plus className="w-5 h-5" />
+                                    <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} disabled={uploading} />
+                                </label>
+                            </div>
+                            {uploading && <p className="text-xs text-blue-500">Uploading photos...</p>}
+                        </div>
+                    </div>
+
+                    <div className="pt-4 flex justify-end gap-3">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium">Cancel</button>
+                        <button type="submit" className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90">
+                            <Save className="w-4 h-4" />
+                            {initialData ? 'Save Changes' : 'Create Customer'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}

@@ -1,32 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useServers, type MikrotikServer } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
-import { DownloadCloud, Search, AlertCircle, CheckCircle2, Pencil, Plus, Save, Layers } from 'lucide-react';
+import { Search, AlertCircle, CheckCircle2, Pencil, Plus, Save, Layers, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-interface Profile {
-    id: string; // Mikrotik ID (*1)
-    name: string;
-    "local-address"?: string;
-    "remote-address"?: string;
-    "rate-limit"?: string;
-    "dns-server"?: string;
-    serverName: string;
-    serverId: string;
-    price?: number; // Extended data
-}
-
-const DEFAULT_PRICES: Record<string, number> = {
-    "PPPoE Keluarga Bulanan": 135000,
-    "PPPoE Keluarga Sultan": 250000,
-    "PPPoE Keluarga Dekat": 100000,
-    "PPPoE Keluarga Hemat": 100000
-};
+import { useData } from '@/context/DataContext';
+import { type Profile } from '@/types';
 
 export function Profiles() {
     const { servers } = useServers();
-    const [profiles, setProfiles] = useState<Profile[]>([]);
-    const [loading, setLoading] = useState(false);
+    const { profiles, refreshProfiles } = useData();
+    const [syncLoading, setSyncLoading] = useState(false);
     const [filter, setFilter] = useState('');
     const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
@@ -34,60 +18,21 @@ export function Profiles() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
 
-    const handlePull = async () => {
-        setLoading(true);
+    const handleSync = async () => {
+        if (!confirm('This will fetch live data from all routers and update the local cache. Continue?')) return;
+
+        setSyncLoading(true);
         setSyncStatus(null);
-        const newProfiles: Profile[] = [];
-
         try {
-            if (servers.length === 0) {
-                setSyncStatus({ type: 'error', message: "No servers available to pull from." });
-                return;
-            }
-
-            // Fetch extended data
-            const extendedData = await MikrotikApi.getProfileExtendedData();
-
-            await Promise.all(servers.map(async (server) => {
-                if (!server.isOnline) return;
-                try {
-                    const data = await MikrotikApi.getPPPProfiles(server);
-
-                    // Process each profile
-                    for (const p of data) {
-                        const key = `${server.id}_${p.name}`;
-                        let price = extendedData[key]?.price;
-
-                        // Seeding Logic: If no price exists but we have a default for this name
-                        if (price === undefined && DEFAULT_PRICES[p.name]) {
-                            price = DEFAULT_PRICES[p.name];
-                            // Auto-save the seeded price
-                            MikrotikApi.updateProfileExtendedData(server.id, p.name, { price }).catch(console.error);
-                        }
-
-                        newProfiles.push({
-                            id: p['.id'],
-                            name: p.name,
-                            "local-address": p['local-address'],
-                            "remote-address": p['remote-address'],
-                            "rate-limit": p['rate-limit'],
-                            "dns-server": p['dns-server'],
-                            serverName: server.name,
-                            serverId: server.id,
-                            price: price ? Number(price) : undefined
-                        });
-                    }
-                } catch (e) {
-                    console.error(`Failed to pull profiles from ${server.name}`, e);
-                }
-            }));
-
-            setProfiles(newProfiles);
-            setSyncStatus({ type: 'success', message: `Pulled ${newProfiles.length} profiles from ${servers.length} servers.` });
-        } catch (e) {
-            setSyncStatus({ type: 'error', message: "Failed to pull data." });
+            await Promise.all(servers.map(server => MikrotikApi.syncProfiles(server)));
+            setSyncStatus({ type: 'success', message: 'Data synced successfully' });
+            refreshProfiles(true);
+        } catch (error) {
+            console.error(error);
+            setSyncStatus({ type: 'error', message: 'Failed to sync data from some routers' });
         } finally {
-            setLoading(false);
+            setSyncLoading(false);
+            setTimeout(() => setSyncStatus(null), 3000);
         }
     };
 
@@ -102,7 +47,7 @@ export function Profiles() {
     };
 
     const handleSave = async (data: any, targetServerId: string) => {
-        setLoading(true);
+        setSyncLoading(true);
         try {
             const server = servers.find(s => s.id === targetServerId);
             if (!server) throw new Error("Target server not found");
@@ -127,17 +72,18 @@ export function Profiles() {
             }
 
             setIsModalOpen(false);
-            handlePull();
+            refreshProfiles(true);
         } catch (e: any) {
             setSyncStatus({ type: 'error', message: `Operation failed: ${e.message}` });
         } finally {
-            setLoading(false);
+            setSyncLoading(false);
         }
     };
 
+    // Initial load
     useEffect(() => {
-        handlePull();
-    }, []);
+        refreshProfiles(false);
+    }, [servers]); // Re-fetch when servers change
 
     const filteredProfiles = profiles.filter(p =>
         p.name.toLowerCase().includes(filter.toLowerCase()) ||
@@ -155,12 +101,22 @@ export function Profiles() {
                     </h1>
                     <p className="text-slate-500">Manage PPP Profiles and pricing across all servers.</p>
                 </div>
-                <div className="flex gap-2">
-                    <button onClick={handlePull} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
-                        <DownloadCloud className={cn("w-4 h-4", loading && "animate-bounce")} />
-                        Pull All
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <button
+                        onClick={handleSync}
+                        disabled={syncLoading}
+                        className={cn(
+                            "flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50 flex-1 md:flex-none",
+                            syncLoading && "animate-pulse"
+                        )}
+                    >
+                        <RefreshCw className={cn("w-4 h-4", syncLoading && "animate-spin")} />
+                        {syncLoading ? 'Syncing...' : 'Sync Data'}
                     </button>
-                    <button onClick={handleAdd} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+                    <button
+                        onClick={handleAdd}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors shadow-sm flex-1 md:flex-none"
+                    >
                         <Plus className="w-4 h-4" />
                         Add Profile
                     </button>

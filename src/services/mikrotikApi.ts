@@ -108,25 +108,75 @@ export const MikrotikApi = {
         }
     },
 
+    // --- Sync & Cache Methods ---
+
+    async syncSecrets(server: MikrotikServer): Promise<any> {
+        return await fetch(`${META_API_URL}/mikrotik/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server, resource: 'secrets' })
+        }).then(r => r.json());
+    },
+
     async getPPPSecrets(server: MikrotikServer): Promise<any[]> {
+        // Read from cache
         try {
-            const data = await runCommand(server, ['/ppp/secret/print']);
-            return Array.isArray(data) ? data : [];
-        } catch (error) {
-            console.error("Mikrotik API Error (PPP Secrets):", error);
+            const res = await fetch(`${META_API_URL}/mikrotik/data?serverId=${server.id}&resource=secrets`);
+            const json = await res.json();
+            return Array.isArray(json.data) ? json.data : [];
+        } catch (e) {
+            console.error("Failed to read secrets cache", e);
+            return [];
+        }
+    },
+
+    async syncProfiles(server: MikrotikServer): Promise<any> {
+        return await fetch(`${META_API_URL}/mikrotik/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server, resource: 'profiles' })
+        }).then(r => r.json());
+    },
+
+    async getPPPProfiles(server: MikrotikServer): Promise<any[]> {
+        try {
+            const res = await fetch(`${META_API_URL}/mikrotik/data?serverId=${server.id}&resource=profiles`);
+            const json = await res.json();
+            return Array.isArray(json.data) ? json.data : [];
+        } catch (e) {
+            console.error("Failed to read profiles cache", e);
+            return [];
+        }
+    },
+
+    async syncPools(server: MikrotikServer): Promise<any> {
+        return await fetch(`${META_API_URL}/mikrotik/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server, resource: 'pools' })
+        }).then(r => r.json());
+    },
+
+    async getIPPools(server: MikrotikServer): Promise<any[]> {
+        try {
+            const res = await fetch(`${META_API_URL}/mikrotik/data?serverId=${server.id}&resource=pools`);
+            const json = await res.json();
+            return Array.isArray(json.data) ? json.data : [];
+        } catch (e) {
+            console.error("Failed to read pools cache", e);
             return [];
         }
     },
 
     async addPPPSecret(server: MikrotikServer, data: any): Promise<any> {
-        // data should be object like { name: "...", password: "...", profile: "...", "remote-address": "...", comment: "..." }
+        // ... (Keep existing write logic as writes should be live. 
+        // Ideally we should auto-sync after write, but for now kept simple)
         const command = ['/ppp/secret/add'];
         Object.keys(data).forEach(key => command.push(`=${key}=${data[key]}`));
         return await runCommand(server, command);
     },
 
     async updatePPPSecret(server: MikrotikServer, id: string, data: any): Promise<any> {
-        // id is the Mikrotik internal ID (e.g. *1)
         const command = ['/ppp/secret/set', `=.id=${id}`];
         Object.keys(data).forEach(key => command.push(`=${key}=${data[key]}`));
         return await runCommand(server, command);
@@ -153,31 +203,9 @@ export const MikrotikApi = {
             }
         } catch (error) {
             console.error(`Failed to remove active session for ${username}:`, error);
-            // Don't throw, as the main block operation might have succeeded
         }
     },
 
-    // --- Profiles ---
-
-    async getPPPProfiles(server: MikrotikServer): Promise<any[]> {
-        try {
-            const data = await runCommand(server, ['/ppp/profile/print']);
-            return Array.isArray(data) ? data : [];
-        } catch (error) {
-            console.error("Mikrotik API Error (PPP Profiles):", error);
-            return [];
-        }
-    },
-
-    async getIPPools(server: MikrotikServer): Promise<any[]> {
-        try {
-            const data = await runCommand(server, ['/ip/pool/print']);
-            return Array.isArray(data) ? data : [];
-        } catch (error) {
-            console.error("Mikrotik API Error (IP Pools):", error);
-            return [];
-        }
-    },
 
     // --- CRM / Extended Data Methods ---
     async getExtendedData(): Promise<Record<string, any>> {

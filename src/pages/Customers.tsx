@@ -1,40 +1,25 @@
 import { useState, useEffect } from 'react';
 import { useServers, type MikrotikServer } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
-import { DownloadCloud, Search, AlertCircle, CheckCircle2, Pencil, Lock, Unlock, Plus, Save, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useData } from '@/context/DataContext';
+import { type Customer } from '@/types';
+import { Search, AlertCircle, CheckCircle2, Pencil, Lock, Unlock, Plus, Save, ChevronLeft, ChevronRight, RefreshCw, DownloadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-interface Customer {
-    id: string; // Mikrotik ID (*1)
-    name: string; // Username
-    password?: string;
-    service: string;
-    profile: string;
-    "remote-address"?: string;
-    "last-logged-out"?: string;
-    disabled: boolean;
-    comment?: string; // Customer Name
-    serverName: string; // To know which router it came from
-    serverId: string;
-    // CRM Fields (from simple DB)
-    whatsapp?: string;
-    lat?: string;
-    long?: string;
-    photos?: string[]; // URLs
-    ktp?: string;
-    activationDate?: string;
-}
 
 export function Customers() {
     const { servers } = useServers();
-    const [customers, setCustomers] = useState<Customer[]>([]);
-    const [loading, setLoading] = useState(false);
+    const { customers, loadingCustomers: loading, refreshCustomers } = useData();
+    // const [customers, setCustomers] = useState<Customer[]>([]); // Removed local state
+    // const [loading, setLoading] = useState(false); // Removed local state
     const [filter, setFilter] = useState('');
+    const [saving, setSaving] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
     const [serverFilter, setServerFilter] = useState<string>('all');
     const [profileFilter, setProfileFilter] = useState<string>('all');
     const [sortConfig, setSortConfig] = useState<{ key: keyof Customer | 'serverName' | 'comment' | 'activationDate', direction: 'asc' | 'desc' } | null>(null);
     const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+    const [syncLoading, setSyncLoading] = useState(false);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -45,6 +30,24 @@ export function Customers() {
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
 
     // ... (rest of helper functions)
+
+    const handleSync = async () => {
+        if (!confirm('This will fetch live data from all routers and update the local cache. Continue?')) return;
+
+        setSyncLoading(true);
+        setSyncStatus(null);
+        try {
+            await Promise.all(servers.map(server => MikrotikApi.syncSecrets(server)));
+            setSyncStatus({ type: 'success', message: 'Data synced successfully' });
+            refreshCustomers(true); // Re-read from cache (forced)
+        } catch (error) {
+            console.error(error);
+            setSyncStatus({ type: 'error', message: 'Failed to sync data from some routers' });
+        } finally {
+            setSyncLoading(false);
+            setTimeout(() => setSyncStatus(null), 3000);
+        }
+    };
 
     // Calculate unique profiles based on current server filter
     const uniqueProfiles = Array.from(new Set(
@@ -105,74 +108,10 @@ export function Customers() {
         });
 
     // Reset pagination when filters change (including profileFilter)
+    // Initial Load - handled by context mostly, but we trigger refresh checks
     useEffect(() => {
-        setCurrentPage(1);
-    }, [filter, statusFilter, serverFilter, profileFilter, itemsPerPage]);
-
-    // Fetch all customers (Pull)
-    const handlePull = async () => {
-        setLoading(true);
-        setSyncStatus(null);
-        const newCustomers: Customer[] = [];
-
-        try {
-            if (servers.length === 0) {
-                setSyncStatus({ type: 'error', message: "No servers available to pull from." });
-                return;
-            }
-
-            // Fetch Meta Data Checkpoint
-            const metaData = await MikrotikApi.getExtendedData(); // returns object { "serverId_username": { ... } }
-
-            await Promise.all(servers.map(async (server) => {
-                if (!server.isOnline) return;
-                try {
-                    // Parse disabled status robustly
-                    const isDisabled = (raw: any) => {
-                        const val = raw.disabled;
-                        if (val === true || val === 'true' || val === 'yes' || val === '1') return true;
-                        return false;
-                    };
-
-                    const secrets = await MikrotikApi.getPPPSecrets(server);
-                    secrets.forEach((s: any) => {
-                        const key = `${server.id}_${s.name}`;
-                        const meta = metaData[key] || {};
-
-                        newCustomers.push({
-                            id: s['.id'],
-                            name: s.name,
-                            password: s.password,
-                            service: s.service || 'any',
-                            profile: s.profile || 'default',
-                            "remote-address": s['remote-address'],
-                            "last-logged-out": s['last-logged-out'],
-                            disabled: isDisabled(s),
-                            comment: s.comment,
-                            serverName: server.name,
-                            serverId: server.id,
-                            // Merged Meta Data
-                            whatsapp: meta.whatsapp,
-                            lat: meta.lat,
-                            long: meta.long,
-                            photos: meta.photos || [],
-                            ktp: meta.ktp,
-                            activationDate: meta.activationDate
-                        });
-                    });
-                } catch (e) {
-                    console.error(`Failed to pull from ${server.name}`, e);
-                }
-            }));
-
-            setCustomers(newCustomers);
-            setSyncStatus({ type: 'success', message: `Pulled ${newCustomers.length} customers from ${servers.length} servers.` });
-        } catch (e) {
-            setSyncStatus({ type: 'error', message: "Failed to pull data." });
-        } finally {
-            setLoading(false);
-        }
-    };
+        refreshCustomers(false);
+    }, []);
 
     const handleEdit = (customer: Customer) => {
         setEditingCustomer(customer);
@@ -185,7 +124,7 @@ export function Customers() {
     };
 
     const handleSave = async (data: any, targetServerId: string) => {
-        setLoading(true);
+        setSaving(true);
         try {
             const server = servers.find(s => s.id === targetServerId);
             if (!server) throw new Error("Target server not found");
@@ -201,12 +140,12 @@ export function Customers() {
             }
 
             setIsModalOpen(false);
-            handlePull(); // Refresh list associated with this context? Or just push to local state? Pull is safer.
+            refreshCustomers(true); // Forcing refresh to ensure UI is updated after save
         } catch (e: any) {
             console.error(e);
             setSyncStatus({ type: 'error', message: `Operation failed: ${e.message}` });
         } finally {
-            setLoading(false);
+            setSaving(false);
         }
     };
 
@@ -226,12 +165,8 @@ export function Customers() {
                 setSyncStatus({ type: 'success', message: `Unblocked ${customer.name}.` });
             }
 
-            // Optimistic Update
-            setCustomers(prev => prev.map(c =>
-                c.id === customer.id && c.serverId === customer.serverId
-                    ? { ...c, disabled: newDisabledState }
-                    : c
-            ));
+            // Optimistic Update is tricky with global context unless we expose a setter or just refresh
+            refreshCustomers(true);
         } catch (e: any) {
             console.error(e);
             setSyncStatus({ type: 'error', message: `Failed to toggle status: ${e.message}` });
@@ -267,9 +202,10 @@ export function Customers() {
         }
     };
 
+    // Reset pagination when filters change (including profileFilter)
     useEffect(() => {
-        handlePull();
-    }, []); // Initial pull on mount
+        setCurrentPage(1);
+    }, [filter, statusFilter, serverFilter, profileFilter, itemsPerPage]);
 
     const handleSort = (key: keyof Customer | 'serverName' | 'comment') => {
         let direction: 'asc' | 'desc' = 'asc';
@@ -296,28 +232,42 @@ export function Customers() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Customers</h1>
-                    <p className="text-slate-500">Manage PPP Secrets (Active: {customers.filter(c => !c.disabled).length}, Blocked: {customers.filter(c => c.disabled).length})</p>
+                    <p className="text-slate-500">Manage PPPoE secrets and users</p>
                 </div>
-                <div className="flex gap-2">
-                    <button onClick={handlePull} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
-                        <DownloadCloud className={cn("w-4 h-4", loading && "animate-bounce")} />
-                        Pull All
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                    <button
+                        onClick={handleSync}
+                        disabled={syncLoading || loading}
+                        className={cn(
+                            "flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50 flex-1 md:flex-none",
+                            syncLoading && "animate-pulse"
+                        )}
+                    >
+                        <RefreshCw className={cn("w-4 h-4", syncLoading && "animate-spin")} />
+                        {syncLoading ? 'Syncing...' : 'Sync Data'}
                     </button>
-                    <button onClick={handleAdd} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+                    <button
+                        onClick={handleAdd}
+                        className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm flex-1 md:flex-none"
+                    >
                         <Plus className="w-4 h-4" />
                         Add Customer
                     </button>
                 </div>
             </div>
 
-            {/* Status Bar */}
-            {syncStatus && (
-                <div className={cn("p-4 rounded-lg flex items-center gap-2 text-sm",
-                    syncStatus.type === 'success' ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
-                    {syncStatus.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                    {syncStatus.message}
-                </div>
-            )}
+            {/* Sync Status Alert */}
+            {
+                syncStatus && (
+                    <div className={cn(
+                        "p-4 rounded-lg flex items-center gap-2 text-sm",
+                        syncStatus.type === 'success' ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-800 border border-red-200"
+                    )}>
+                        {syncStatus.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                        {syncStatus.message}
+                    </div>
+                )
+            }
 
             {/* Filters */}
             <div className="flex flex-col md:flex-row gap-4">
@@ -550,12 +500,21 @@ export function Customers() {
                 onSave={handleSave}
                 initialData={editingCustomer}
                 servers={servers}
+                isLoading={saving}
+
             />
         </div >
     );
 }
 
-function CustomerModal({ isOpen, onClose, onSave, initialData, servers }: { isOpen: boolean; onClose: () => void; onSave: (data: any, serverId: string) => void, initialData?: Customer | null, servers: MikrotikServer[] }) {
+function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoading }: {
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (data: any, serverId: string) => void,
+    initialData?: Customer | null,
+    servers: MikrotikServer[],
+    isLoading: boolean
+}) {
     if (!isOpen) return null;
 
     const [formData, setFormData] = useState({
@@ -813,9 +772,9 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers }: { isOp
                     </div>
 
                     <div className="pt-4 flex justify-end gap-3">
-                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium">Cancel</button>
-                        <button type="submit" className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90">
-                            <Save className="w-4 h-4" />
+                        <button type="button" onClick={onClose} disabled={isLoading} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium disabled:opacity-50">Cancel</button>
+                        <button type="submit" disabled={isLoading} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50">
+                            {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             {initialData ? 'Save Changes' : 'Create Customer'}
                         </button>
                     </div>

@@ -1,16 +1,27 @@
 import { useState } from 'react';
-import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network } from "lucide-react";
+import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
+    { name: "Registration", href: "/registration", icon: ClipboardList },
+    {
+        name: "Working Order",
+        icon: Wrench,
+        children: [
+            { name: "In Progress", href: "/working-order/progress", icon: Wrench },
+            { name: "Completed", href: "/working-order/completed", icon: CheckCircle },
+        ]
+    },
+    { name: "Employees", href: "/employees", icon: Briefcase },
     { name: "Servers", href: "/servers", icon: Server },
     { name: "Customers", href: "/customers", icon: Users },
     {
         name: "Data Master",
         icon: Database,
         children: [
+            { name: "Job Titles", href: "/master/job-titles", icon: BadgeCheck },
             { name: "Profiles", href: "/master/profiles", icon: Layers },
             { name: "IP Pools", href: "/master/ip-pools", icon: Network },
         ]

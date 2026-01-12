@@ -5,6 +5,7 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const { RouterOSAPI } = routeros;
 
@@ -86,6 +87,86 @@ app.post('/api/proxy', async (req, res) => {
     }
 });
 
+// --- Mikrotik Cache Endpoints ---
+
+// Helper to get cache file path
+const getCachePath = (serverId, resource) => {
+    // resource: 'secrets', 'profiles', 'pools', 'interfaces'
+    return path.join(__dirname, 'data', `cache_${serverId}_${resource}.json`);
+};
+
+// Sync Data: Fetch from Mikrotik -> Save to JSON -> Return Data
+app.post('/api/mikrotik/sync', async (req, res) => {
+    const { server, resource } = req.body; // server object, resource string
+
+    if (!server || !resource) {
+        return res.status(400).json({ error: 'Missing server or resource' });
+    }
+
+    // Map resource to command
+    let command;
+    switch (resource) {
+        case 'secrets': command = '/ppp/secret/print'; break;
+        case 'profiles': command = '/ppp/profile/print'; break;
+        case 'pools': command = '/ip/pool/print'; break;
+        case 'interfaces': command = '/interface/print'; break;
+        case 'active_ppp': command = '/ppp/active/print'; break;
+        default: return res.status(400).json({ error: 'Invalid resource type' });
+    }
+
+    const client = new RouterOSAPI({
+        host: server.ip,
+        port: server.port || 8728,
+        user: server.username,
+        password: server.password,
+        keepalive: false,
+        timeout: 20
+    });
+
+    try {
+        await client.connect();
+        const data = await client.write(command);
+        await client.close();
+
+        // Save to cache
+        const cachePath = getCachePath(server.id, resource);
+        const cacheData = {
+            timestamp: new Date().toISOString(),
+            data: Array.isArray(data) ? data : []
+        };
+        fs.writeFileSync(cachePath, JSON.stringify(cacheData, null, 2));
+
+        res.json(cacheData);
+    } catch (error) {
+        console.error(`[Sync] Failed to sync ${resource} for ${server.ip}:`, error.message);
+        try { client.close(); } catch (e) { }
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Read Cached Data
+app.get('/api/mikrotik/data', (req, res) => {
+    const { serverId, resource } = req.query;
+
+    if (!serverId || !resource) {
+        return res.status(400).json({ error: 'Missing serverId or resource' });
+    }
+
+    const cachePath = getCachePath(serverId, resource);
+
+    if (!fs.existsSync(cachePath)) {
+        return res.json({ timestamp: null, data: [] });
+    }
+
+    try {
+        const fileContent = fs.readFileSync(cachePath, 'utf8');
+        const cacheData = JSON.parse(fileContent);
+        res.json(cacheData);
+    } catch (error) {
+        res.json({ timestamp: null, data: [] });
+    }
+});
+
 // --- CRM Endpoints ---
 
 // Get All Meta Data
@@ -149,6 +230,63 @@ app.post('/api/profiles/meta', (req, res) => {
     res.json({ success: true, data: db[key] });
 });
 
+// --- Servers Metadata (Migration from LocalStorage) ---
+const DB_SERVERS_FILE = path.join(__dirname, 'data', 'servers.json');
+const getServersDB = () => {
+    if (!fs.existsSync(DB_SERVERS_FILE)) return [];
+    try {
+        const data = JSON.parse(fs.readFileSync(DB_SERVERS_FILE, 'utf8'));
+        return Array.isArray(data) ? data : [];
+    } catch (e) { return []; }
+};
+const saveServersDB = (data) => {
+    fs.writeFileSync(DB_SERVERS_FILE, JSON.stringify(data, null, 2));
+};
+
+app.get('/api/servers', (req, res) => {
+    const db = getServersDB();
+    res.json(db);
+});
+
+app.post('/api/servers', (req, res) => {
+    const newServer = req.body;
+    if (!newServer.id) newServer.id = crypto.randomUUID(); // Ensure ID exists if not provided
+
+    // Validate required fields
+    if (!newServer.name || !newServer.ip || !newServer.username) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const db = getServersDB();
+    db.push(newServer);
+    saveServersDB(db);
+    res.json(newServer);
+});
+
+app.put('/api/servers/:id', (req, res) => {
+    const { id } = req.params;
+    const updatedData = req.body;
+    const db = getServersDB();
+    const index = db.findIndex(s => s.id === id);
+
+    if (index === -1) {
+        return res.status(404).json({ error: 'Server not found' });
+    }
+
+    db[index] = { ...db[index], ...updatedData };
+    saveServersDB(db);
+    res.json(db[index]);
+});
+
+app.delete('/api/servers/:id', (req, res) => {
+    const { id } = req.params;
+    let db = getServersDB();
+    db = db.filter(s => s.id !== id);
+    saveServersDB(db);
+    res.json({ success: true });
+});
+
+
 // Upload Photos
 app.post('/api/upload', upload.array('photos', 5), (req, res) => {
     // Returns list of filenames
@@ -156,6 +294,177 @@ app.post('/api/upload', upload.array('photos', 5), (req, res) => {
 
     const urls = req.files.map(f => `/uploads/${f.filename}`);
     res.json({ urls });
+});
+
+// --- Registration & Working Order ---
+const DB_REGISTRATIONS_FILE = path.join(__dirname, 'data', 'registrations.json');
+const getRegistrationsDB = () => {
+    if (!fs.existsSync(DB_REGISTRATIONS_FILE)) return [];
+    try {
+        const data = JSON.parse(fs.readFileSync(DB_REGISTRATIONS_FILE, 'utf8'));
+        return Array.isArray(data) ? data : [];
+    } catch (e) { return []; }
+};
+const saveRegistrationsDB = (data) => {
+    fs.writeFileSync(DB_REGISTRATIONS_FILE, JSON.stringify(data, null, 2));
+};
+
+// Get Registrations
+app.get('/api/registrations', (req, res) => {
+    const db = getRegistrationsDB();
+    res.json(db);
+});
+
+// Create Registration
+app.post('/api/registrations', (req, res) => {
+    const newReg = req.body;
+    if (!newReg.id) newReg.id = crypto.randomUUID();
+    if (!newReg.createdAt) newReg.createdAt = new Date().toISOString();
+    if (!newReg.status) newReg.status = 'queue'; // Default status
+
+    // Validation
+    if (!newReg.phoneNumber || !newReg.fullName) {
+        return res.status(400).json({ error: 'Phone Number and Name are required' });
+    }
+
+    const db = getRegistrationsDB();
+    db.push(newReg);
+    saveRegistrationsDB(db);
+    res.json(newReg);
+});
+
+// Update Registration (General & Status)
+app.put('/api/registrations/:id', (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+    const db = getRegistrationsDB();
+    const index = db.findIndex(r => r.id === id);
+
+    if (index === -1) {
+        return res.status(404).json({ error: 'Registration not found' });
+    }
+
+    // Merge updates
+    db[index] = { ...db[index], ...updates };
+
+    // Logic: If status becomes 'installation_process' and no workingOrderStatus yet, set it to 'pending'
+    if (db[index].status === 'installation_process' && !db[index].workingOrderStatus) {
+        db[index].workingOrderStatus = 'pending';
+    }
+
+    saveRegistrationsDB(db);
+    res.json(db[index]);
+});
+
+// Delete Registration
+app.delete('/api/registrations/:id', (req, res) => {
+    const { id } = req.params;
+    let db = getRegistrationsDB();
+    db = db.filter(r => r.id !== id);
+    saveRegistrationsDB(db);
+    res.json({ success: true });
+});
+
+// --- Job Titles ---
+const DB_JOB_TITLES_FILE = path.join(__dirname, 'data', 'job_titles.json');
+const getJobTitlesDB = () => {
+    if (!fs.existsSync(DB_JOB_TITLES_FILE)) return [];
+    try {
+        const data = JSON.parse(fs.readFileSync(DB_JOB_TITLES_FILE, 'utf8'));
+        return Array.isArray(data) ? data : [];
+    } catch (e) { return []; }
+};
+const saveJobTitlesDB = (data) => {
+    fs.writeFileSync(DB_JOB_TITLES_FILE, JSON.stringify(data, null, 2));
+};
+
+app.get('/api/job-titles', (req, res) => {
+    res.json(getJobTitlesDB());
+});
+
+app.post('/api/job-titles', (req, res) => {
+    const newItem = req.body;
+    if (!newItem.id) newItem.id = crypto.randomUUID();
+    if (!newItem.createdAt) newItem.createdAt = new Date().toISOString();
+
+    if (!newItem.name) return res.status(400).json({ error: 'Name is required' });
+
+    const db = getJobTitlesDB();
+    db.push(newItem);
+    saveJobTitlesDB(db);
+    res.json(newItem);
+});
+
+app.put('/api/job-titles/:id', (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+    const db = getJobTitlesDB();
+    const index = db.findIndex(i => i.id === id);
+    if (index === -1) return res.status(404).json({ error: 'Not found' });
+
+    db[index] = { ...db[index], ...updates };
+    saveJobTitlesDB(db);
+    res.json(db[index]);
+});
+
+app.delete('/api/job-titles/:id', (req, res) => {
+    const { id } = req.params;
+    let db = getJobTitlesDB();
+    db = db.filter(i => i.id !== id);
+    saveJobTitlesDB(db);
+    res.json({ success: true });
+});
+
+// --- Employees ---
+const DB_EMPLOYEES_FILE = path.join(__dirname, 'data', 'employees.json');
+const getEmployeesDB = () => {
+    if (!fs.existsSync(DB_EMPLOYEES_FILE)) return [];
+    try {
+        const data = JSON.parse(fs.readFileSync(DB_EMPLOYEES_FILE, 'utf8'));
+        return Array.isArray(data) ? data : [];
+    } catch (e) { return []; }
+};
+const saveEmployeesDB = (data) => {
+    fs.writeFileSync(DB_EMPLOYEES_FILE, JSON.stringify(data, null, 2));
+};
+
+app.get('/api/employees', (req, res) => {
+    res.json(getEmployeesDB());
+});
+
+app.post('/api/employees', (req, res) => {
+    const newItem = req.body;
+    if (!newItem.id) newItem.id = crypto.randomUUID();
+    if (!newItem.createdAt) newItem.createdAt = new Date().toISOString();
+
+    if (!newItem.name || !newItem.phoneNumber || !newItem.jobTitleId) {
+        return res.status(400).json({ error: 'Name, Phone, and Job Title are required' });
+    }
+
+    const db = getEmployeesDB();
+    db.push(newItem);
+    saveEmployeesDB(db);
+    res.json(newItem);
+});
+
+app.put('/api/employees/:id', (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+    const db = getEmployeesDB();
+    const index = db.findIndex(i => i.id === id);
+    if (index === -1) return res.status(404).json({ error: 'Not found' });
+
+    db[index] = { ...db[index], ...updates };
+    saveEmployeesDB(db);
+    res.json(db[index]);
+});
+
+app.delete('/api/employees/:id', (req, res) => {
+    const { id } = req.params;
+    let db = getEmployeesDB();
+    db = db.filter(i => i.id !== id);
+    saveEmployeesDB(db);
+    res.json({ success: true });
 });
 
 app.listen(PORT, () => {

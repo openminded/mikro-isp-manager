@@ -1,69 +1,55 @@
+
 import { useState, useEffect } from 'react';
 import { useServers } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
-import { DownloadCloud, Search, AlertCircle, CheckCircle2, Network } from 'lucide-react';
+import { Search, RefreshCw, CheckCircle2, AlertCircle, Network } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useData } from '@/context/DataContext';
+import { type IpPool } from '@/types';
 
-interface IpPool {
-    id: string;
-    name: string;
-    ranges: string;
-    "next-pool"?: string;
-    serverName: string;
-    serverId: string;
-}
+// The original IpPool interface is now imported from '@/types'
+// interface IpPool {
+//     id: string;
+//     name: string;
+//     ranges: string;
+//     "next-pool"?: string;
+//     serverName: string;
+//     serverId: string;
+// }
 
 export function IpPools() {
     const { servers } = useServers();
-    const [pools, setPools] = useState<IpPool[]>([]);
-    const [loading, setLoading] = useState(false);
+    const { pools, refreshPools } = useData();
+    // const [pools, setPools] = useState<IpPool[]>([]); // Removed, now from DataContext
+    const [syncLoading, setSyncLoading] = useState(false); // This state is for the manual sync button
     const [filter, setFilter] = useState('');
     const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
     const [serverFilter, setServerFilter] = useState<string>('all');
 
-    const handlePull = async () => {
-        setLoading(true);
+
+
+    const handleSync = async () => {
+        if (!confirm('This will fetch live data from all routers and update the local cache. Continue?')) return;
+
+        setSyncLoading(true);
         setSyncStatus(null);
-        const newPools: IpPool[] = [];
-
         try {
-            if (servers.length === 0) {
-                setSyncStatus({ type: 'error', message: "No servers available." });
-                return;
-            }
-
-            await Promise.all(servers.map(async (server) => {
-                if (!server.isOnline) return;
-                try {
-                    const data = await MikrotikApi.getIPPools(server);
-                    data.forEach((p: any) => {
-                        newPools.push({
-                            id: p['.id'],
-                            name: p.name,
-                            ranges: p.ranges,
-                            "next-pool": p['next-pool'],
-                            serverName: server.name,
-                            serverId: server.id
-                        });
-                    });
-                } catch (e) {
-                    console.error(`Failed to pull pools from ${server.name}`, e);
-                }
-            }));
-
-            setPools(newPools);
-            setSyncStatus({ type: 'success', message: `Pulled ${newPools.length} pools from ${servers.length} servers.` });
-        } catch (e) {
-            setSyncStatus({ type: 'error', message: "Failed to pull data." });
+            await Promise.all(servers.map(server => MikrotikApi.syncPools(server)));
+            setSyncStatus({ type: 'success', message: 'Data synced successfully' });
+            refreshPools(true); // Use refreshPools from DataContext
+        } catch (error) {
+            console.error(error);
+            setSyncStatus({ type: 'error', message: 'Failed to sync data from some routers' });
         } finally {
-            setLoading(false);
+            setSyncLoading(false);
+            setTimeout(() => setSyncStatus(null), 3000);
         }
     };
 
     useEffect(() => {
-        handlePull();
-    }, []);
+        refreshPools(false);
+    }, [servers]);
 
     const filteredPools = pools.filter(p => {
         const matchesSearch = p.name.toLowerCase().includes(filter.toLowerCase()) ||
@@ -79,9 +65,16 @@ export function IpPools() {
                     <h1 className="text-2xl font-bold text-slate-900">IP Pools</h1>
                     <p className="text-slate-500">Manage IP Address Pools across your network</p>
                 </div>
-                <button onClick={handlePull} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
-                    <DownloadCloud className={cn("w-4 h-4", loading && "animate-bounce")} />
-                    Pull All
+                <button
+                    onClick={handleSync}
+                    disabled={syncLoading}
+                    className={cn(
+                        "flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50 w-full md:w-auto",
+                        syncLoading && "animate-pulse"
+                    )}
+                >
+                    <RefreshCw className={cn("w-4 h-4", syncLoading && "animate-spin")} />
+                    {syncLoading ? 'Syncing...' : 'Sync Data'}
                 </button>
             </div>
 
@@ -132,7 +125,7 @@ export function IpPools() {
                             </tr>
                         ) : (
                             filteredPools.map((pool) => (
-                                <tr key={`${pool.serverId}-${pool.id}`} className="hover:bg-slate-50/50">
+                                <tr key={`${pool.serverId} -${pool.id} `} className="hover:bg-slate-50/50">
                                     <td className="px-6 py-3 font-medium text-slate-900 flex items-center gap-2">
                                         <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded">
                                             <Network className="w-4 h-4" />

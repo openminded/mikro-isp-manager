@@ -21,32 +21,90 @@ interface ServerContextType {
 const ServerContext = createContext<ServerContextType | undefined>(undefined);
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
-    const [servers, setServers] = useState<MikrotikServer[]>(() => {
-        const saved = localStorage.getItem('mikrotik_servers');
-        return saved ? JSON.parse(saved) : [];
-    });
+    const [servers, setServers] = useState<MikrotikServer[]>([]);
 
+    // Fetch servers from backend on mount
     useEffect(() => {
-        localStorage.setItem('mikrotik_servers', JSON.stringify(servers));
-    }, [servers]);
-
-    const addServer = (data: Omit<MikrotikServer, 'id' | 'isOnline'>) => {
-        const newServer: MikrotikServer = {
-            ...data,
-            id: crypto.randomUUID(),
-            isOnline: false, // default offline until checked
+        const fetchServers = async () => {
+            try {
+                const response = await fetch('http://localhost:3001/api/servers');
+                if (response.ok) {
+                    const data = await response.json();
+                    // Add isOnline: false to each server as it's not stored in DB
+                    setServers(data.map((s: any) => ({ ...s, isOnline: false })));
+                } else {
+                    console.error('Failed to fetch servers');
+                }
+            } catch (error) {
+                console.error('Error fetching servers:', error);
+            }
         };
-        setServers(prev => [...prev, newServer]);
+        fetchServers();
+    }, []);
+
+    const addServer = async (data: Omit<MikrotikServer, 'id' | 'isOnline'>) => {
+        try {
+            const response = await fetch('http://localhost:3001/api/servers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                const newServerData = await response.json();
+                const newServer: MikrotikServer = {
+                    ...newServerData,
+                    isOnline: false,
+                };
+                setServers(prev => [...prev, newServer]);
+            } else {
+                console.error('Failed to add server');
+            }
+        } catch (error) {
+            console.error('Error adding server', error);
+        }
     };
 
-    const editServer = (id: string, updatedData: Partial<MikrotikServer>) => {
+    const editServer = async (id: string, updatedData: Partial<MikrotikServer>) => {
+        // Optimistic update for UI responsiveness, especially for isOnline which isn't saved
         setServers(prev => prev.map(server =>
             server.id === id ? { ...server, ...updatedData } : server
         ));
+
+        // If we are just updating status (isOnline), do NOT save to DB
+        // The check is if updatedData ONLY contains isOnline, or if we want to filter it out
+        // However, editServer is usually used for config edits. updateServerStatus is for isOnline.
+        // Let's separate cleanly.
+
+        // Filter out isOnline from the payload to backend
+        const { isOnline, ...dataToSave } = updatedData;
+
+        if (Object.keys(dataToSave).length > 0) {
+            try {
+                await fetch(`http://localhost:3001/api/servers/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dataToSave)
+                });
+            } catch (error) {
+                console.error('Error updating server', error);
+                // Revert? For now, assume success or user will retry
+            }
+        }
     };
 
-    const removeServer = (id: string) => {
-        setServers(prev => prev.filter(s => s.id !== id));
+    const removeServer = async (id: string) => {
+        try {
+            const response = await fetch(`http://localhost:3001/api/servers/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                setServers(prev => prev.filter(s => s.id !== id));
+            }
+        } catch (error) {
+            console.error('Error deleting server', error);
+        }
     };
 
     const updateServerStatus = (id: string, isOnline: boolean) => {

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import type { Customer, Profile, IpPool } from '@/types';
+import type { Customer, Profile, IpPool, Registration } from '@/types';
+import axios from 'axios';
 import { useServers } from './ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
 
@@ -52,6 +53,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
             const metaData = await MikrotikApi.getExtendedData();
 
+            // Fetch registrations for linking real names
+            let registrations: Registration[] = [];
+            try {
+                const res = await axios.get('/api/registrations');
+                if (Array.isArray(res.data)) registrations = res.data;
+            } catch (e) { console.error("Failed to fetch registrations for linking", e); }
+
             await Promise.all(servers.map(async (server) => {
                 // Read from cache/live
                 try {
@@ -66,6 +74,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                         const key = `${server.id}_${s.name}`;
                         const meta = metaData[key] || {};
 
+                        // Link with Registration
+                        let realName = '';
+                        let registrationId = '';
+                        if (meta.whatsapp) {
+                            // Try to find by normalized phone number
+                            const phone = meta.whatsapp.replace(/\D/g, '');
+                            const reg = registrations.find(r => r.phoneNumber?.replace(/\D/g, '') === phone);
+                            if (reg) {
+                                realName = reg.fullName;
+                                registrationId = reg.id;
+                            }
+                        }
+
                         newCustomers.push({
                             id: s['.id'],
                             name: s.name,
@@ -79,6 +100,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                             serverName: server.name,
                             serverId: server.id,
                             whatsapp: meta.whatsapp,
+                            realName: realName,
+                            registrationId: registrationId,
                             lat: meta.lat,
                             long: meta.long,
                             photos: meta.photos || [],

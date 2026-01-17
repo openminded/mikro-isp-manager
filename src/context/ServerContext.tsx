@@ -27,7 +27,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const fetchServers = async () => {
             try {
-                const response = await fetch('http://localhost:3001/api/servers');
+                const response = await fetch('/api/servers');
                 if (response.ok) {
                     const data = await response.json();
                     // Add isOnline: false to each server as it's not stored in DB
@@ -44,7 +44,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
     const addServer = async (data: Omit<MikrotikServer, 'id' | 'isOnline'>) => {
         try {
-            const response = await fetch('http://localhost:3001/api/servers', {
+            const response = await fetch('/api/servers', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -81,7 +81,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
         if (Object.keys(dataToSave).length > 0) {
             try {
-                await fetch(`http://localhost:3001/api/servers/${id}`, {
+                await fetch(`/api/servers/${id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(dataToSave)
@@ -95,7 +95,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
     const removeServer = async (id: string) => {
         try {
-            const response = await fetch(`http://localhost:3001/api/servers/${id}`, {
+            const response = await fetch(`/api/servers/${id}`, {
                 method: 'DELETE'
             });
 

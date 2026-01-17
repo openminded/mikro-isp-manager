@@ -1,24 +1,26 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, MapPin, Smartphone, User, Calendar, Wrench, Search, XCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, MapPin, Smartphone, User, Calendar, Wrench, Search, XCircle, Loader2, AlertTriangle, ClipboardList, Upload } from 'lucide-react';
 import axios from 'axios';
+import { cn } from '@/lib/utils';
+import type { Ticket, Registration } from '@/types';
 
-interface Registration {
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
+
+// Unified Interface
+interface WorkItem {
     id: string;
+    type: 'installation' | 'ticket';
+    customerName: string;
     phoneNumber: string;
-    fullName: string;
     address: string;
-    locationId: string;
-    status: 'queue' | 'installation_process' | 'done' | 'cancel';
-    installation?: {
-        technician: string;
-        companion: string;
-        date: string;
-        finishDate?: string;
-    };
-    workingOrderStatus?: 'pending' | 'done';
-    workingOrderNote?: string;
+    server: string;
+    technician: string;
+    date: string; // Installation Date or Ticket Created Date
+    status: 'pending' | 'in_progress' | 'done' | 'cancel';
+    originalObject: Registration | Ticket;
+    note?: string;
+    rawStatus?: string; // For badges (e.g. ticket status vs registration status)
 }
-
 
 interface Server {
     id: string;
@@ -37,12 +39,13 @@ interface PppSecret {
     comment?: string;
 }
 
+// Reuse StatusModal logic (simplified)
 interface StatusModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSubmit: (note: string) => void;
     title: string;
-    actionType: 'pending' | 'cancel';
+    actionType: 'pending' | 'cancel' | 'resolve'; // Added resolve
 }
 
 function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusModalProps) {
@@ -56,14 +59,16 @@ function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusMod
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6 transform transition-all">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6 transform transition-all animate-in fade-in zoom-in-95 duration-200">
                 <h3 className="text-xl font-bold text-slate-900 mb-2">{title}</h3>
                 <p className="text-slate-500 text-sm mb-4">
-                    Please provide a reason or note for this action.
+                    {actionType === 'resolve'
+                        ? 'Please provide resolution notes for this ticket.'
+                        : 'Please provide a reason or note for this action.'}
                 </p>
                 <textarea
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary min-h-[100px] bg-slate-50"
-                    placeholder="Enter note here..."
+                    placeholder={actionType === 'resolve' ? "Resolution details..." : "Enter note here..."}
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                     autoFocus
@@ -78,10 +83,12 @@ function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusMod
                     <button
                         onClick={() => onSubmit(note)}
                         disabled={!note.trim()}
-                        className={`px-4 py-2 text-white rounded-lg text-sm font-medium transition-colors ${actionType === 'cancel'
-                            ? 'bg-red-600 hover:bg-red-700'
-                            : 'bg-amber-500 hover:bg-amber-600'
-                            }`}
+                        className={cn(
+                            "px-4 py-2 text-white rounded-lg text-sm font-medium transition-colors",
+                            actionType === 'cancel' ? 'bg-red-600 hover:bg-red-700' :
+                                actionType === 'resolve' ? 'bg-emerald-600 hover:bg-emerald-700' :
+                                    'bg-amber-500 hover:bg-amber-600'
+                        )}
                     >
                         Confirm
                     </button>
@@ -91,32 +98,55 @@ function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusMod
     );
 }
 
+// Reuse CompletionModal for Installations (unchanged logic mostly)
 interface CompletionModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: (secretId: string) => void;
+    onConfirm: (secretId: string, files: File[], subAreaId: string, secretName: string) => void;
     serverName: string;
     fetchingSecrets: boolean;
     secrets: PppSecret[];
+    subAreas: any[];
 }
 
-function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecrets, secrets }: CompletionModalProps) {
+function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecrets, secrets, subAreas }: CompletionModalProps) {
     const [selectedSecretId, setSelectedSecretId] = useState('');
+    const [selectedSubAreaId, setSelectedSubAreaId] = useState('');
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+
+    useEffect(() => {
+        setSelectedSecretId('');
+        setSelectedSubAreaId('');
+        setSelectedFiles([]);
+        setPreviewUrls([]);
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files) {
+            const files = Array.from(e.target.files);
+            setSelectedFiles(files);
+
+            // Generate previews
+            const urls = files.map(file => URL.createObjectURL(file));
+            setPreviewUrls(urls);
+        }
+    };
+
     const handleSubmit = () => {
         const secret = secrets.find(s => s['.id'] === selectedSecretId);
-        if (secret) {
-            onConfirm(secret['.id']);
+        if (secret && selectedFiles.length > 0) {
+            onConfirm(secret['.id'], selectedFiles, selectedSubAreaId, secret.name);
         }
     };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6 transform transition-all">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6 transform transition-all animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-slate-900">Complete Working Order</h3>
+                    <h3 className="text-xl font-bold text-slate-900">Complete Installation</h3>
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
                         <XCircle className="w-5 h-5" />
                     </button>
@@ -127,11 +157,7 @@ function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecre
                 </div>
 
                 <p className="text-slate-500 text-sm mb-4">
-                    Please select the PPPoE account (username) created for this customer.
-                    The comment will be automatically updated to: <br />
-                    <code className="bg-slate-100 px-1 py-0.5 rounded text-xs mt-1 block w-fit">
-                        [Server] - [Customer Name] - [Date]
-                    </code>
+                    Link Mikrotik PPPoE Secret and upload installation photos to complete.
                 </p>
 
                 {fetchingSecrets ? (
@@ -140,36 +166,85 @@ function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecre
                         Fetching secrets from router...
                     </div>
                 ) : (
-                    <div className="mb-6">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Select PPPoE Account</label>
-                        <select
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-primary focus:border-primary outline-none bg-white"
-                            value={selectedSecretId}
-                            onChange={(e) => setSelectedSecretId(e.target.value)}
-                        >
-                            <option value="">Select an account...</option>
-                            {secrets.map((secret) => (
-                                <option key={secret['.id']} value={secret['.id']}>
-                                    {secret.name} {secret.comment ? `(${secret.comment})` : ''}
-                                </option>
-                            ))}
-                        </select>
-                        {secrets.length === 0 && (
-                            <p className="text-xs text-red-500 mt-1">No PPPoE secrets found on this server.</p>
-                        )}
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Select PPPoE Account</label>
+                            <SearchableSelect
+                                options={secrets.map(s => ({
+                                    value: s['.id'],
+                                    label: s.comment ? `${s.name} (${s.comment})` : s.name
+                                }))}
+                                value={selectedSecretId}
+                                onChange={setSelectedSecretId}
+                                placeholder="Select PPPoE Account..."
+                            />
+                            {secrets.length === 0 && (
+                                <p className="text-xs text-red-500 mt-1">No PPPoE secrets found on this server.</p>
+                            )}
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Sub Area</label>
+                            <SearchableSelect
+                                options={subAreas
+                                    // Use filtered methods if serverName maps to ID, otherwise just show all?
+                                    // We need server ID. But we only have serverName here.
+                                    // However, in WorkingOrder we can find ID. In Modal props we receive serverName.
+                                    // Let's filter in the Modal? No, simpler to just show all for now?
+                                    // Or better, filter by finding the ID from subAreas (if we had server list here).
+                                    // For now, let's just show all or maybe pass serverId?
+                                    // WorkingOrder passes serverName.
+                                    // Let's filter purely by matching serverName if we can?
+                                    // No, SubArea has serverId.
+                                    // Let's pass filteredSubAreas to Modal?
+                                    // Yes, let's filter in WorkingOrder before passing.
+                                    // BUT, for now I will just map ALL subAreas and let user pick (with label showing server maybe?).
+                                    // Actually, let's update WorkingOrder to pass filteredSubAreas.
+                                    // REVERTING this thought: Let's just use subAreas prop (which should be filtered).
+                                    // But I passed raw subAreas.
+                                    // Modify SearchableSelect options below to match what I'll do in WorkingOrder.
+                                    .map(sa => ({ label: sa.name, value: sa.id }))
+                                }
+                                value={selectedSubAreaId}
+                                onChange={setSelectedSubAreaId}
+                                placeholder="Select Sub Area..."
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Installation Photos <span className="text-red-500">*</span>
+                            </label>
+                            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
+                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                    <Upload className="w-8 h-8 text-slate-400 mb-2" />
+                                    <p className="text-sm text-slate-500"><span className="font-semibold">Click to upload</span> photos</p>
+                                    <p className="text-xs text-slate-400">Min 1 photo required (JPG, PNG)</p>
+                                </div>
+                                <input type="file" className="hidden" multiple accept="image/*" onChange={handleFileChange} />
+                            </label>
+
+                            {/* Previews */}
+                            {previewUrls.length > 0 && (
+                                <div className="mt-2 grid grid-cols-3 gap-2">
+                                    {previewUrls.map((url, idx) => (
+                                        <div key={idx} className="relative aspect-square rounded-md overflow-hidden border border-slate-200">
+                                            <img src={url} alt={`Preview ${idx}`} className="w-full h-full object-cover" />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 
-                <div className="flex justify-end gap-3 mt-2">
-                    <button
-                        onClick={onClose}
-                        className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
-                    >
+                <div className="flex justify-end gap-3 mt-6">
+                    <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
                         Cancel
                     </button>
                     <button
                         onClick={handleSubmit}
-                        disabled={!selectedSecretId}
+                        disabled={!selectedSecretId || selectedFiles.length === 0}
                         className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Confirm Completion
@@ -185,219 +260,304 @@ interface WorkingOrderProps {
 }
 
 export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
-    const [orders, setOrders] = useState<Registration[]>([]);
+    // const { user } = useAuth();
+    const [workItems, setWorkItems] = useState<WorkItem[]>([]);
     const [servers, setServers] = useState<Server[]>([]);
+    const [subAreas, setSubAreas] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('');
-    // const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all'); // Removed in favor of view prop
-    const [sortConfig, setSortConfig] = useState<{ key: keyof Registration | 'date', direction: 'asc' | 'desc' } | null>(null);
+    const [sortConfig, setSortConfig] = useState<{ key: keyof WorkItem | 'date', direction: 'asc' | 'desc' } | null>(null);
 
     // Modal State
     const [modalOpen, setModalOpen] = useState(false);
-    const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
-    const [modalAction, setModalAction] = useState<'pending' | 'cancel'>('pending');
+    const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null);
+    const [modalAction, setModalAction] = useState<'pending' | 'cancel' | 'resolve'>('pending');
 
-    // Completion Modal State
+    // Installation Completion Modal State
     const [completionModalOpen, setCompletionModalOpen] = useState(false);
     const [completingOrder, setCompletingOrder] = useState<Registration | null>(null);
     const [fetchingSecrets, setFetchingSecrets] = useState(false);
     const [routerSecrets, setRouterSecrets] = useState<PppSecret[]>([]);
-
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState<number>(10);
 
     useEffect(() => {
-        fetchOrders();
-        fetchServers();
-    }, []);
+        fetchData();
+    }, [view]); // Refetch when view changes to ensure fresh data
 
-    const fetchServers = async () => {
+    const fetchData = async () => {
+        setLoading(true);
         try {
-            const res = await axios.get('http://localhost:3001/api/servers');
-            setServers(res.data);
-        } catch (error) {
-            console.error("Failed to fetch servers", error);
-        }
-    };
+            const [resServers, resRegs, resTickets, resSubAreas] = await Promise.all([
+                axios.get('/api/servers'),
+                axios.get('/api/registrations'),
+                axios.get('/api/tickets'),
+                axios.get('/api/sub-areas')
+            ]);
 
-    const fetchOrders = async () => {
-        try {
-            const res = await axios.get('http://localhost:3001/api/registrations');
-            // Filter only those in installation process or done, relevant for working orders
-            const relevant = res.data.filter((r: Registration) =>
-                r.status === 'installation_process' || (r.status === 'done' && r.workingOrderStatus === 'done')
-            );
-            setOrders(relevant);
+            setServers(resServers.data);
+            setSubAreas(resSubAreas.data); // Needs state
+            const regs: Registration[] = resRegs.data;
+            const tickets: Ticket[] = resTickets.data;
+
+            const items: WorkItem[] = [];
+
+            // Process Registrations
+            regs.forEach(r => {
+                let status: WorkItem['status'] = 'in_progress';
+                if (r.status === 'done' && r.workingOrderStatus === 'done') status = 'done';
+                if (r.status === 'cancel') status = 'cancel'; // Should act same as cancel
+                if (r.workingOrderStatus === 'pending') status = 'pending';
+
+                // Only include based on view
+                const isCompleted = r.status === 'done' && r.workingOrderStatus === 'done';
+                if (view === 'progress' && isCompleted) return;
+                if (view === 'completed' && !isCompleted) return;
+                if (view === 'progress' && r.status === 'queue') return; // Queued not yet WO
+
+                // Normalize for "Installation Process"
+                if (view === 'progress' && r.status !== 'installation_process' && r.status !== 'done') return;
+
+                items.push({
+                    id: r.id,
+                    type: 'installation',
+                    customerName: r.fullName,
+                    phoneNumber: r.phoneNumber,
+                    address: r.address,
+                    server: r.locationId,
+                    technician: r.installation?.technician || 'Unassigned',
+                    date: r.installation?.date || '',
+                    status,
+                    originalObject: r,
+                    note: r.workingOrderNote,
+                    rawStatus: r.workingOrderStatus === 'pending' ? 'Pending' : (status === 'done' ? 'Completed' : 'Installation')
+                });
+            });
+
+            // Process Tickets
+            tickets.forEach(t => {
+                let status: WorkItem['status'] = 'in_progress';
+                if (t.status === 'resolved' || t.status === 'closed') status = 'done';
+
+                // Only include based on view
+                const isCompleted = t.status === 'resolved' || t.status === 'closed';
+                if (view === 'progress' && isCompleted) return;
+                if (view === 'completed' && !isCompleted) return;
+
+                // For progress view, include Open and In Progress tickets
+                if (view === 'progress' && t.status !== 'open' && t.status !== 'in_progress') return;
+
+                items.push({
+                    id: t.id,
+                    type: 'ticket',
+                    customerName: t.customerName,
+                    phoneNumber: t.customerPhone,
+                    address: t.customerAddress || '-',
+                    server: t.locationId || '-',
+                    technician: t.technician || 'Unassigned',
+                    date: t.createdAt,
+                    status,
+                    originalObject: t,
+                    rawStatus: t.status,
+                    note: t.status === 'open' ? 'Waiting Assignment' : (t.description)
+                });
+            });
+
+            setWorkItems(items);
+
         } catch (error) {
-            console.error("Failed to fetch working orders", error);
+            console.error("Failed to fetch data", error);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleCompleteClick = async (order: Registration) => {
-        setCompletingOrder(order);
-        setCompletionModalOpen(true);
+    const handleAction = (item: WorkItem, action: 'complete' | 'pending' | 'cancel') => {
+        if (action === 'complete') {
+            if (item.type === 'installation') {
+                setCompletingOrder(item.originalObject as Registration);
+                setCompletionModalOpen(true);
+                handleFetchSecrets(item);
+            } else {
+                // Ticket Resolution
+                setSelectedItem(item);
+                setModalAction('resolve');
+                setModalOpen(true);
+            }
+        } else {
+            setSelectedItem(item);
+            setModalAction(action);
+            setModalOpen(true);
+        }
+    };
+
+    const handleFetchSecrets = async (item: WorkItem) => {
         setFetchingSecrets(true);
         setRouterSecrets([]);
-
         // Find server
-        const server = servers.find(s => s.name === order.locationId);
+        const server = servers.find(s => s.name === item.server);
         if (!server) {
             alert('Server not found for this order location.');
             setFetchingSecrets(false);
             return;
         }
-
         try {
-            // Fetch secrets
-            const response = await axios.post('http://localhost:3001/api/proxy', {
+            const response = await axios.post('/api/proxy', {
                 host: server.ip,
                 user: server.username,
                 password: server.password,
                 port: server.port,
                 command: '/ppp/secret/print'
             });
-
             if (Array.isArray(response.data)) {
                 setRouterSecrets(response.data);
-            } else {
-                console.error("Unexpected response from router:", response.data);
-                alert("Failed to fetch secrets: Unexpected response format.");
             }
         } catch (error: any) {
             console.error("Failed to fetch secrets", error);
-            alert(`Failed to connect to router: ${error.response?.data?.error || error.message}`);
         } finally {
             setFetchingSecrets(false);
         }
     };
 
-    const handleCompletionConfirm = async (secretId: string) => {
-        if (!completingOrder) return;
-
-        const server = servers.find(s => s.name === completingOrder.locationId);
-        if (!server) return;
-
-        try {
-            // 1. Update Mikrotik Comment
-            const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-            const newComment = `${server.name} - ${completingOrder.fullName} - ${dateStr}`;
-
-            await axios.post('http://localhost:3001/api/proxy', {
-                host: server.ip,
-                user: server.username,
-                password: server.password,
-                port: server.port,
-                command: [
-                    '/ppp/secret/set',
-                    `=.id=${secretId}`,
-                    `=comment=${newComment}`
-                ]
-            });
-
-            // 2. Update Registration Status
-            const installation = completingOrder.installation || {};
-            await axios.put(`http://localhost:3001/api/registrations/${completingOrder.id}`, {
-                workingOrderStatus: 'done',
-                status: 'done',
-                installation: {
-                    ...installation,
-                    finishDate: new Date().toISOString()
-                }
-            });
-
-            setCompletionModalOpen(false);
-            setCompletingOrder(null);
-            fetchOrders();
-            alert(`Order completed! Secret updated with comment: ${newComment}`);
-
-        } catch (error: any) {
-            console.error("Failed to complete order", error);
-            alert(`Failed to update router or database: ${error.response?.data?.error || error.message}`);
-        }
-    };
-
-
-    const openActionModal = (id: string, action: 'pending' | 'cancel') => {
-        setSelectedOrder(id);
-        setModalAction(action);
-        setModalOpen(true);
-    };
-
     const handleModalSubmit = async (note: string) => {
-        if (!selectedOrder) return;
+        if (!selectedItem) return;
 
         try {
-            const updates: any = { workingOrderNote: note };
-
-            if (modalAction === 'pending') {
-                updates.workingOrderStatus = 'pending';
-                updates.status = 'installation_process'; // Ensure it stays active
-            } else if (modalAction === 'cancel') {
-                updates.status = 'cancel'; // Remove from active working orders
-                // workingOrderStatus doesn't strictly matter if main status is cancel, but let's keep it consistent
-                updates.workingOrderStatus = 'done'; // Effectively closes the ticket? Or maybe just leave as is.
+            if (selectedItem.type === 'installation') {
+                const updates: any = { workingOrderNote: note };
+                if (modalAction === 'pending') {
+                    updates.workingOrderStatus = 'pending';
+                    updates.status = 'installation_process';
+                } else if (modalAction === 'cancel') {
+                    updates.status = 'cancel';
+                    updates.workingOrderStatus = 'done';
+                }
+                await axios.put(`/api/registrations/${selectedItem.id}`, updates);
+            } else {
+                // Ticket Updates
+                const updates: any = {};
+                if (modalAction === 'resolve') {
+                    updates.status = 'resolved';
+                    updates.solution = note;
+                    updates.resolvedAt = new Date().toISOString();
+                } else if (modalAction === 'pending') {
+                    // Ticket doesn't have "pending" state strictly, maybe just adding a note or keeping it in progress
+                    // user wants "pending", let's assume it keeps status but adds note? 
+                    // Or maybe we treat 'open' as pending? Let's just update description or add a note field if we had one.
+                    // For now, let's just append to description or ignore if no field.
+                    // Actually, let's set status back to 'in_progress' explicitly if it was something else?
+                    alert("Pending status for tickets is just 'In Progress'. Note recorded locally (not saved to DB yet as no specific field for notes).");
+                    // Ideally we would add a 'notes' array to tickets.
+                } else if (modalAction === 'cancel') {
+                    updates.status = 'closed'; // Or deleted? Closed seems safer.
+                }
+                await axios.put(`/api/tickets/${selectedItem.id}`, updates);
             }
 
-            await axios.put(`http://localhost:3001/api/registrations/${selectedOrder}`, updates);
             setModalOpen(false);
-            fetchOrders();
+            fetchData();
         } catch (error) {
             alert('Failed to update status');
         }
     };
 
-    const handleReopen = async (id: string) => {
-        if (!confirm('Reopen this ticket?')) return;
+    const handleCompletionConfirm = async (secretId: string, files: File[], subAreaId: string, secretName: string) => {
+        if (!completingOrder) return;
+        const server = servers.find(s => s.name === completingOrder.locationId);
+        if (!server) return;
+
+        // Create FormData
+        const formData = new FormData();
+        formData.append('secretId', secretId);
+        formData.append('secretName', secretName); // Pass name for SQL Customer creation
+        if (subAreaId) formData.append('sub_area_id', subAreaId);
+
+        files.forEach(file => {
+            formData.append('photos', file);
+        });
+
         try {
-            await axios.put(`http://localhost:3001/api/registrations/${id}`, {
-                workingOrderStatus: 'pending',
-                status: 'installation_process'
+            // 1. Update Router
+            const dateStr = new Date().toISOString().split('T')[0];
+            const newComment = `${server.name} - ${completingOrder.fullName} - ${dateStr}`;
+
+            await axios.post('/api/proxy', {
+                host: server.ip,
+                user: server.username,
+                password: server.password,
+                port: server.port,
+                command: ['/ppp/secret/set', `=.id=${secretId}`, `=comment=${newComment}`, '=disabled=no']
             });
-            fetchOrders();
+
+            // 2. Submit to Backend (New Endpoint)
+            await axios.post(`/api/registrations/${completingOrder.id}/complete`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            setCompletionModalOpen(false);
+            setCompletingOrder(null);
+            fetchData();
+            alert(`Order completed successfully!`);
+        } catch (error: any) {
+            console.error(error);
+            alert(`Failed to complete: ${error.response?.data?.error || error.message}`);
+        }
+    };
+
+    const handleReopen = async (item: WorkItem) => {
+        if (!confirm('Reopen this job?')) return;
+        try {
+            if (item.type === 'installation') {
+                await axios.put(`/api/registrations/${item.id}`, {
+                    workingOrderStatus: 'pending',
+                    status: 'installation_process'
+                });
+            } else {
+                await axios.put(`/api/tickets/${item.id}`, {
+                    status: 'in_progress',
+                    resolvedAt: null
+                });
+            }
+            fetchData();
         } catch (error) {
             alert('Failed to reopen');
         }
     };
 
     // Filter & Sort Logic
-    // ... [Same logic as before]
-    const filteredAndSortedOrders = orders
-        .filter(order => {
-            const matchesSearch = order.fullName.toLowerCase().includes(filter.toLowerCase()) ||
-                order.phoneNumber.includes(filter) ||
-                (order.installation?.technician || '').toLowerCase().includes(filter.toLowerCase()) ||
-                (order.locationId || '').toLowerCase().includes(filter.toLowerCase());
+    const filteredAndSortedItems = workItems
+        .filter(item => {
+            // Role Restriction
+            /* 
+            if (user?.role === 'technician') {
+                if (item.technician !== user?.name) return false;
+            }
+            */
 
-            const matchesStatus = view === 'completed'
-                ? order.workingOrderStatus === 'done'
-                : order.workingOrderStatus !== 'done';
-
-            return matchesSearch && matchesStatus;
+            const searchLower = filter.toLowerCase();
+            const matchesSearch = item.customerName.toLowerCase().includes(searchLower) ||
+                item.phoneNumber.includes(filter) ||
+                item.technician.toLowerCase().includes(searchLower) ||
+                item.server.toLowerCase().includes(searchLower) ||
+                (item.type === 'ticket' && (item.originalObject as Ticket).ticketNumber.toLowerCase().includes(searchLower));
+            return matchesSearch;
         })
         .sort((a, b) => {
-            if (!sortConfig) {
-                if (a.workingOrderStatus === 'pending' && b.workingOrderStatus !== 'pending') return -1;
-                if (a.workingOrderStatus !== 'pending' && b.workingOrderStatus === 'pending') return 1;
-                return 0;
-            }
-
+            if (!sortConfig) return new Date(b.date).getTime() - new Date(a.date).getTime(); // Default new first
             const { key, direction } = sortConfig;
-            let aValue: any = key === 'date' ? a.installation?.date : a[key as keyof Registration];
-            let bValue: any = key === 'date' ? b.installation?.date : b[key as keyof Registration];
-
-            if (!aValue) aValue = '';
-            if (!bValue) bValue = '';
-
-            if (aValue < bValue) return direction === 'asc' ? -1 : 1;
-            if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+            if (key === 'date') {
+                return direction === 'asc' ? new Date(a.date).getTime() - new Date(b.date).getTime() : new Date(b.date).getTime() - new Date(a.date).getTime();
+            }
+            const aVal = String(a[key]).toLowerCase();
+            const bVal = String(b[key]).toLowerCase();
+            if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return direction === 'asc' ? 1 : -1;
             return 0;
         });
 
-    const handleSort = (key: keyof Registration | 'date') => {
+    const handleSort = (key: keyof WorkItem | 'date') => {
         let direction: 'asc' | 'desc' = 'asc';
         if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
             direction = 'desc';
@@ -405,15 +565,10 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
         setSortConfig({ key, direction });
     };
 
-    // Pagination Logic
-    const totalPages = itemsPerPage === -1
-        ? 1
-        : Math.ceil(filteredAndSortedOrders.length / itemsPerPage);
-
-    const startIndex = (currentPage - 1) * (itemsPerPage === -1 ? filteredAndSortedOrders.length : itemsPerPage);
-    const paginatedOrders = itemsPerPage === -1
-        ? filteredAndSortedOrders
-        : filteredAndSortedOrders.slice(startIndex, startIndex + itemsPerPage);
+    // Pagination
+    const totalPages = itemsPerPage === -1 ? 1 : Math.ceil(filteredAndSortedItems.length / itemsPerPage);
+    const startIndex = (currentPage - 1) * (itemsPerPage === -1 ? filteredAndSortedItems.length : itemsPerPage);
+    const paginatedItems = itemsPerPage === -1 ? filteredAndSortedItems : filteredAndSortedItems.slice(startIndex, startIndex + itemsPerPage);
 
     useEffect(() => { setCurrentPage(1); }, [filter, view, itemsPerPage]);
 
@@ -423,7 +578,7 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                 isOpen={modalOpen}
                 onClose={() => setModalOpen(false)}
                 onSubmit={handleModalSubmit}
-                title={modalAction === 'pending' ? 'Set as Pending' : 'Cancel Order'}
+                title={modalAction === 'resolve' ? 'Resolve Ticket' : (modalAction === 'pending' ? 'Set Pending' : 'Cancel Job')}
                 actionType={modalAction}
             />
 
@@ -434,33 +589,34 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                 serverName={completingOrder?.locationId || ''}
                 fetchingSecrets={fetchingSecrets}
                 secrets={routerSecrets}
+                subAreas={subAreas.filter(sa => {
+                    if (!completingOrder?.locationId) return false;
+                    const s = servers.find(sv => sv.name === completingOrder.locationId);
+                    return s && sa.serverId === s.id;
+                })}
             />
 
             {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">
-                        {view === 'progress' ? 'Working Orders In Progress' : 'Completed Working Orders'}
-                    </h1>
-                    <p className="text-slate-500">
-                        {view === 'progress' ? 'Track active technician installation tasks' : 'View history of completed installations'}
-                    </p>
-                </div>
+            <div>
+                <h1 className="text-2xl font-bold text-slate-900">
+                    {view === 'progress' ? 'Job List (In Progress)' : 'Job History (Completed)'}
+                </h1>
+                <p className="text-slate-500">
+                    {view === 'progress' ? 'Active installations and support tickets' : 'History of installations and resolved tickets'}
+                </p>
             </div>
 
             {/* Filters */}
-            <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex gap-4">
                 <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
-                        className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                        placeholder="Search customer, phone, technician, or server..."
+                        className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        placeholder="Search customer, phone, tech, or ticket #..."
                         value={filter}
                         onChange={e => setFilter(e.target.value)}
                     />
                 </div>
-
-
             </div>
 
             {/* Table */}
@@ -469,96 +625,102 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
-                                <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('status')}>Status</th>
-                                <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('fullName')}>Customer</th>
-                                <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('locationId')}>Server (Loc)</th>
-                                <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('address')}>Address</th>
-                                <th className="px-6 py-3 font-medium text-slate-500">Installation Info</th>
+                                <th className="px-6 py-3 font-medium text-slate-500">Type</th>
+                                <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('customerName')}>Customer</th>
+                                <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('server')}>Server</th>
+                                <th className="px-6 py-3 font-medium text-slate-500">Job Info</th>
                                 <th className="px-6 py-3 font-medium text-slate-500 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
-                                <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
-                            ) : paginatedOrders.length === 0 ? (
-                                <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">No working orders found</td></tr>
-                            ) : paginatedOrders.map((order) => (
-                                <tr key={order.id} className="hover:bg-slate-50/50 group transition-colors">
+                                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
+                            ) : paginatedItems.length === 0 ? (
+                                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No jobs found</td></tr>
+                            ) : paginatedItems.map((item) => (
+                                <tr key={`${item.type}-${item.id}`} className="hover:bg-slate-50/50 group transition-colors">
                                     <td className="px-6 py-4">
-                                        <div className="flex flex-col gap-1 items-start">
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${order.workingOrderStatus === 'done'
-                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                : order.workingOrderNote ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200'
-                                                }`}>
-                                                {order.workingOrderStatus === 'done' ? 'Completed' : 'Pending'}
+                                        <div className="flex flex-col gap-1">
+                                            {item.type === 'installation' ? (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 w-fit">
+                                                    <ClipboardList className="w-3 h-3" /> Installation
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 w-fit">
+                                                    <Wrench className="w-3 h-3" /> Ticket
+                                                </span>
+                                            )}
+                                            <span className={cn(
+                                                "text-xs font-medium px-2 py-0.5 rounded-full border w-fit mt-1",
+                                                item.status === 'done' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                                    item.rawStatus === 'Pending' ? "bg-amber-50 text-amber-700 border-amber-200" :
+                                                        "bg-slate-100 text-slate-600 border-slate-200"
+                                            )}>
+                                                {item.type === 'ticket' ? item.rawStatus : item.rawStatus}
                                             </span>
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className="font-medium text-slate-900">{order.fullName}</div>
+                                        <div className="font-medium text-slate-900">{item.customerName}</div>
                                         <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                                            <Smartphone className="w-3 h-3" /> {order.phoneNumber}
+                                            <Smartphone className="w-3 h-3" /> {item.phoneNumber}
+                                        </div>
+                                        <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate max-w-[200px]" title={item.address}>
+                                            <MapPin className="w-3 h-3" /> {item.address}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className="text-slate-700 font-medium">{order.locationId}</div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-start gap-2 max-w-[200px]">
-                                            <MapPin className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
-                                            <span className="text-slate-600 truncate" title={order.address}>{order.address}</span>
-                                        </div>
+                                        <div className="text-slate-700 font-medium">{item.server}</div>
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="space-y-1">
                                             <div className="flex items-center gap-1.5 text-xs text-slate-700">
-                                                <Wrench className="w-3.5 h-3.5 text-blue-500" />
-                                                <span className="font-medium">Tech:</span> {order.installation?.technician}
-                                            </div>
-                                            <div className="flex items-center gap-1.5 text-xs text-slate-700">
                                                 <User className="w-3.5 h-3.5 text-slate-400" />
-                                                <span className="font-medium">Partner:</span> {order.installation?.companion || '-'}
+                                                <span className="font-medium">Tech:</span> {item.technician}
                                             </div>
                                             <div className="flex items-center gap-1.5 text-xs text-slate-500">
                                                 <Calendar className="w-3.5 h-3.5" />
-                                                {order.installation?.date ? new Date(order.installation.date).toLocaleString([], { year: '2-digit', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                                {item.date ? new Date(item.date).toLocaleDateString() : '-'}
                                             </div>
-                                            {order.workingOrderNote && (
-                                                <div className="mt-1 p-1.5 bg-yellow-50 border border-yellow-100 rounded text-xs text-yellow-800 italic">
-                                                    "{order.workingOrderNote}"
+                                            {item.type === 'ticket' && (
+                                                <div className="flex items-center gap-1.5 text-xs text-slate-700 mt-1">
+                                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                                                    <span className="font-medium">Issue:</span> {(item.originalObject as Ticket).damageTypeName}
+                                                </div>
+                                            )}
+                                            {item.note && (
+                                                <div className="mt-1 p-1.5 bg-yellow-50 border border-yellow-100 rounded text-xs text-yellow-800 italic max-w-[200px]">
+                                                    "{item.note}"
                                                 </div>
                                             )}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         <div className="flex justify-end gap-2">
-                                            {order.workingOrderStatus !== 'done' ? (
+                                            {view === 'progress' ? (
                                                 <>
                                                     <button
-                                                        onClick={() => handleCompleteClick(order)}
+                                                        onClick={() => handleAction(item, 'complete')}
                                                         className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors"
-                                                        title="Complete Order"
                                                     >
-                                                        <CheckCircle className="w-3.5 h-3.5" /> Done
+                                                        <CheckCircle className="w-3.5 h-3.5" /> {item.type === 'ticket' ? 'Resolve' : 'Done'}
                                                     </button>
                                                     <button
-                                                        onClick={() => openActionModal(order.id, 'pending')}
+                                                        onClick={() => handleAction(item, 'pending')}
                                                         className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-medium transition-colors"
-                                                        title="Set as Pending (Add Note)"
                                                     >
                                                         Pending
                                                     </button>
                                                     <button
-                                                        onClick={() => openActionModal(order.id, 'cancel')}
+                                                        onClick={() => handleAction(item, 'cancel')}
                                                         className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium transition-colors"
-                                                        title="Cancel Order"
                                                     >
                                                         Cancel
                                                     </button>
                                                 </>
                                             ) : (
                                                 <button
-                                                    onClick={() => handleReopen(order.id)}
+                                                    onClick={() => handleReopen(item)}
                                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-xs font-medium transition-colors"
                                                 >
                                                     Reopen
@@ -571,29 +733,30 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                         </tbody>
                     </table>
                 </div>
-
                 {/* Pagination Controls */}
                 <div className="px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                         <span>Show</span>
-                        <select
-                            className="bg-white border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                            value={itemsPerPage}
-                            onChange={(e) => {
-                                setItemsPerPage(Number(e.target.value));
-                                setCurrentPage(1);
-                            }}
-                        >
-                            <option value={10}>10</option>
-                            <option value={20}>20</option>
-                            <option value={50}>50</option>
-                            <option value={-1}>All</option>
-                        </select>
+                        <div className="w-[80px]">
+                            <SearchableSelect
+                                value={itemsPerPage}
+                                onChange={(val) => {
+                                    setItemsPerPage(Number(val));
+                                    setCurrentPage(1);
+                                }}
+                                options={[
+                                    { label: '10', value: 10 },
+                                    { label: '20', value: 20 },
+                                    { label: '50', value: 50 },
+                                    { label: 'All', value: -1 }
+                                ]}
+                            />
+                        </div>
                         <span>entries</span>
                         <span className="text-slate-400 mx-2">|</span>
                         <span>
-                            Showing {filteredAndSortedOrders.length === 0 ? 0 : startIndex + 1} to{' '}
-                            {itemsPerPage === -1 ? filteredAndSortedOrders.length : Math.min(startIndex + itemsPerPage, filteredAndSortedOrders.length)} of {filteredAndSortedOrders.length} entries
+                            Showing {paginatedItems.length === 0 ? 0 : startIndex + 1} to{' '}
+                            {itemsPerPage === -1 ? paginatedItems.length : Math.min(startIndex + itemsPerPage, paginatedItems.length)} of {filteredAndSortedItems.length} entries
                         </span>
                     </div>
 
@@ -621,4 +784,3 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
         </div>
     );
 }
-

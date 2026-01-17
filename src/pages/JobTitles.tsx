@@ -22,7 +22,7 @@ export function JobTitles() {
 
     const fetchTitles = async () => {
         try {
-            const res = await axios.get('http://localhost:3001/api/job-titles');
+            const res = await axios.get('/api/job-titles');
             setTitles(res.data);
         } catch (error) {
             console.error("Failed to fetch job titles", error);
@@ -35,9 +35,9 @@ export function JobTitles() {
         e.preventDefault();
         try {
             if (editingItem) {
-                await axios.put(`http://localhost:3001/api/job-titles/${editingItem.id}`, formData);
+                await axios.put(`/api/job-titles/${editingItem.id}`, formData);
             } else {
-                await axios.post('http://localhost:3001/api/job-titles', formData);
+                await axios.post('/api/job-titles', formData);
             }
             fetchTitles();
             closeModal();
@@ -49,7 +49,7 @@ export function JobTitles() {
     const handleDelete = async (id: string) => {
         if (!confirm('Delete this job title?')) return;
         try {
-            await axios.delete(`http://localhost:3001/api/job-titles/${id}`);
+            await axios.delete(`/api/job-titles/${id}`);
             fetchTitles();
         } catch (error) {
             alert('Failed to delete');

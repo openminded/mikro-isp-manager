@@ -7,11 +7,14 @@ import { cn } from '@/lib/utils';
 import { useData } from '@/context/DataContext';
 import { type Profile } from '@/types';
 
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
+
 export function Profiles() {
     const { servers } = useServers();
     const { profiles, refreshProfiles } = useData();
     const [syncLoading, setSyncLoading] = useState(false);
     const [filter, setFilter] = useState('');
+    const [serverFilter, setServerFilter] = useState('all');
     const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
     // Modal State
@@ -85,10 +88,14 @@ export function Profiles() {
         refreshProfiles(false);
     }, [servers]); // Re-fetch when servers change
 
-    const filteredProfiles = profiles.filter(p =>
-        p.name.toLowerCase().includes(filter.toLowerCase()) ||
-        p.serverName.toLowerCase().includes(filter.toLowerCase())
-    );
+    const filteredProfiles = profiles.filter(p => {
+        const matchesSearch = p.name.toLowerCase().includes(filter.toLowerCase()) ||
+            p.serverName.toLowerCase().includes(filter.toLowerCase());
+
+        const matchesServer = serverFilter === 'all' ? true : p.serverId === serverFilter;
+
+        return matchesSearch && matchesServer;
+    });
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-6">
@@ -133,14 +140,27 @@ export function Profiles() {
             )}
 
             {/* Filters */}
-            <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                    placeholder="Search profile name or server..."
-                    value={filter}
-                    onChange={e => setFilter(e.target.value)}
-                />
+            <div className="flex gap-4">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                        className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                        placeholder="Search profile name or server..."
+                        value={filter}
+                        onChange={e => setFilter(e.target.value)}
+                    />
+                </div>
+                <div className="w-[250px]">
+                    <SearchableSelect
+                        value={serverFilter}
+                        onChange={setServerFilter}
+                        options={[
+                            { label: 'All Servers', value: 'all' },
+                            ...servers.map(s => ({ label: s.name, value: s.id }))
+                        ]}
+                        placeholder="Filter by Server"
+                    />
+                </div>
             </div>
 
             {/* Table */}

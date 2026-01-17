@@ -150,11 +150,19 @@ function RevenueOverviewWidget({ servers, priceData, reloadTrigger }: { servers:
                     const isDisabled = s.disabled === 'true' || s.disabled === true;
                     // Look up price
                     const key = `${server.id}_${s.profile}`;
-                    const price = priceData[key]?.price ? Number(priceData[key].price) : 0;
+                    let price = priceData[key]?.price ? Number(priceData[key].price) : 0;
+
+                    // Fallback: If price is 0, try to find ANY profile with same name that has a price
+                    if (price === 0) {
+                        const fallbackKey = Object.keys(priceData).find(k => k.endsWith(`_${s.profile}`) && priceData[k].price > 0);
+                        if (fallbackKey) {
+                            price = Number(priceData[fallbackKey].price);
+                        }
+                    }
 
                     // Log failed lookups for active users to see mismatch
                     if (price === 0 && !isDisabled) {
-                        console.log(`Missing price for key: ${key}. Available keys:`, Object.keys(priceData));
+                        // console.log(`Missing price for key: ${key}. Available keys:`, Object.keys(priceData));
                     }
 
                     if (isDisabled) {
@@ -252,7 +260,15 @@ function ServerCard({ server, priceData, onRemove, onEdit, reloadTrigger }: { se
             secrets.forEach((s: any) => {
                 const isDisabled = s.disabled === 'true' || s.disabled === true;
                 const key = `${server.id}_${s.profile}`;
-                const price = priceData[key]?.price ? Number(priceData[key].price) : 0;
+                let price = priceData[key]?.price ? Number(priceData[key].price) : 0;
+
+                // Fallback: If price is 0, try to find ANY profile with same name that has a price
+                if (price === 0) {
+                    const fallbackKey = Object.keys(priceData).find(k => k.endsWith(`_${s.profile}`) && priceData[k].price > 0);
+                    if (fallbackKey) {
+                        price = Number(priceData[fallbackKey].price);
+                    }
+                }
 
                 if (isDisabled) {
                     blockedCount++;
@@ -435,7 +451,10 @@ function ServerCard({ server, priceData, onRemove, onEdit, reloadTrigger }: { se
 function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean; onClose: () => void; onSave: (data: any) => void, initialData?: MikrotikServer }) {
     if (!isOpen) return null;
 
-    const [formData, setFormData] = useState({ name: '', ip: '', port: 8728, username: '', password: '' });
+    const [formData, setFormData] = useState({
+        name: '', ip: '', port: 8728, username: '', password: '',
+        payment_due_days: 20 // Default 20th
+    });
 
     // Load initial data for editing
     useEffect(() => {
@@ -445,10 +464,11 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
                 ip: initialData.ip,
                 port: initialData.port,
                 username: initialData.username,
-                password: initialData.password || '' // Note: Password might not be secure to populate like this in real apps, but for local storage app it is fine
+                password: initialData.password || '', // Note: Password might not be secure to populate like this in real apps, but for local storage app it is fine
+                payment_due_days: (initialData as any).payment_due_days || 7
             });
         } else {
-            setFormData({ name: '', ip: '', port: 8728, username: '', password: '' });
+            setFormData({ name: '', ip: '', port: 8728, username: '', password: '', payment_due_days: 7 });
         }
     }, [initialData, isOpen]);
 
@@ -470,21 +490,44 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
                         <input required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                             value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="e.g. Main Router" />
                     </div>
-                    <div className="grid grid-cols-3 gap-4">
-                        <div className="col-span-2 space-y-2">
-                            <label className="text-sm font-medium text-slate-700">IP Address</label>
-                            <input required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                value={formData.ip} onChange={e => setFormData({ ...formData, ip: e.target.value })} placeholder="192.168.88.1" />
+
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700">IP Address</label>
+                        <input required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            value={formData.ip} onChange={e => setFormData({ ...formData, ip: e.target.value })} placeholder="192.168.88.1" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">API Port</label>
+                            <input
+                                required
+                                type="number"
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData.port}
+                                onChange={e => setFormData({ ...formData, port: Number(e.target.value) })}
+                                placeholder="8728"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Default: 8728</p>
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">API Port</label>
-                            <div className="space-y-1">
-                                <input required type="number" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                    value={formData.port} onChange={e => setFormData({ ...formData, port: Number(e.target.value) })} placeholder="8728" />
-                                <p className="text-[10px] text-slate-400">Default: 8728 (Binary API)</p>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Payment Due Date</label>
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="28"
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                    value={formData.payment_due_days}
+                                    onChange={e => setFormData({ ...formData, payment_due_days: parseInt(e.target.value) || 20 })}
+                                />
+                                <span className="absolute right-3 top-2 text-xs text-slate-400">of month</span>
                             </div>
+                            <p className="text-[10px] text-slate-400 mt-1">E.g. 20 = Due on 20th</p>
                         </div>
                     </div>
+
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-slate-700">Username</label>

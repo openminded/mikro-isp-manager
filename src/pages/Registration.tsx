@@ -1,27 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, XCircle, Wrench, Smartphone, Calendar, Eye, User, RotateCcw, CheckCircle } from 'lucide-react';
 import axios from 'axios';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
+import type { Registration } from '@/types';
 
-interface Registration {
-    id: string;
-    phoneNumber: string;
-    fullName: string;
-    ktpNumber: string;
-    address: string;
-    locationId: string;
-    status: 'queue' | 'installation_process' | 'done' | 'cancel';
-    installation?: {
-        technician: string;
-        companion: string;
-        date: string;
-        finishDate?: string;
-    };
-    workingOrderStatus?: 'pending' | 'done';
-    workingOrderNote?: string;
-    createdAt?: string;
+interface RegistrationProps {
+    view?: 'active' | 'completed';
 }
 
-export function Registration() {
+export function Registration({ view = 'active' }: RegistrationProps) {
     const [registrations, setRegistrations] = useState<Registration[]>([]);
     const [servers, setServers] = useState<any[]>([]);
     const [employees, setEmployees] = useState<any[]>([]);
@@ -70,13 +57,13 @@ export function Registration() {
         fetchRegistrations();
         fetchServers();
         fetchEmployeesAndTitles();
-    }, []);
+    }, [view]); // Refetch/Re-filter when view changes
 
     const fetchEmployeesAndTitles = async () => {
         try {
             const [empRes, titleRes] = await Promise.all([
-                axios.get('http://localhost:3001/api/employees'),
-                axios.get('http://localhost:3001/api/job-titles')
+                axios.get('/api/employees'),
+                axios.get('/api/job-titles')
             ]);
             setEmployees(empRes.data);
             setJobTitles(titleRes.data);
@@ -87,7 +74,7 @@ export function Registration() {
 
     const fetchServers = async () => {
         try {
-            const res = await axios.get('http://localhost:3001/api/servers');
+            const res = await axios.get('/api/servers');
             setServers(res.data);
         } catch (error) {
             console.error("Failed to fetch servers", error);
@@ -95,8 +82,9 @@ export function Registration() {
     };
 
     const fetchRegistrations = async () => {
+        setLoading(true);
         try {
-            const res = await axios.get('http://localhost:3001/api/registrations');
+            const res = await axios.get('/api/registrations');
             setRegistrations(res.data);
         } catch (error) {
             console.error("Failed to fetch registrations", error);
@@ -123,9 +111,9 @@ export function Registration() {
         e.preventDefault();
         try {
             if (editingReg) {
-                await axios.put(`http://localhost:3001/api/registrations/${editingReg.id}`, formData);
+                await axios.put(`/api/registrations/${editingReg.id}`, formData);
             } else {
-                await axios.post('http://localhost:3001/api/registrations', formData);
+                await axios.post('/api/registrations', formData);
             }
             fetchRegistrations();
             setIsFormOpen(false);
@@ -156,7 +144,7 @@ export function Registration() {
     const handleCancelReg = async (id: string) => {
         if (!confirm('Are you sure you want to cancel this registration?')) return;
         try {
-            await axios.put(`http://localhost:3001/api/registrations/${id}`, { status: 'cancel' });
+            await axios.put(`/api/registrations/${id}`, { status: 'cancel' });
             fetchRegistrations();
         } catch (error) {
             alert('Failed to cancel');
@@ -166,7 +154,7 @@ export function Registration() {
     const handleReinstall = async (id: string) => {
         if (!confirm('Are you sure you want to reinstall this customer? Current status will be reset to Pending.')) return;
         try {
-            await axios.put(`http://localhost:3001/api/registrations/${id}`, {
+            await axios.put(`/api/registrations/${id}`, {
                 status: 'queue',
                 // Reset working order status so it's treated as new when installed again
                 workingOrderStatus: null,
@@ -192,7 +180,7 @@ export function Registration() {
         e.preventDefault();
         if (!selectedReg) return;
         try {
-            await axios.put(`http://localhost:3001/api/registrations/${selectedReg.id}`, {
+            await axios.put(`/api/registrations/${selectedReg.id}`, {
                 status: 'installation_process',
                 installation: installData,
                 workingOrderStatus: 'pending' // Ensure it starts as pending
@@ -207,6 +195,14 @@ export function Registration() {
 
     // Filter Logic
     const filteredRegs = registrations.filter(r => {
+        // VIEW FILTER
+        if (view === 'completed') {
+            if (r.status !== 'done') return false;
+        } else {
+            // Active view: Show everything EXCEPT 'done'
+            if (r.status === 'done') return false;
+        }
+
         const matchesSearch = r.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
             r.phoneNumber.includes(searchTerm);
 
@@ -273,8 +269,12 @@ export function Registration() {
         <div className="p-6 max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Registration</h1>
-                    <p className="text-slate-500">Manage new WiFi registrations</p>
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        {view === 'completed' ? 'Completed Registrations' : 'Active Registrations'}
+                    </h1>
+                    <p className="text-slate-500">
+                        {view === 'completed' ? 'History of completed registrations' : 'Manage new WiFi registrations'}
+                    </p>
                 </div>
                 <button
                     onClick={() => { setEditingReg(null); setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '' }); setIsFormOpen(true); }}
@@ -299,28 +299,32 @@ export function Registration() {
                             />
                         </div>
 
-                        <select
-                            className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[150px]"
-                            value={filterStatus}
-                            onChange={e => setFilterStatus(e.target.value)}
-                        >
-                            <option value="all">All Status</option>
-                            <option value="queue">Pending</option>
-                            <option value="installation_process">Installing</option>
-                            <option value="done">Done</option>
-                            <option value="cancel">Cancelled</option>
-                        </select>
+                        <div className="w-[180px]">
+                            <SearchableSelect
+                                value={filterStatus}
+                                onChange={setFilterStatus}
+                                options={[
+                                    { label: 'All Status', value: 'all' },
+                                    { label: 'Pending', value: 'queue' },
+                                    { label: 'Installing', value: 'installation_process' },
+                                    { label: 'Done', value: 'done' },
+                                    { label: 'Cancelled', value: 'cancel' }
+                                ]}
+                                placeholder="Status"
+                            />
+                        </div>
 
-                        <select
-                            className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[150px]"
-                            value={filterServer}
-                            onChange={e => setFilterServer(e.target.value)}
-                        >
-                            <option value="">All Servers</option>
-                            {servers.map(s => (
-                                <option key={s.id} value={s.name}>{s.name}</option>
-                            ))}
-                        </select>
+                        <div className="w-[200px]">
+                            <SearchableSelect
+                                value={filterServer}
+                                onChange={setFilterServer}
+                                options={[
+                                    { label: 'All Servers', value: '' },
+                                    ...servers.map(s => ({ label: s.name, value: s.name }))
+                                ]}
+                                placeholder="Select Server"
+                            />
+                        </div>
                     </div>
 
                     <div className="flex flex-col md:flex-row gap-4 items-center">
@@ -446,19 +450,21 @@ export function Registration() {
                 <div className="px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                         <span>Show</span>
-                        <select
-                            className="bg-white border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                            value={itemsPerPage}
-                            onChange={(e) => {
-                                setItemsPerPage(Number(e.target.value));
-                                setCurrentPage(1);
-                            }}
-                        >
-                            <option value={10}>10</option>
-                            <option value={50}>50</option>
-                            <option value={100}>100</option>
-                            <option value={-1}>All</option>
-                        </select>
+                        <div className="w-[80px]">
+                            <SearchableSelect
+                                value={itemsPerPage}
+                                onChange={(val) => {
+                                    setItemsPerPage(Number(val));
+                                    setCurrentPage(1);
+                                }}
+                                options={[
+                                    { label: '10', value: 10 },
+                                    { label: '50', value: 50 },
+                                    { label: '100', value: 100 },
+                                    { label: 'All', value: -1 }
+                                ]}
+                            />
+                        </div>
                         <span>entries</span>
                         <span className="text-slate-400 mx-2">|</span>
                         <span>
@@ -492,8 +498,8 @@ export function Registration() {
             {/* Registration Form Modal */}
             {isFormOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
                             <h3 className="font-semibold text-lg">{editingReg ? 'Edit Registration' : 'New Registration'}</h3>
                             <button onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-slate-600"><XCircle className="w-6 h-6" /></button>
                         </div>
@@ -538,17 +544,16 @@ export function Registration() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Location (Server) <span className="text-red-500">*</span></label>
-                                <select
+                                <SearchableSelect
                                     required
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-primary focus:border-primary outline-none bg-white"
                                     value={formData.locationId}
-                                    onChange={e => setFormData({ ...formData, locationId: e.target.value })}
-                                >
-                                    <option value="">Select Server...</option>
-                                    {servers.map(server => (
-                                        <option key={server.id} value={server.name}>{server.name}</option>
-                                    ))}
-                                </select>
+                                    onChange={(val) => setFormData({ ...formData, locationId: val })}
+                                    options={[
+                                        { label: 'Select Server...', value: '' },
+                                        ...servers.map(server => ({ label: server.name, value: server.name }))
+                                    ]}
+                                    placeholder="Select Server..."
+                                />
                             </div>
                             <div className="flex justify-end gap-3 mt-6">
                                 <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
@@ -677,38 +682,36 @@ export function Registration() {
             {/* Installation Modal */}
             {isInstallOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50 rounded-t-xl">
                             <h3 className="font-semibold text-lg text-blue-900">Process Installation</h3>
                             <button onClick={() => setIsInstallOpen(false)} className="text-blue-400 hover:text-blue-600"><XCircle className="w-6 h-6" /></button>
                         </div>
                         <form onSubmit={handleInstallSubmit} className="p-6 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Technician</label>
-                                <select
+                                <SearchableSelect
                                     required
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
                                     value={installData.technician}
-                                    onChange={e => setInstallData({ ...installData, technician: e.target.value })}
-                                >
-                                    <option value="">Select Technician...</option>
-                                    {getTechnicians().map(tech => (
-                                        <option key={tech.id} value={tech.name}>{tech.name}</option>
-                                    ))}
-                                </select>
+                                    onChange={(val) => setInstallData({ ...installData, technician: val })}
+                                    options={[
+                                        { label: 'Select Technician...', value: '' },
+                                        ...getTechnicians().map(tech => ({ label: tech.name, value: tech.name }))
+                                    ]}
+                                    placeholder="Select Technician..."
+                                />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Companion (Pendamping)</label>
-                                <select
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                                <SearchableSelect
                                     value={installData.companion}
-                                    onChange={e => setInstallData({ ...installData, companion: e.target.value })}
-                                >
-                                    <option value="">Select Companion...</option>
-                                    {getTechnicians().map(tech => (
-                                        <option key={tech.id} value={tech.name}>{tech.name}</option>
-                                    ))}
-                                </select>
+                                    onChange={(val) => setInstallData({ ...installData, companion: val })}
+                                    options={[
+                                        { label: 'Select Companion...', value: '' },
+                                        ...getTechnicians().map(tech => ({ label: tech.name, value: tech.name }))
+                                    ]}
+                                    placeholder="Select Companion..."
+                                />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Date & Time</label>

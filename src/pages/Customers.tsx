@@ -1,14 +1,18 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 import { useServers, type MikrotikServer } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
 import { useData } from '@/context/DataContext';
 import { type Customer } from '@/types';
-import { Search, AlertCircle, CheckCircle2, Pencil, Lock, Unlock, Plus, Save, ChevronLeft, ChevronRight, RefreshCw, DownloadCloud } from 'lucide-react';
+import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud } from 'lucide-react';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { cn } from '@/lib/utils';
 
 export function Customers() {
     const { servers } = useServers();
-    const { customers, loadingCustomers: loading, refreshCustomers } = useData();
+    const { customers, refreshCustomers } = useData();
+    // ...
+    // const cleanPhone = data.whatsapp.replace(/\D/g, '');
     // const [customers, setCustomers] = useState<Customer[]>([]); // Removed local state
     // const [loading, setLoading] = useState(false); // Removed local state
     const [filter, setFilter] = useState('');
@@ -123,26 +127,68 @@ export function Customers() {
         setIsModalOpen(true);
     };
 
-    const handleSave = async (data: any, targetServerId: string) => {
+    const handleSave = async (data: any, targetServerId: string, saveMode: 'server' | 'app') => {
         setSaving(true);
         try {
             const server = servers.find(s => s.id === targetServerId);
             if (!server) throw new Error("Target server not found");
 
-            if (editingCustomer) {
-                // Update
-                await MikrotikApi.updatePPPSecret(server, editingCustomer.id, data);
-                setSyncStatus({ type: 'success', message: "Customer updated successfully." });
+            if (saveMode === 'server') {
+                // SERVER SIDE: Mikrotik Update
+                const mikrotikPayload = {
+                    name: data.name,
+                    password: data.password,
+                    profile: data.profile,
+                    comment: data.comment,
+                    "remote-address": data["remote-address"],
+                };
+
+                if (editingCustomer) {
+                    await MikrotikApi.updatePPPSecret(server, editingCustomer.id, mikrotikPayload);
+                } else {
+                    await MikrotikApi.addPPPSecret(server, mikrotikPayload);
+                }
+
+                // Sync cache immediately to reflect changes
+                await MikrotikApi.syncSecrets(server);
+                setSyncStatus({ type: 'success', message: editingCustomer ? "Mikrotik Secret updated successfully." : "Mikrotik Secret created successfully." });
+
             } else {
-                // Create
-                await MikrotikApi.addPPPSecret(server, data);
-                setSyncStatus({ type: 'success', message: "Customer created successfully." });
+                // APP SIDE: Local Data Update Only (No Mikrotik Connection)
+                if (!editingCustomer) throw new Error("Cannot create new customer in App mode. Please create in Server mode first.");
+
+                // Use the new endpoint to update SQL and JSON metadata directly
+                await axios.put(`/api/customers/${editingCustomer.id}`, {
+                    serverId: targetServerId, // Required for backend lookup
+                    name: data.name, // Keep consistency if needed, but mainly realName below
+                    realName: data.realName,
+                    whatsapp: data.whatsapp,
+                    address: data.address, // mapping needed if used
+                    sub_area_id: data.sub_area_id,
+                    coordinates: `${data.lat},${data.long}`,
+                    ktp: data.ktp,
+                    activationDate: data.activationDate,
+                    photos: data.photos
+                });
+
+                // Also Handle Registration Real Name Update if needed (Legacy Support)
+                if (data.realName && editingCustomer.registrationId) {
+                    try {
+                        await axios.put(`/api/registrations/${editingCustomer.registrationId}`, {
+                            fullName: data.realName
+                        });
+                    } catch (e) { console.error("Failed to update registration name", e); }
+                }
+
+                setSyncStatus({ type: 'success', message: "App Data updated successfully (Saved to DB)." });
             }
 
             setIsModalOpen(false);
-            refreshCustomers(true); // Forcing refresh to ensure UI is updated after save
+            refreshCustomers(true); // Forcing refresh
         } catch (e: any) {
             console.error(e);
+            // [DEBUG] Alert the user on error so they know why it failed
+            alert(`Failed to save: ${e.response?.data?.error || e.message}`);
             setSyncStatus({ type: 'error', message: `Operation failed: ${e.message}` });
         } finally {
             setSaving(false);
@@ -164,6 +210,9 @@ export function Customers() {
             } else {
                 setSyncStatus({ type: 'success', message: `Unblocked ${customer.name}.` });
             }
+
+            // Sync cache to reflect status change
+            await MikrotikApi.syncSecrets(server);
 
             // Optimistic Update is tricky with global context unless we expose a setter or just refresh
             refreshCustomers(true);
@@ -236,22 +285,21 @@ export function Customers() {
                 </div>
                 <div className="flex items-center gap-3 w-full md:w-auto">
                     <button
-                        onClick={handleSync}
-                        disabled={syncLoading || loading}
-                        className={cn(
-                            "flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50 flex-1 md:flex-none",
-                            syncLoading && "animate-pulse"
-                        )}
-                    >
-                        <RefreshCw className={cn("w-4 h-4", syncLoading && "animate-spin")} />
-                        {syncLoading ? 'Syncing...' : 'Sync Data'}
-                    </button>
-                    <button
                         onClick={handleAdd}
-                        className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm flex-1 md:flex-none"
+                        className="p-2 md:px-4 md:py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm"
                     >
-                        <Plus className="w-4 h-4" />
-                        Add Customer
+                        <Plus className="w-5 h-5" />
+                        <span className="hidden md:inline font-medium">Add Customer</span>
+                    </button>
+
+                    <button
+                        onClick={handleSync}
+                        disabled={syncLoading}
+                        className="p-2 md:px-4 md:py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
+                        title="Sync Data from Mikrotik to Database"
+                    >
+                        <RefreshCw className={cn("w-5 h-5", syncLoading && "animate-spin")} />
+                        <span className="hidden md:inline font-medium">Sync Data</span>
                     </button>
                 </div>
             </div>
@@ -281,46 +329,58 @@ export function Customers() {
                     />
                 </div>
 
-                <select
-                    className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[150px]"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'blocked')}
-                >
-                    <option value="all">All Status</option>
-                    <option value="active">Active</option>
-                    <option value="blocked">Blocked</option>
-                </select>
+                <div className="w-[180px]">
+                    <SearchableSelect
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                        options={[
+                            { label: 'All Status', value: 'all' },
+                            { label: 'Active', value: 'active' },
+                            { label: 'Isolated', value: 'isolated' },
+                            { label: 'Disabled', value: 'disabled' },
+                            { label: 'Installing', value: 'installing' }
+                        ]}
+                        placeholder="Status"
+                    />
+                </div>
 
-                <select
-                    className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[200px]"
-                    value={serverFilter}
-                    onChange={(e) => {
-                        setServerFilter(e.target.value);
-                        setProfileFilter('all'); // Reset profile filter when server changes
-                    }}
-                >
-                    <option value="all">All Servers</option>
-                    {servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                <div className="w-[200px]">
+                    <SearchableSelect
+                        value={serverFilter}
+                        onChange={(val) => {
+                            setServerFilter(val);
+                            setProfileFilter('all'); // Reset profile filter when server changes
+                        }}
+                        options={[
+                            { label: 'All Servers', value: 'all' },
+                            ...servers.map(s => ({ label: s.name, value: s.id }))
+                        ]}
+                        placeholder="Select Server"
+                    />
+                </div>
 
-                <select
-                    className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-slate-700 min-w-[200px]"
-                    value={profileFilter}
-                    onChange={(e) => setProfileFilter(e.target.value)}
-                >
-                    <option value="all">All Profiles</option>
-                    {uniqueProfiles.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
+                <div className="w-[200px]">
+                    <SearchableSelect
+                        value={profileFilter}
+                        onChange={setProfileFilter}
+                        options={[
+                            { label: 'All Profiles', value: 'all' },
+                            ...uniqueProfiles.map(p => ({ label: p, value: p }))
+                        ]}
+                        placeholder="Select Profile"
+                    />
+                </div>
             </div>
 
             {/* Table */}
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
+                <div className="overflow-x-auto overflow-y-hidden rounded-t-xl">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
                                 {[
                                     { label: 'Username', key: 'name' },
+                                    { label: 'Real Name', key: 'realName' },
                                     { label: 'Customer', key: 'comment' },
                                     { label: 'Profile', key: 'profile' },
                                     { label: 'WhatsApp', key: 'whatsapp' },
@@ -348,14 +408,23 @@ export function Customers() {
                         <tbody className="divide-y divide-slate-100">
                             {filteredAndSortedCustomers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-400">
+                                    <td colSpan={9} className="px-6 py-8 text-center text-slate-400">
                                         No customers found matching your filters.
                                     </td>
                                 </tr>
                             ) : (
                                 paginatedCustomers.map((customer) => (
-                                    <tr key={`${customer.serverId}-${customer.id}`} className="hover:bg-slate-50/50 group">
-                                        <td className="px-6 py-3 font-medium text-slate-900">{customer.name}</td>
+                                    <tr key={`${customer.serverId}-${customer.name}`} className="hover:bg-slate-50/50 group">
+                                        <td className="px-6 py-3 font-medium text-slate-900">
+                                            {customer.name}
+                                        </td>
+                                        <td className="px-6 py-3 text-slate-600 font-medium">
+                                            {customer.realName ? (
+                                                <span className="text-emerald-600">{customer.realName}</span>
+                                            ) : (
+                                                <span className="text-slate-400 italic text-xs">Unlinked</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-3 text-slate-600">{customer.comment || '-'}</td>
                                         <td className="px-6 py-3">
                                             <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
@@ -444,22 +513,24 @@ export function Customers() {
                 </div>
 
                 {/* Pagination Controls */}
-                <div className="px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50">
+                <div className="px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50 rounded-b-xl">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                         <span>Show</span>
-                        <select
-                            className="bg-white border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                            value={itemsPerPage}
-                            onChange={(e) => {
-                                setItemsPerPage(Number(e.target.value));
-                                setCurrentPage(1);
-                            }}
-                        >
-                            <option value={10}>10</option>
-                            <option value={50}>50</option>
-                            <option value={100}>100</option>
-                            <option value={-1}>All</option>
-                        </select>
+                        <div className="w-[80px]">
+                            <select
+                                className="w-full px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-sm"
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                            >
+                                <option value={10}>10</option>
+                                <option value={50}>50</option>
+                                <option value={100}>100</option>
+                                <option value={-1}>All</option>
+                            </select>
+                        </div>
                         <span>entries</span>
                         <span className="text-slate-400 mx-2">|</span>
                         <span>
@@ -510,7 +581,7 @@ export function Customers() {
 function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoading }: {
     isOpen: boolean;
     onClose: () => void;
-    onSave: (data: any, serverId: string) => void,
+    onSave: (data: any, serverId: string, saveMode: 'server' | 'app') => void,
     initialData?: Customer | null,
     servers: MikrotikServer[],
     isLoading: boolean
@@ -519,6 +590,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
 
     const [formData, setFormData] = useState({
         name: '',
+        realName: '',
         password: '',
         comment: '',
         profile: 'default',
@@ -530,20 +602,34 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         long: '',
         ktp: '',
         activationDate: '',
-        photos: [] as string[]
+        photos: [] as string[],
+        sub_area_id: ''
     });
 
     const [uploading, setUploading] = useState(false);
     const [availableProfiles, setAvailableProfiles] = useState<any[]>([]);
     const [availablePools, setAvailablePools] = useState<any[]>([]);
+    const [subAreas, setSubAreas] = useState<any[]>([]);
     const [loadingProfiles, setLoadingProfiles] = useState(false);
+
+    // UI State
+    const [activeTab, setActiveTab] = useState<'server' | 'app'>('server');
+
+    // Fetch Sub Areas on mount
+    useEffect(() => {
+        axios.get('/api/sub-areas').then(res => setSubAreas(res.data)).catch(console.error);
+    }, []);
 
     // Fetch profiles and pools when serverId changes
     useEffect(() => {
         const fetchData = async () => {
-            if (!formData.serverId) return;
+            if (!formData.serverId) {
+                setAvailableProfiles([]);
+                setAvailablePools([]);
+                return;
+            }
             const server = servers.find(s => s.id === formData.serverId);
-            if (!server || !server.isOnline) {
+            if (!server) {
                 setAvailableProfiles([]);
                 setAvailablePools([]);
                 return;
@@ -571,6 +657,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         if (initialData) {
             setFormData({
                 name: initialData.name,
+                realName: initialData.realName || '',
                 password: initialData.password || '',
                 comment: initialData.comment || '',
                 profile: initialData.profile,
@@ -581,11 +668,13 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 long: initialData.long || '',
                 ktp: initialData.ktp || '',
                 activationDate: initialData.activationDate || '',
-                photos: initialData.photos || []
+                photos: initialData.photos || [],
+                sub_area_id: initialData.sub_area_id || ''
             });
         } else {
             setFormData({
                 name: '',
+                realName: '',
                 password: '',
                 comment: '',
                 profile: 'default',
@@ -596,7 +685,8 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 long: '',
                 ktp: '',
                 activationDate: '',
-                photos: []
+                photos: [],
+                sub_area_id: ''
             });
         }
     }, [initialData, isOpen, servers]);
@@ -618,167 +708,240 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        // Save to Mikrotik
-        await onSave({
+        // Save to Mikrotik & Metadata
+        onSave({
             name: formData.name,
+            realName: formData.realName,
             password: formData.password,
             comment: formData.comment,
             profile: formData.profile,
-            ...(formData["remote-address"] ? { "remote-address": formData["remote-address"] } : {})
-        }, formData.serverId);
-
-        // Save Extended Meta Data
-        if (formData.serverId && formData.name) {
-            await MikrotikApi.updateExtendedData(formData.serverId, formData.name, {
-                whatsapp: formData.whatsapp,
-                lat: formData.lat,
-                long: formData.long,
-                ktp: formData.ktp,
-                activationDate: formData.activationDate,
-                photos: formData.photos
-            });
-        }
+            "remote-address": formData["remote-address"] || undefined,
+            serverId: formData.serverId, // Pass serverId for extended data update
+            whatsapp: formData.whatsapp || undefined,
+            lat: formData.lat || undefined,
+            long: formData.long || undefined,
+            ktp: formData.ktp || undefined,
+            activationDate: formData.activationDate || undefined,
+            photos: formData.photos,
+            sub_area_id: formData.sub_area_id || undefined
+        }, formData.serverId, activeTab);
     };
 
     return (
         <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                {/* ... Header ... */}
-                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                {/* Header */}
+                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center flex-shrink-0">
                     <h2 className="text-lg font-semibold">{initialData ? 'Edit Customer' : 'Add New Customer'}</h2>
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600">×</button>
                 </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    {/* ... Server Select ... */}
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-slate-700">Server (Router)</label>
-                        <select
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
-                            value={formData.serverId}
-                            onChange={e => setFormData({ ...formData, serverId: e.target.value })}
-                            disabled={!!initialData}
-                        >
-                            {servers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.ip})</option>)}
-                        </select>
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">Username</label>
-                            <input required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">Password</label>
-                            <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} />
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-slate-700">Customer Name (Comment)</label>
-                        <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                            value={formData.comment} onChange={e => setFormData({ ...formData, comment: e.target.value })} placeholder="Full Name" />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">Profile (Package)</label>
-                            {loadingProfiles ? (
-                                <div className="text-sm text-slate-400 py-2">Loading...</div>
-                            ) : (
-                                <select
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
-                                    value={formData.profile}
-                                    onChange={e => setFormData({ ...formData, profile: e.target.value })}
-                                >
-                                    <option value="default">default</option>
-                                    {availableProfiles.map((p: any) => (
-                                        <option key={p['.id']} value={p.name}>{p.name}</option>
-                                    ))}
-                                </select>
+                {/* Scrollable Content */}
+                <div className="p-6 overflow-y-auto min-h-[400px]">
+                    <div className="flex gap-4 mb-6 border-b border-slate-100 pb-1">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('server')}
+                            className={cn(
+                                "pb-2 px-1 text-sm font-medium transition-colors relative",
+                                activeTab === 'server' ? "text-primary border-b-2 border-primary" : "text-slate-500 hover:text-slate-700"
                             )}
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">Remote Address</label>
-                            <input
-                                list="ip-pools"
-                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                value={formData["remote-address"]}
-                                onChange={e => setFormData({ ...formData, "remote-address": e.target.value })}
-                                placeholder="IP or Pool Name"
-                            />
-                            <datalist id="ip-pools">
-                                {availablePools.map((pool: any) => (
-                                    <option key={pool['.id']} value={pool.name}>Pool: {pool.ranges}</option>
-                                ))}
-                            </datalist>
-                        </div>
-                    </div>
-
-                    <div className="border-t border-slate-100 pt-4 mt-2">
-                        <h3 className="text-sm font-semibold text-slate-900 mb-3">CRM Data</h3>
-
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-700">WhatsApp</label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">62</span>
-                                    <input className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                        value={formData.whatsapp} onChange={e => setFormData({ ...formData, whatsapp: e.target.value })} placeholder="81234567890" />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-700">No. KTP</label>
-                                <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                    value={formData.ktp} onChange={e => setFormData({ ...formData, ktp: e.target.value })} placeholder="16 Digits" />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-700">Latitude</label>
-                                <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                    value={formData.lat} onChange={e => setFormData({ ...formData, lat: e.target.value })} placeholder="-6.200000" />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-700">Longitude</label>
-                                <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                    value={formData.long} onChange={e => setFormData({ ...formData, long: e.target.value })} placeholder="106.800000" />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2 mb-4">
-                            <label className="text-sm font-medium text-slate-700">Activation Date</label>
-                            <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                value={formData.activationDate} onChange={e => setFormData({ ...formData, activationDate: e.target.value })} />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">Installation Photos</label>
-                            <div className="flex flex-wrap gap-2 mb-2">
-                                {formData.photos.map((url, i) => (
-                                    <a key={i} href={`http://localhost:3001${url}`} target="_blank" rel="noreferrer" className="block w-16 h-16 rounded overflow-hidden border border-slate-200 hover:opacity-80">
-                                        <img src={`http://localhost:3001${url}`} alt="Install" className="w-full h-full object-cover" />
-                                    </a>
-                                ))}
-                                <label className="w-16 h-16 rounded border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-colors">
-                                    <Plus className="w-5 h-5" />
-                                    <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} disabled={uploading} />
-                                </label>
-                            </div>
-                            {uploading && <p className="text-xs text-blue-500">Uploading photos...</p>}
-                        </div>
-                    </div>
-
-                    <div className="pt-4 flex justify-end gap-3">
-                        <button type="button" onClick={onClose} disabled={isLoading} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium disabled:opacity-50">Cancel</button>
-                        <button type="submit" disabled={isLoading} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50">
-                            {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            {initialData ? 'Save Changes' : 'Create Customer'}
+                        >
+                            Server Configuration
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('app')}
+                            className={cn(
+                                "pb-2 px-1 text-sm font-medium transition-colors relative",
+                                activeTab === 'app' ? "text-primary border-b-2 border-primary" : "text-slate-500 hover:text-slate-700"
+                            )}
+                        >
+                            App & CRM Data
                         </button>
                     </div>
-                </form>
+
+                    <form id="customer-form" onSubmit={handleSubmit} className="space-y-6">
+
+                        {activeTab === 'server' && (
+                            <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
+                                {/* Server Selection - Full Width */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-slate-700">Server (Router)</label>
+                                    <SearchableSelect
+                                        required
+                                        value={formData.serverId}
+                                        onChange={(val) => setFormData({ ...formData, serverId: val, sub_area_id: '' })}
+                                        options={[
+                                            { label: 'Select Server...', value: '' },
+                                            ...servers.map(server => ({ label: server.name, value: server.id }))
+                                        ]}
+                                        placeholder="Select Server..."
+                                        disabled={!!initialData}
+                                    />
+                                    <p className="text-xs text-slate-400">Target Mikrotik Router</p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Username (PPPoE Secret)</label>
+                                            <input required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                                placeholder="username" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Password</label>
+                                            <input required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })}
+                                                placeholder="password" />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Profile (Package)</label>
+                                            {loadingProfiles ? (
+                                                <div className="text-sm text-slate-400 py-2">Loading...</div>
+                                            ) : (
+                                                <SearchableSelect
+                                                    value={formData.profile}
+                                                    onChange={val => setFormData({ ...formData, profile: val })}
+                                                    options={[
+                                                        { label: 'default', value: 'default' },
+                                                        ...availableProfiles.map((p: any) => ({ label: p.name, value: p.name }))
+                                                    ]}
+                                                />
+                                            )}
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Remote Address</label>
+                                            <input
+                                                list="ip-pools"
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                value={formData["remote-address"]}
+                                                onChange={e => setFormData({ ...formData, "remote-address": e.target.value })}
+                                                placeholder="IP or Pool Name"
+                                            />
+                                            <datalist id="ip-pools">
+                                                {availablePools.map((pool: any) => (
+                                                    <option key={pool['.id']} value={pool.name}>Pool: {pool.ranges}</option>
+                                                ))}
+                                            </datalist>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="space-y-2 border-t border-slate-100 pt-4">
+                                    <label className="text-sm font-medium text-slate-700">Mikrotik Comment / Identity</label>
+                                    <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                        value={formData.comment} onChange={e => setFormData({ ...formData, comment: e.target.value })} placeholder="Customer Name in Mikrotik" />
+                                    <p className="text-xs text-slate-400">Usually used for the main Customer Name in Mikrotik list</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'app' && (
+                            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-4">
+                                        {/* Sub Area Selection */}
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Sub Area</label>
+                                            <SearchableSelect
+                                                value={formData.sub_area_id}
+                                                onChange={(val) => setFormData({ ...formData, sub_area_id: val })}
+                                                options={[
+                                                    { label: 'Select Sub Area...', value: '' },
+                                                    ...subAreas
+                                                        .filter(sa => sa.serverId === formData.serverId)
+                                                        .map(sa => ({ label: sa.name, value: sa.id }))
+                                                ]}
+                                                placeholder={formData.serverId ? "Select Sub Area..." : "Select Server first (in Server Tab)"}
+                                                disabled={!formData.serverId}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Real Name (Registration)</label>
+                                            <input
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                placeholder="Full Name as per Registration"
+                                                value={formData.realName} onChange={e => setFormData({ ...formData, realName: e.target.value })}
+                                            />
+                                            <p className="text-xs text-slate-400">Updates linked registration data</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">No. KTP</label>
+                                            <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                value={formData.ktp} onChange={e => setFormData({ ...formData, ktp: e.target.value })} placeholder="16 Digits" />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">WhatsApp</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">62</span>
+                                                <input className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                    value={formData.whatsapp} onChange={e => setFormData({ ...formData, whatsapp: e.target.value })} placeholder="812..." />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Activation Date</label>
+                                            <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                value={formData.activationDate} onChange={e => setFormData({ ...formData, activationDate: e.target.value })} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Location & Photos */}
+                                <div className="border-t border-slate-100 pt-4">
+                                    <h3 className="text-sm font-semibold text-slate-900 mb-3">Location & Installation</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Latitude</label>
+                                            <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                value={formData.lat} onChange={e => setFormData({ ...formData, lat: e.target.value })} placeholder="-6.200..." />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700">Longitude</label>
+                                            <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                                value={formData.long} onChange={e => setFormData({ ...formData, long: e.target.value })} placeholder="106.8..." />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 mt-4">
+                                        <label className="text-sm font-medium text-slate-700">Installation Photos</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {formData.photos.map((url, i) => (
+                                                <a key={i} href={url} target="_blank" rel="noreferrer" className="block w-16 h-16 rounded overflow-hidden border border-slate-200 hover:opacity-80">
+                                                    <img src={url} alt="Install" className="w-full h-full object-cover" />
+                                                </a>
+                                            ))}
+                                            <label className="w-16 h-16 rounded border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-colors">
+                                                <Plus className="w-5 h-5" />
+                                                <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} disabled={uploading} />
+                                            </label>
+                                        </div>
+                                        {uploading && <p className="text-xs text-blue-500">Uploading photos...</p>}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </form>
+                </div>
+
+                {/* Fixed Footer */}
+                <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 flex-shrink-0 bg-slate-50 rounded-b-xl">
+                    <button type="button" onClick={onClose} disabled={isLoading} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium disabled:opacity-50">Cancel</button>
+                    <button
+                        type="submit"
+                        form="customer-form"
+                        disabled={isLoading}
+                        className="flex items-center gap-2 px-6 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 transition-all shadow-sm"
+                    >
+                        {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        {initialData ? 'Save Changes' : 'Create Customer'}
+                    </button>
+                </div>
             </div>
         </div>
     );

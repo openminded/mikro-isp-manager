@@ -16,8 +16,8 @@ export interface InterfaceStats {
     "tx-bits-per-second": number;
 }
 
-const API_URL = 'http://localhost:3001/api/proxy';
-const META_API_URL = 'http://localhost:3001/api';
+const API_URL = '/api/proxy';
+const META_API_URL = '/api';
 
 // Helper to use the Backend Proxy
 const runCommand = async (server: MikrotikServer, command: string[]) => {

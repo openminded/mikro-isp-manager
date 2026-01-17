@@ -5,7 +5,7 @@ import { MikrotikApi } from '@/services/mikrotikApi';
 import { Search, RefreshCw, CheckCircle2, AlertCircle, Network } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useData } from '@/context/DataContext';
-import { type IpPool } from '@/types';
+
 
 // The original IpPool interface is now imported from '@/types'
 // interface IpPool {

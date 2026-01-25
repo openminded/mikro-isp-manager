@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, XCircle, Wrench, Smartphone, Calendar, Eye, User, RotateCcw, CheckCircle } from 'lucide-react';
+import { Plus, Search, Edit2, XCircle, Wrench, Smartphone, Calendar, Eye, User, RotateCcw, CheckCircle, MapPin, Trash2 } from 'lucide-react';
 import axios from 'axios';
+import { useAuth } from '@/context/AuthContext';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import type { Registration } from '@/types';
 
@@ -15,6 +16,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
     const [jobTitles, setJobTitles] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const { user } = useAuth();
 
     // Sorting
     const [sortConfig, setSortConfig] = useState<{ key: keyof Registration | 'date', direction: 'asc' | 'desc' } | null>(null);
@@ -46,11 +48,14 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         ktpNumber: '',
         address: '',
         locationId: '',
+        mapsUrl: '', // Add mapsUrl state
     });
     const [installData, setInstallData] = useState({
         technician: '',
         companion: '',
         date: '',
+        costName: '',
+        costPrice: 0
     });
 
     useEffect(() => {
@@ -118,7 +123,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             fetchRegistrations();
             setIsFormOpen(false);
             setEditingReg(null);
-            setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '' });
+            setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', mapsUrl: '' });
         } catch (error) {
             alert('Failed to save registration');
         }
@@ -132,6 +137,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             ktpNumber: reg.ktpNumber,
             address: reg.address,
             locationId: reg.locationId,
+            mapsUrl: reg.mapsUrl || '', // Load mapsUrl
         });
         setIsFormOpen(true);
     };
@@ -139,6 +145,16 @@ export function Registration({ view = 'active' }: RegistrationProps) {
     const openDetail = (reg: Registration) => {
         setDetailReg(reg);
         setIsDetailOpen(true);
+    };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm('Are you sure you want to DELETE this registration PERMANENTLY? This cannot be undone.')) return;
+        try {
+            await axios.delete(`/api/registrations/${id}`);
+            fetchRegistrations();
+        } catch (error) {
+            alert('Failed to delete registration');
+        }
     };
 
     const handleCancelReg = async (id: string) => {
@@ -172,6 +188,8 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             technician: reg.installation?.technician || '',
             companion: reg.installation?.companion || '',
             date: reg.installation?.date ? reg.installation.date.slice(0, 16) : '',
+            costName: reg.installation?.cost?.name || '',
+            costPrice: reg.installation?.cost?.price || 0
         });
         setIsInstallOpen(true);
     };
@@ -182,7 +200,10 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         try {
             await axios.put(`/api/registrations/${selectedReg.id}`, {
                 status: 'installation_process',
-                installation: installData,
+                installation: {
+                    ...installData,
+                    cost: installData.costName ? { name: installData.costName, price: Number(installData.costPrice) } : null
+                },
                 workingOrderStatus: 'pending' // Ensure it starts as pending
             });
             fetchRegistrations();
@@ -277,7 +298,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                     </p>
                 </div>
                 <button
-                    onClick={() => { setEditingReg(null); setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '' }); setIsFormOpen(true); }}
+                    onClick={() => { setEditingReg(null); setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', mapsUrl: '' }); setIsFormOpen(true); }}
                     className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
                 >
                     <Plus className="w-4 h-4" />
@@ -438,6 +459,11 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                                     <RotateCcw className="w-4 h-4" />
                                                 </button>
                                             )}
+                                            {reg.status === 'done' && user?.role === 'superadmin' && (
+                                                <button onClick={() => handleDelete(reg.id)} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>
@@ -543,6 +569,19 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                     value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })}></textarea>
                             </div>
                             <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Link Lokasi (Maps URL)</label>
+                                <div className="relative">
+                                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                    <input
+                                        type="url"
+                                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-primary focus:border-primary outline-none"
+                                        value={formData.mapsUrl}
+                                        onChange={e => setFormData({ ...formData, mapsUrl: e.target.value })}
+                                        placeholder="https://maps.google.com/..."
+                                    />
+                                </div>
+                            </div>
+                            <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Location (Server) <span className="text-red-500">*</span></label>
                                 <SearchableSelect
                                     required
@@ -613,6 +652,11 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                     <div className="col-span-2">
                                         <div className="text-slate-500 mb-1">Address</div>
                                         <div className="font-medium text-slate-900">{detailReg.address}</div>
+                                        {detailReg.mapsUrl && (
+                                            <a href={detailReg.mapsUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline mt-1 text-xs">
+                                                <MapPin className="w-3 h-3" /> View Location
+                                            </a>
+                                        )}
                                     </div>
                                     {detailReg.createdAt && (
                                         <div className="col-span-2 mt-1">
@@ -640,17 +684,42 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                             <div className="text-slate-500 mb-1">Companion</div>
                                             <div className="font-medium text-slate-900">{detailReg.installation.companion || '-'}</div>
                                         </div>
+                                        {/* Cost Display */}
+                                        {(detailReg.installation as any).cost && (
+                                            <div className="col-span-2 bg-slate-50 p-2 rounded border border-slate-100 mt-1">
+                                                <div className="text-slate-500 text-xs mb-1">Installation Cost</div>
+                                                <div className="font-medium text-slate-900 flex justify-between">
+                                                    <span>{(detailReg.installation as any).cost.name}</span>
+                                                    <span>Rp {Number((detailReg.installation as any).cost.price).toLocaleString('id-ID')}</span>
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className="col-span-2">
                                             <div className="text-slate-500 mb-1">Scheduled Date</div>
                                             <div className="font-medium text-slate-900">
                                                 {new Date(detailReg.installation.date).toLocaleString([], { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                             </div>
                                         </div>
-                                        {detailReg.installation.finishDate && (
-                                            <div className="col-span-2 mt-2 pt-2 border-t border-slate-100">
-                                                <div className="text-slate-500 mb-1 text-xs uppercase tracking-wide font-semibold">Finish Date</div>
-                                                <div className="font-medium text-emerald-700 bg-emerald-50 inline-block px-2 py-1 rounded">
-                                                    {new Date(detailReg.installation.finishDate).toLocaleString()}
+                                        <div className="col-span-2 mt-2 pt-2 border-t border-slate-100">
+                                            <div className="text-slate-500 mb-1 text-xs uppercase tracking-wide font-semibold">Finish Date</div>
+                                            <div className="font-medium text-emerald-700 bg-emerald-50 inline-block px-2 py-1 rounded">
+                                                {detailReg.installation.finishDate ? new Date(detailReg.installation.finishDate).toLocaleString() : '-'}
+                                            </div>
+                                        </div>
+                                        {detailReg.installation.coordinates && (
+                                            <div className="col-span-2 mt-2">
+                                                <div className="text-slate-500 mb-1 text-xs">Captured Location</div>
+                                                <div className="font-medium text-slate-900 flex items-center gap-2">
+                                                    <MapPin className="w-4 h-4 text-red-500" />
+                                                    {detailReg.installation.coordinates}
+                                                    <a
+                                                        href={`https://www.google.com/maps/search/?api=1&query=${detailReg.installation.coordinates}`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-blue-600 hover:underline text-xs"
+                                                    >
+                                                        (Open Map)
+                                                    </a>
                                                 </div>
                                             </div>
                                         )}
@@ -717,6 +786,35 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Date & Time</label>
                                 <input required type="datetime-local" className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 outline-none"
                                     value={installData.date} onChange={e => setInstallData({ ...installData, date: e.target.value })} />
+                            </div>
+
+                            {/* Installation Cost Section */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Installation Cost</label>
+                                <select
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                    value={installData.costName}
+                                    onChange={(e) => {
+                                        const name = e.target.value;
+                                        if (!name) {
+                                            setInstallData({ ...installData, costName: '', costPrice: 0 });
+                                            return;
+                                        }
+                                        // Find cost
+                                        const server = servers.find(s => s.name === selectedReg?.locationId);
+                                        const cost = server?.installation_costs?.find((c: any) => c.name === name);
+                                        if (cost) {
+                                            setInstallData({ ...installData, costName: cost.name, costPrice: cost.price });
+                                        }
+                                    }}
+                                >
+                                    <option value="">Select Cost...</option>
+                                    {selectedReg && servers.find(s => s.name === selectedReg.locationId)?.installation_costs?.map((c: any, idx: number) => (
+                                        <option key={idx} value={c.name}>
+                                            {c.name} - Rp {c.price.toLocaleString('id-ID')}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                             <div className="flex justify-end gap-3 mt-6">
                                 <button type="button" onClick={() => setIsInstallOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>

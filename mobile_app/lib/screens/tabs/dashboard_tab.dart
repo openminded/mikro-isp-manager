@@ -42,13 +42,14 @@ class _DashboardTabState extends State<DashboardTab> {
         child: isLoading && workItems.isEmpty
             ? const Center(child: CircularProgressIndicator())
             : ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
                 children: [
                     Row(
                         children: [
-                            Expanded(child: _buildStatCard('Pending', myPending.toString(), Colors.orange)),
+                            Expanded(child: _buildStatCard('Pending', myPending.toString(), [Colors.orange.shade400, Colors.deepOrange.shade600])),
                             const SizedBox(width: 16),
-                            Expanded(child: _buildStatCard('Completed', myCompleted.toString(), Colors.green)),
+                            Expanded(child: _buildStatCard('Completed', myCompleted.toString(), [Colors.green.shade400, Colors.teal.shade700])),
                         ],
                     ),
                     const SizedBox(height: 24),
@@ -72,21 +73,30 @@ class _DashboardTabState extends State<DashboardTab> {
     );
   }
 
-  Widget _buildStatCard(String title, String value, Color color) {
+  Widget _buildStatCard(String title, String value, List<Color> colors) {
     return Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-            color: Colors.white,
+            gradient: LinearGradient(
+                colors: colors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+            ),
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-            border: Border.all(color: color.withOpacity(0.2))
+            boxShadow: [
+                BoxShadow(
+                    color: colors.last.withOpacity(0.4),
+                    blurRadius: 8,
+                    offset: const Offset(2, 4)
+                )
+            ],
         ),
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-                Text(value, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: color)),
+                Text(value, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white)),
                 const SizedBox(height: 4),
-                Text(title, style: TextStyle(color: Colors.grey.shade600)),
+                Text(title, style: const TextStyle(color: Colors.white70, fontSize: 16)),
             ],
         ),
     );

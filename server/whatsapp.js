@@ -80,7 +80,12 @@ async function connectToWhatsApp() {
 }
 
 // Start connection immediately
-connectToWhatsApp();
+// Start connection immediately if not disabled
+if (process.env.ENABLE_WHATSAPP !== 'false') {
+    connectToWhatsApp();
+} else {
+    console.log('[WhatsApp] Disabled via ENABLE_WHATSAPP=false');
+}
 
 // --- Routes ---
 

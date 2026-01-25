@@ -4,7 +4,9 @@ import { useAuth } from '@/context/AuthContext';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { ClipboardList, Wrench, Filter, Users, Server, Briefcase } from 'lucide-react';
 import type { Registration, Ticket } from '@/types';
-import { useData } from '@/context/DataContext';
+// import { useData } from '@/context/DataContext';
+import { TechnicianHistoryChart } from '@/components/dashboard/TechnicianHistoryChart';
+import { MikrotikApi } from '@/services/mikrotikApi';
 
 export function Dashboard() {
     const { user } = useAuth();
@@ -18,10 +20,8 @@ export function Dashboard() {
 }
 
 function AdminDashboard() {
-    const { customers: contextCustomers } = useData(); // Get customers from context if available
     const [registrations, setRegistrations] = useState<Registration[]>([]);
     const [tickets, setTickets] = useState<Ticket[]>([]);
-    const [dbCustomers, setDbCustomers] = useState<any[]>([]); // Fallback if context not used or for full count
     const [servers, setServers] = useState<any[]>([]);
     const [employees, setEmployees] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -29,14 +29,13 @@ function AdminDashboard() {
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
+    const [totalCustomers, setTotalCustomers] = useState(0);
+
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
             try {
                 // Fetch all necessary data
-                // Note: Customers might be heavy if fetched fully, but let's assume it's okay for dashboard stats for now.
-                // If using contextCustomers, we might skip fetching customers, but context might depend on sync.
-                // Let's fetch lightweight list if possible, but distinct endpoints:
                 const [regRes, ticketRes, serverRes, empRes] = await Promise.all([
                     axios.get('/api/registrations'),
                     axios.get('/api/tickets'),
@@ -48,9 +47,15 @@ function AdminDashboard() {
                 setTickets(ticketRes.data);
                 setServers(serverRes.data);
                 setEmployees(empRes.data);
-                if (contextCustomers.length > 0) {
-                    setDbCustomers(contextCustomers);
-                }
+
+                // Calculate Total Customers exactly like Server Menu (Revenue Widget)
+                // Sum of all PPP Secrets across all servers
+                const currentServers = serverRes.data;
+                const secretPromises = currentServers.map((s: any) => MikrotikApi.getPPPSecrets(s).catch(() => []));
+                const results = await Promise.all(secretPromises);
+                const totalSecrets = results.reduce((acc, curr) => acc + curr.length, 0);
+
+                setTotalCustomers(totalSecrets);
 
             } catch (error) {
                 console.error("Failed to fetch dashboard data", error);
@@ -59,14 +64,9 @@ function AdminDashboard() {
             }
         };
         fetchData();
-    }, [contextCustomers.length]);
+    }, []);
 
-    // Update customers from context if it changes late
-    useEffect(() => {
-        if (contextCustomers.length > 0) {
-            setDbCustomers(contextCustomers);
-        }
-    }, [contextCustomers]);
+
 
     // Filter Data by Date (Global)
     const filteredRegs = registrations.filter(r => {
@@ -142,7 +142,7 @@ function AdminDashboard() {
                             </div>
                             <div>
                                 <p className="text-sm font-medium text-slate-500">Total Customers</p>
-                                <p className="text-2xl font-bold text-slate-900">{dbCustomers.length}</p>
+                                <p className="text-2xl font-bold text-slate-900">{totalCustomers}</p>
                             </div>
                         </div>
                         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center gap-4">
@@ -212,6 +212,11 @@ function AdminDashboard() {
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    {/* Historical Performance Chart */}
+                    <div className="mt-6">
+                        <TechnicianHistoryChart registrations={registrations} tickets={tickets} />
                     </div>
                 </>
             )}

@@ -140,7 +140,7 @@ export function Profiles() {
             )}
 
             {/* Filters */}
-            <div className="flex gap-4">
+            <div className="flex flex-col md:flex-row gap-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
@@ -150,7 +150,7 @@ export function Profiles() {
                         onChange={e => setFilter(e.target.value)}
                     />
                 </div>
-                <div className="w-[250px]">
+                <div className="w-full md:w-[250px]">
                     <SearchableSelect
                         value={serverFilter}
                         onChange={setServerFilter}

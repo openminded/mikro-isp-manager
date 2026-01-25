@@ -86,7 +86,12 @@ const navigation = [
 import { useAuth } from "@/context/AuthContext";
 import { LogOut } from "lucide-react";
 
-export function Sidebar() {
+interface SidebarProps {
+    className?: string;
+    onClose?: () => void;
+}
+
+export function Sidebar({ className, onClose }: SidebarProps) {
     const location = useLocation();
     const [openMenus, setOpenMenus] = useState<string[]>(['Data Master', 'Working Order']);
     const { user, logout } = useAuth();
@@ -98,8 +103,12 @@ export function Sidebar() {
         );
     };
 
+    const handleNavigation = () => {
+        if (onClose) onClose();
+    };
+
     return (
-        <div className="flex flex-col w-64 border-r border-slate-200 bg-white h-screen">
+        <div className={cn("flex flex-col w-64 border-r border-slate-200 bg-white h-screen", className)}>
             <div className="h-16 flex items-center px-6 border-b border-slate-200 justify-between flex-shrink-0">
                 <div className="flex items-center gap-2 font-bold text-xl text-slate-800">
                     <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain" />
@@ -166,6 +175,7 @@ export function Sidebar() {
                                                         <NavLink
                                                             key={child.name}
                                                             to={child.href}
+                                                            onClick={handleNavigation}
                                                             className={({ isActive }) =>
                                                                 cn(
                                                                     "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors",
@@ -190,6 +200,7 @@ export function Sidebar() {
                                     <NavLink
                                         key={item.name}
                                         to={(item as any).href}
+                                        onClick={handleNavigation}
                                         className={({ isActive }) =>
                                             cn(
                                                 "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors",

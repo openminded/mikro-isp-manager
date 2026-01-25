@@ -11,11 +11,13 @@ class WorkItem {
   final String address;
   final String server;
   final String technician;
+  final String? companion;
   final String date;
   final String status; // pending, in_progress, done, cancel
   final String rawStatus;
   final String? note;
   final dynamic originalObject; // Registration or Ticket
+  final String? mapsUrl;
 
   WorkItem({
     required this.id,
@@ -25,10 +27,12 @@ class WorkItem {
     required this.address,
     required this.server,
     required this.technician,
+    this.companion,
     required this.date,
     required this.status,
     required this.rawStatus,
     this.note,
     this.originalObject,
+    this.mapsUrl,
   });
 }

@@ -54,7 +54,7 @@ export function Servers() {
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Servers & Revenue</h1>
                     <p className="text-slate-500 mt-1">Manage devices and monitor estimated revenue based on active profiles.</p>
@@ -453,7 +453,8 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
 
     const [formData, setFormData] = useState({
         name: '', ip: '', port: 8728, username: '', password: '',
-        payment_due_days: 20 // Default 20th
+        payment_due_days: 20, // Default 20th
+        installation_costs: [] as { name: string; price: number }[] // Setup installation costs
     });
 
     // Load initial data for editing
@@ -465,10 +466,11 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
                 port: initialData.port,
                 username: initialData.username,
                 password: initialData.password || '', // Note: Password might not be secure to populate like this in real apps, but for local storage app it is fine
-                payment_due_days: (initialData as any).payment_due_days || 7
+                payment_due_days: (initialData as any).payment_due_days || 7,
+                installation_costs: initialData.installation_costs || []
             });
         } else {
-            setFormData({ name: '', ip: '', port: 8728, username: '', password: '', payment_due_days: 7 });
+            setFormData({ name: '', ip: '', port: 8728, username: '', password: '', payment_due_days: 7, installation_costs: [] });
         }
     }, [initialData, isOpen]);
 
@@ -539,6 +541,59 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
                             <input type="password" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                                 value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} />
                         </div>
+                    </div>
+
+                    {/* Installation Costs Section */}
+                    <div className="border-t border-slate-100 pt-4">
+                        <label className="text-sm font-medium text-slate-700 mb-2 block">Installation Costs (Biaya Pemasangan)</label>
+                        <div className="space-y-2 mb-2">
+                            {formData.installation_costs.map((cost, idx) => (
+                                <div key={idx} className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Name (e.g. Standard)"
+                                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                                        value={cost.name}
+                                        onChange={e => {
+                                            const newCosts = [...formData.installation_costs];
+                                            newCosts[idx].name = e.target.value;
+                                            setFormData({ ...formData, installation_costs: newCosts });
+                                        }}
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Price"
+                                        className="w-32 px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                                        value={cost.price}
+                                        onChange={e => {
+                                            const newCosts = [...formData.installation_costs];
+                                            newCosts[idx].price = Number(e.target.value);
+                                            setFormData({ ...formData, installation_costs: newCosts });
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const newCosts = formData.installation_costs.filter((_, i) => i !== idx);
+                                            setFormData({ ...formData, installation_costs: newCosts });
+                                        }}
+                                        className="p-2 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setFormData({
+                                ...formData,
+                                installation_costs: [...formData.installation_costs, { name: '', price: 0 }]
+                            })}
+                            className="text-sm text-primary hover:text-primary/80 font-medium flex items-center gap-1"
+                        >
+                            <Plus className="w-4 h-4" /> Add Cost Type
+                        </button>
                     </div>
                     <div className="pt-4 flex justify-end gap-3">
                         <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium">Cancel</button>

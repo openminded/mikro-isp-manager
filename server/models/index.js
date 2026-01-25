@@ -13,7 +13,8 @@ export const Server = sequelize.define('Server', {
     password: { type: DataTypes.STRING, allowNull: true },
     default_billing_day: { type: DataTypes.INTEGER, defaultValue: 1, validate: { min: 1, max: 28 } },
     payment_due_days: { type: DataTypes.INTEGER, defaultValue: 7, validate: { min: 1, max: 30 } },
-    isOnline: { type: DataTypes.BOOLEAN, defaultValue: false }
+    isOnline: { type: DataTypes.BOOLEAN, defaultValue: false },
+    installation_costs: { type: DataTypes.JSON, defaultValue: [] } // List of { name, price }
 });
 
 export const Customer = sequelize.define('Customer', {
@@ -72,10 +73,10 @@ Customer.belongsTo(Server, { foreignKey: 'server_id' });
 Customer.hasMany(Invoice, { foreignKey: 'customer_id' });
 Invoice.belongsTo(Customer, { foreignKey: 'customer_id' });
 
-Invoice.hasMany(Payment, { foreignKey: 'invoice_id' });
+Invoice.hasMany(Payment, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
 Payment.belongsTo(Invoice, { foreignKey: 'invoice_id' });
 
-Invoice.hasMany(InvoiceHistory, { foreignKey: 'invoice_id' });
+Invoice.hasMany(InvoiceHistory, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
 InvoiceHistory.belongsTo(Invoice, { foreignKey: 'invoice_id' });
 
 // Function to sync database
@@ -96,6 +97,24 @@ export const initDB = async () => {
             await sequelize.getQueryInterface().addColumn('Customers', 'sub_area_id', {
                 type: DataTypes.STRING,
                 allowNull: true
+            });
+        }
+
+        if (!tableInfo.coordinates) {
+            console.log('[Database] Adding missing column coordinates to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'coordinates', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
+        const serverTableInfo = await sequelize.getQueryInterface().describeTable('Servers');
+        if (!serverTableInfo.installation_costs) {
+            console.log('[Database] Adding missing column installation_costs to Servers...');
+            await sequelize.getQueryInterface().addColumn('Servers', 'installation_costs', {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: []
             });
         }
 

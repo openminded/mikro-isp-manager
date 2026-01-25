@@ -68,3 +68,39 @@ Since you successfully deployed locally, you can expose it securely.
 -   **Server Wont Start**: Check Logs in aaPanel.
 -   **"Address already in use"**: Kill the process using port 3001 or change the port in aaPanel settings.
 -   **Frontend 404**: Ensure the `dist` folder is uploaded and is a sibling of the `server` folder (or verify the path in `server/index.js`).
+71: 
+## 5. Safe Update Procedure (Prevention of Data Loss)
+**CRITICAL**: Your database (`server/data/*.json`, `server/crm.sqlite`) and user uploads (`server/uploads/`) are stored INSIDE the `server` folder.
+**DO NOT** simply overwrite the entire `server` folder when updating, or you will **LOSE All DATA**.
+
+### How to Update Correctly:
+
+#### Method A: Selective Upload (Recommended)
+1.  **Frontend**: It is safe to delete/overwrite the `dist` folder completely. Upload the new `dist` folder.
+2.  **Backend**:
+    -   Upload `server/index.js` (Overwrite)
+    -   Upload `server/models/` (Overwrite folder)
+    -   Upload `server/package.json` (Overwrite)
+    -   **DO NOT** upload/overwrite the `server/data/` folder.
+    -   **DO NOT** upload/overwrite the `server/uploads/` folder.
+    -   **DO NOT** overwrite `server/crm.sqlite` if it exists.
+
+#### Method B: Backup & Swap (Safer)
+1.  Go to File Manager in aaPanel.
+2.  Rename your existing `server` folder to `server_backup_DATE`.
+3.  Upload your NEW `server` folder.
+4.  Copy the `data` folder and `uploads` folder from `server_backup_DATE` into your NEW `server` folder.
+5.  Copy `crm.sqlite` (if using SQL) from `server_backup_DATE` to your NEW `server` folder.
+6.  Restart the Node Project.
+
+## 6. Handling Schema Changes (New Parameters)
+You asked: "If the new server file has new parameters, will it be a problem with old data?"
+
+**Answer**: Generally, **NO**, it won't be a problem, but we have added safety mechanisms:
+
+1.  **JSON Data**: The code is written to handle missing fields gracefully (it assumes they are optional).
+2.  **SQL Database**: We have disabled "auto-alter" to prevent data corruption. Instead, we added **Automatic Migrations** in `server/models/index.js`.
+    -   When the server starts, it checks if your database tables are missing any new columns (like `coordinates`).
+    -   If missing, it **automatically adds them** without deleting your existing data.
+
+**So, simply replacing the `server` folder (while keeping `data` and `uploads`) and restarting the server is safe and will automatically update your database structure.**

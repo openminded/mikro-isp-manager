@@ -92,8 +92,14 @@ export interface Registration {
         companion: string;
         date: string;
         finishDate?: string;
+        coordinates?: string;
+        secretId?: string;
+        secretName?: string;
+        photos?: string[];
+        cost?: { name: string; price: number };
     };
     workingOrderStatus?: 'pending' | 'done';
     workingOrderNote?: string;
     createdAt?: string;
+    mapsUrl?: string; // Link Lokasi Pemasangan
 }

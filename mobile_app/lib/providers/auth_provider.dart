@@ -17,9 +17,13 @@ class AuthProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _user != null;
 
+  late Future<void> _initFuture;
+
   AuthProvider() {
-    _init();
+    _initFuture = _init();
   }
+  
+  Future<void> get initFuture => _initFuture;
 
   Future<void> _init() async {
     _user = await _authService.getCurrentUser();

@@ -329,7 +329,7 @@ export function Customers() {
                     />
                 </div>
 
-                <div className="w-[180px]">
+                <div className="w-full md:w-[180px]">
                     <SearchableSelect
                         value={statusFilter}
                         onChange={setStatusFilter}
@@ -344,7 +344,7 @@ export function Customers() {
                     />
                 </div>
 
-                <div className="w-[200px]">
+                <div className="w-full md:w-[200px]">
                     <SearchableSelect
                         value={serverFilter}
                         onChange={(val) => {
@@ -359,7 +359,7 @@ export function Customers() {
                     />
                 </div>
 
-                <div className="w-[200px]">
+                <div className="w-full md:w-[200px]">
                     <SearchableSelect
                         value={profileFilter}
                         onChange={setProfileFilter}

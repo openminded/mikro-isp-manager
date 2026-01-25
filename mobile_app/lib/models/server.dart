@@ -13,7 +13,10 @@ class Server {
     required this.username,
     this.password,
     this.port,
+    this.installationCosts = const [],
   });
+
+  final List<InstallationCostType> installationCosts;
 
   factory Server.fromJson(Map<String, dynamic> json) {
     return Server(
@@ -23,6 +26,23 @@ class Server {
       username: json['username'] ?? '',
       password: json['password'],
       port: json['port'],
+      installationCosts: (json['installation_costs'] as List<dynamic>?)
+          ?.map((e) => InstallationCostType.fromJson(e))
+          .toList() ?? [],
+    );
+  }
+}
+
+class InstallationCostType {
+  final String name;
+  final num price;
+
+  InstallationCostType({required this.name, required this.price});
+
+  factory InstallationCostType.fromJson(Map<String, dynamic> json) {
+    return InstallationCostType(
+      name: json['name'] ?? '',
+      price: json['price'] ?? 0,
     );
   }
 }

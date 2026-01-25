@@ -50,84 +50,102 @@ class _LoginScreenState extends State<LoginScreen> {
     final auth = Provider.of<AuthProvider>(context);
 
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+      body: Container(
+        decoration: const BoxDecoration(
+            gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF3949AB), Color(0xFF283593), Color(0xFF1A237E)], // Indigo Gradients
+            )
+        ),
+        child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+              padding: const EdgeInsets.all(24.0),
+              child: Card(
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
                   Image.asset('assets/images/logo.png', height: 100),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Welcome Back',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Sign in to access your technician dashboard',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 48),
-                  
-                  TextField(
-                    controller: _usernameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Username',
-                      prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock_outline),
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  
-                  if (_showSettings) ...[
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _urlController,
-                        decoration: const InputDecoration(
-                          labelText: 'Server URL',
-                          prefixIcon: Icon(Icons.link),
-                          border: OutlineInputBorder(),
-                          helperText: 'e.g. https://app.telaju.com/api'
-                        ),
-                      ),
-                  ],
 
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: auth.isLoading ? null : _handleLogin,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    child: auth.isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('Login', style: TextStyle(fontSize: 16)),
+                          const Text(
+                            'Telaju Admin',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.indigo),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Sign in to manage ISP operations',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                          const SizedBox(height: 40),
+                          
+                          TextField(
+                            controller: _usernameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Username',
+                              prefixIcon: Icon(Icons.person),
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16)
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _passwordController,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: Icon(Icons.lock),
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16)
+                            ),
+                          ),
+                          
+                          if (_showSettings) ...[
+                              const SizedBox(height: 16),
+                              TextField(
+                                controller: _urlController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Server URL',
+                                  prefixIcon: Icon(Icons.link),
+                                  border: OutlineInputBorder(),
+                                  helperText: 'e.g. https://app.telaju.com/api'
+                                ),
+                              ),
+                          ],
+        
+                          const SizedBox(height: 32),
+                          ElevatedButton(
+                            onPressed: auth.isLoading ? null : _handleLogin,
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              backgroundColor: Colors.indigo,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: auth.isLoading
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                : const Text('LOGIN', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          ),
+                          
+                          const SizedBox(height: 16),
+                          TextButton(
+                            onPressed: () {
+                                setState(() {
+                                    _showSettings = !_showSettings;
+                                });
+                            },
+                            child: Text(_showSettings ? 'Hide Settings' : 'Settings', style: const TextStyle(color: Colors.grey)),
+                          )
+                        ],
+                      ),
                   ),
-                  
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: () {
-                        setState(() {
-                            _showSettings = !_showSettings;
-                        });
-                    },
-                    child: Text(_showSettings ? 'Hide Server Settings' : 'Server Settings'),
-                  )
-                ],
               ),
             ),
           ),

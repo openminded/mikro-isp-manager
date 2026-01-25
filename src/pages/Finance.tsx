@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil } from "lucide-react";
+import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Mock Data for dev (replace with API calls later)
@@ -22,6 +22,9 @@ export function Finance() {
     // Grouping & Selection
     const [groupByServer, setGroupByServer] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+    // Sorting
+    const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
 
     // Payment Form State
     const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -51,7 +54,7 @@ export function Finance() {
             fetchInvoices(1);
         }, 300);
         return () => clearTimeout(timer);
-    }, [search, period, filterServerId, activeTab, limit]);
+    }, [search, period, filterServerId, activeTab, limit, sortConfig]);
 
     useEffect(() => {
         // Fetch when page changes (skip initial redundant fetch)
@@ -98,6 +101,10 @@ export function Finance() {
             if (search) params.append('search', search);
             if (period) params.append('period', period);
             if (filterServerId) params.append('serverId', filterServerId);
+            if (sortConfig) {
+                params.append('sortBy', sortConfig.key);
+                params.append('order', sortConfig.direction.toUpperCase());
+            }
 
             const res = await fetch(`/api/billing/invoices?${params.toString()}`);
             const result = await res.json();
@@ -115,6 +122,14 @@ export function Finance() {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const requestSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
     };
 
     const handlePayClick = (invoice: any) => {
@@ -155,10 +170,21 @@ export function Finance() {
         }
     };
 
-    const handleGenerate = async () => {
-        if (!confirm('Generate invoices for all active customers for this month?')) return;
+    const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+    const [generateServerId, setGenerateServerId] = useState('');
+
+    const handleGenerateClick = () => {
+        setIsGenerateModalOpen(true);
+    };
+
+    const handleGenerateConfirm = async () => {
+        setIsGenerateModalOpen(false); // Close first
         try {
-            const res = await fetch('/api/billing/generate', { method: 'POST' });
+            const res = await fetch('/api/billing/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serverId: generateServerId || undefined }) // Empty string sends undefined to act as "all"
+            });
             const result = await res.json();
             alert(result.message);
             fetchInvoices();
@@ -272,6 +298,50 @@ export function Finance() {
     }, [invoices, groupByServer]);
 
 
+    const handleBulkDelete = async () => {
+        if (!user || user.role !== 'superadmin') return;
+        if (!confirm(`Are you sure you want to delete ${selectedIds.size} invoices? This cannot be undone.`)) return;
+
+        try {
+            const res = await fetch('/api/billing/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ invoiceIds: Array.from(selectedIds), user })
+            });
+            const result = await res.json();
+            if (result.success) {
+                alert(result.message);
+                setSelectedIds(new Set());
+                fetchInvoices();
+            } else {
+                alert('Bulk delete failed: ' + result.error);
+            }
+        } catch (e) {
+            alert('Failed to execute bulk delete');
+        }
+    };
+
+    const handleDeleteInvoice = async (invoice: any) => {
+        if (!confirm(`Are you sure you want to delete invoice for ${invoice.Customer?.name}? This cannot be undone.`)) return;
+
+        try {
+            const res = await fetch(`/api/billing/invoices/${invoice.id}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user })
+            });
+            const result = await res.json();
+            if (result.success) {
+                alert('Invoice deleted successfully');
+                fetchInvoices();
+            } else {
+                alert('Delete failed: ' + result.error);
+            }
+        } catch (e) {
+            alert('Failed to delete invoice');
+        }
+    };
+
     return (
         <div className="p-8 max-w-7xl mx-auto">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -292,6 +362,8 @@ export function Finance() {
                         <Layers className="w-4 h-4" />
                         {groupByServer ? "Ungroup" : "Group by Server"}
                     </button>
+                </div>
+                <div className="flex gap-2">
                     <button
                         onClick={() => fetchInvoices()} // quick refresh
                         className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
@@ -299,7 +371,7 @@ export function Finance() {
                         Refresh
                     </button>
                     <button
-                        onClick={handleGenerate}
+                        onClick={handleGenerateClick}
                         className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
                     >
                         <CheckCircle className="w-4 h-4" />
@@ -348,29 +420,36 @@ export function Finance() {
             </div>
 
             {/* Bulk Actions Bar */}
-            {selectedIds.size > 0 && (
-                <div className="mb-6 p-4 bg-slate-900 text-white rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 fade-in duration-200">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-white/10 px-3 py-1 rounded-md text-sm font-medium">
-                            {selectedIds.size} Selected
+            {
+                selectedIds.size > 0 && (
+                    <div className="mb-6 p-4 bg-slate-900 text-white rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 fade-in duration-200">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-white/10 px-3 py-1 rounded-md text-sm font-medium">
+                                {selectedIds.size} Selected
+                            </div>
+                            <span className="text-sm text-slate-300 border-l border-white/20 pl-3">
+                                Bulk Actions:
+                            </span>
                         </div>
-                        <span className="text-sm text-slate-300 border-l border-white/20 pl-3">
-                            Bulk Actions:
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => handleBulkAction('PAID')} className="px-3 py-1.5 bg-green-600 hover:bg-green-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                <CheckCircle className="w-4 h-4" /> Paid
+                            </button>
+                            <button onClick={() => handleBulkAction('UNPAID')} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                <X className="w-4 h-4" /> Unpaid
+                            </button>
+                            <button onClick={() => handleBulkAction('INVALID')} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                <Ban className="w-4 h-4" /> Invalid
+                            </button>
+                            {user?.role === 'superadmin' && (
+                                <button onClick={handleBulkDelete} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-red-700">
+                                    <Trash2 className="w-4 h-4" /> Delete Selected
+                                </button>
+                            )}
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => handleBulkAction('PAID')} className="px-3 py-1.5 bg-green-600 hover:bg-green-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4" /> Paid
-                        </button>
-                        <button onClick={() => handleBulkAction('UNPAID')} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                            <X className="w-4 h-4" /> Unpaid
-                        </button>
-                        <button onClick={() => handleBulkAction('INVALID')} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                            <Ban className="w-4 h-4" /> Invalid
-                        </button>
-                    </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Tabs */}
             <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-700 mb-6">
@@ -423,18 +502,61 @@ export function Finance() {
                                         onChange={handleSelectAll}
                                     />
                                 </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white">Customer</th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white">Period</th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white">Due Date</th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white">Amount</th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white">Status</th>
+                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('username')}>
+                                    <div className="flex items-center gap-2">
+                                        Username
+                                        {sortConfig?.key === 'username' && (
+                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                        )}
+                                    </div>
+                                </th>
+                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('customer_name')}>
+                                    <div className="flex items-center gap-2">
+                                        Customer
+                                        {sortConfig?.key === 'customer_name' && (
+                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                        )}
+                                    </div>
+                                </th>
+                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('period')}>
+                                    <div className="flex items-center gap-2">
+                                        Period
+                                        {sortConfig?.key === 'period' && (
+                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                        )}
+                                    </div>
+                                </th>
+                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('due_date')}>
+                                    <div className="flex items-center gap-2">
+                                        Due Date
+                                        {sortConfig?.key === 'due_date' && (
+                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                        )}
+                                    </div>
+                                </th>
+                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('amount')}>
+                                    <div className="flex items-center gap-2">
+                                        Amount
+                                        {sortConfig?.key === 'amount' && (
+                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                        )}
+                                    </div>
+                                </th>
+                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('status')}>
+                                    <div className="flex items-center gap-2">
+                                        Status
+                                        {sortConfig?.key === 'status' && (
+                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                        )}
+                                    </div>
+                                </th>
                                 <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                             {invoices.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
+                                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
                                         No invoices found for this category.
                                     </td>
                                 </tr>
@@ -442,7 +564,7 @@ export function Finance() {
                                 Object.entries(groupedInvoices).map(([serverName, groupInvoices]) => (
                                     <>
                                         <tr key={`group-${serverName}`} className="bg-slate-50/80 dark:bg-slate-900/30">
-                                            <td colSpan={7} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
+                                            <td colSpan={8} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
                                                 <div className="flex items-center gap-2">
                                                     <Layers className="w-3.5 h-3.5" />
                                                     {serverName} <span className="text-slate-400 font-normal">({groupInvoices.length} invoices)</span>
@@ -458,6 +580,7 @@ export function Finance() {
                                                 onPay={() => handlePayClick(inv)}
                                                 onEdit={() => handleEditClick(inv)}
                                                 onViewHistory={() => handleViewHistory(inv)}
+                                                onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
                                             />
                                         ))}
                                     </>
@@ -472,6 +595,7 @@ export function Finance() {
                                         onPay={() => handlePayClick(inv)}
                                         onEdit={() => handleEditClick(inv)}
                                         onViewHistory={() => handleViewHistory(inv)}
+                                        onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
                                     />
                                 ))
                             )}
@@ -601,113 +725,159 @@ export function Finance() {
             }
 
             {/* Edit Invoice Modal */}
-            {isEditModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-                        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
-                            <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Edit Invoice</h3>
-                            <button onClick={() => setIsEditModalOpen(false)} className="text-slate-500 hover:text-slate-700">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Amount (Rp)</label>
-                                <input
-                                    type="number"
-                                    value={editFormData.amount}
-                                    onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
-                                    className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                />
+            {
+                isEditModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+                            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+                                <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Edit Invoice</h3>
+                                <button onClick={() => setIsEditModalOpen(false)} className="text-slate-500 hover:text-slate-700">
+                                    <X className="w-5 h-5" />
+                                </button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Due Date</label>
-                                <input
-                                    type="date"
-                                    value={editFormData.due_date}
-                                    onChange={(e) => setEditFormData({ ...editFormData, due_date: e.target.value })}
-                                    className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Status</label>
-                                <select
-                                    value={editFormData.status}
-                                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
-                                    className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Amount (Rp)</label>
+                                    <input
+                                        type="number"
+                                        value={editFormData.amount}
+                                        onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Due Date</label>
+                                    <input
+                                        type="date"
+                                        value={editFormData.due_date}
+                                        onChange={(e) => setEditFormData({ ...editFormData, due_date: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Status</label>
+                                    <select
+                                        value={editFormData.status}
+                                        onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    >
+                                        <option value="UNPAID">UNPAID</option>
+                                        <option value="PAID">PAID</option>
+                                        <option value="INVALID">INVALID</option>
+                                        <option value="CANCELLED">CANCELLED</option>
+                                    </select>
+                                </div>
+                                <button
+                                    type="submit"
+                                    className="w-full py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary/90 transition-colors"
                                 >
-                                    <option value="UNPAID">UNPAID</option>
-                                    <option value="PAID">PAID</option>
-                                    <option value="INVALID">INVALID</option>
-                                    <option value="CANCELLED">CANCELLED</option>
-                                </select>
-                            </div>
-                            <button
-                                type="submit"
-                                className="w-full py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary/90 transition-colors"
-                            >
-                                Save Changes
-                            </button>
-                        </form>
+                                    Save Changes
+                                </button>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
             {/* History Modal */}
-            {isHistoryModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
-                        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
-                            <h3 className="font-semibold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-                                <History className="w-5 h-5" /> Invoice History
-                            </h3>
-                            <button onClick={() => setIsHistoryModalOpen(false)} className="text-slate-500 hover:text-slate-700">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <div className="p-0 overflow-y-auto flex-1">
-                            {historyLogs.length === 0 ? (
-                                <div className="p-8 text-center text-slate-500">No history available for this invoice.</div>
-                            ) : (
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
-                                        <tr>
-                                            <th className="px-4 py-2 font-medium text-slate-500">Timestamp</th>
-                                            <th className="px-4 py-2 font-medium text-slate-500">User</th>
-                                            <th className="px-4 py-2 font-medium text-slate-500">Action</th>
-                                            <th className="px-4 py-2 font-medium text-slate-500">Details</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {historyLogs.map((log) => (
-                                            <tr key={log.id}>
-                                                <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                                                    {new Date(log.timestamp).toLocaleString('id-ID')}
-                                                </td>
-                                                <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
-                                                    {log.user_name}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                                                        {log.action}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                                                    {log.details}
-                                                </td>
+            {
+                isHistoryModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
+                            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+                                <h3 className="font-semibold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                                    <History className="w-5 h-5" /> Invoice History
+                                </h3>
+                                <button onClick={() => setIsHistoryModalOpen(false)} className="text-slate-500 hover:text-slate-700">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <div className="p-0 overflow-y-auto flex-1">
+                                {historyLogs.length === 0 ? (
+                                    <div className="p-8 text-center text-slate-500">No history available for this invoice.</div>
+                                ) : (
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
+                                            <tr>
+                                                <th className="px-4 py-2 font-medium text-slate-500">Timestamp</th>
+                                                <th className="px-4 py-2 font-medium text-slate-500">User</th>
+                                                <th className="px-4 py-2 font-medium text-slate-500">Action</th>
+                                                <th className="px-4 py-2 font-medium text-slate-500">Details</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            )}
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {historyLogs.map((log) => (
+                                                <tr key={log.id}>
+                                                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                                                        {new Date(log.timestamp).toLocaleString('id-ID')}
+                                                    </td>
+                                                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
+                                                        {log.user_name}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                                            {log.action}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                                                        {log.details}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
+            {/* Generate Invoices Modal */}
+            {
+                isGenerateModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl w-full max-w-sm overflow-hidden">
+                            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+                                <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Generate Invoices</h3>
+                                <button onClick={() => setIsGenerateModalOpen(false)} className="text-slate-500 hover:text-slate-700">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    Select which server you want to generate invoices for. This will generate UNPAID invoices for active customers in the selected server(s) for the current month.
+                                </p>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                        Target Server
+                                    </label>
+                                    <select
+                                        value={generateServerId}
+                                        onChange={(e) => setGenerateServerId(e.target.value)}
+                                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    >
+                                        <option value="">All Servers</option>
+                                        {servers.map(srv => (
+                                            <option key={srv.id} value={srv.id}>{srv.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <button
+                                    onClick={handleGenerateConfirm}
+                                    className="w-full py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <CheckCircle className="w-4 h-4" />
+                                    Start Generation
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
         </div >
     );
 }
 
-function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory }: { invoice: any, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void }) {
+function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory, onDelete }: { invoice: any, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void }) {
     return (
         <tr className={cn("hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors", selected && "bg-blue-50/50 dark:bg-blue-900/10")}>
             <td className="px-4 py-4">
@@ -718,12 +888,14 @@ function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory 
                     onChange={(e) => onSelect(e.target.checked)}
                 />
             </td>
+            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
+                {invoice.Customer?.mikrotik_name || 'N/A'}
+                {invoice.status === 'INVALID' && <span className="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">INVALID</span>}
+            </td>
             <td className="px-6 py-4">
-                <div className="font-medium text-slate-900 dark:text-white">
-                    {invoice.Customer?.name || invoice.Customer?.mikrotik_name || 'Unknown'}
-                    {invoice.status === 'INVALID' && <span className="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">INVALID</span>}
+                <div className="font-medium text-slate-700 dark:text-slate-200">
+                    {invoice.Customer?.name || 'Unknown'}
                 </div>
-                <div className="text-xs text-slate-500">{invoice.Customer?.mikrotik_name}</div>
             </td>
             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
                 {invoice.period}
@@ -749,6 +921,14 @@ function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory 
             <td className="px-6 py-4 text-right">
                 <div className="flex justify-end gap-2">
                     <button
+                        onClick={() => window.open(`/api/billing/invoices/${invoice.id}/pdf`, '_blank')}
+                        title="Download PDF"
+                        className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors"
+                    >
+                        <Download className="w-4 h-4" />
+                    </button>
+
+                    <button
                         onClick={onViewHistory}
                         title="View History"
                         className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
@@ -773,6 +953,17 @@ function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory 
                         </button>
                     )}
                 </div>
+                {onDelete && (
+                    <div className="mt-1 flex justify-end">
+                        <button
+                            onClick={onDelete}
+                            title="Delete Invoice"
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                        >
+                            <span className="text-xs font-medium">Delete</span>
+                        </button>
+                    </div>
+                )}
             </td>
         </tr>
     );

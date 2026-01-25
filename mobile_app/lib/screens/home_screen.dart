@@ -4,6 +4,8 @@ import '../providers/auth_provider.dart';
 import 'login_screen.dart';
 import 'tabs/dashboard_tab.dart';
 import 'tabs/installations_tab.dart';
+import 'tabs/registrations_tab.dart';
+import 'tabs/customers_tab.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
@@ -38,9 +40,52 @@ class _HomeScreenState extends State<HomeScreen> {
     final auth = Provider.of<AuthProvider>(context);
     final user = auth.user;
 
+    List<Widget> displayTabs;
+    List<String> displayTitles;
+    List<BottomNavigationBarItem> displayNavItems;
+
+    if (user?.role == 'admin' || user?.role == 'superadmin') {
+        displayTabs = [
+            const RegistrationsTab(),
+            const InstallationsTab(),
+            const CustomersTab(),
+            const TicketsTab(),
+        ];
+        displayTitles = [
+            'Registrations',
+            'Working Order', 
+            'Customers',
+            'Support Tickets',
+        ];
+        displayNavItems = const [
+            BottomNavigationBarItem(icon: Icon(Icons.app_registration), label: 'Registrations'),
+            BottomNavigationBarItem(icon: Icon(Icons.work), label: 'Working Order'),
+            BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Customers'),
+            BottomNavigationBarItem(icon: Icon(Icons.confirmation_number), label: 'Tickets'),
+        ];
+    } else {
+        displayTabs = _tabs;
+        displayTitles = _titles;
+        displayNavItems = const [
+          BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+          BottomNavigationBarItem(icon: Icon(Icons.build), label: 'Installations'),
+          BottomNavigationBarItem(icon: Icon(Icons.confirmation_number), label: 'Tickets'),
+        ];
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(_titles[_currentIndex]),
+        title: Text(displayTitles[_currentIndex], style: const TextStyle(fontWeight: FontWeight.bold)),
+        elevation: 0,
+        flexibleSpace: Container(
+            decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                    colors: [Color(0xFF3949AB), Color(0xFF283593)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                )
+            ),
+        ),
         actions: [
             IconButton(
                 icon: const Icon(Icons.logout),
@@ -53,43 +98,81 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: IndexedStack(
         index: _currentIndex,
-        children: _tabs,
+        children: displayTabs,
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.build), label: 'Installations'),
-          BottomNavigationBarItem(icon: Icon(Icons.confirmation_number), label: 'Tickets'),
-        ],
+        type: BottomNavigationBarType.fixed, // Ensure all 4 items are visible
+        selectedItemColor: Colors.blue,
+        unselectedItemColor: Colors.grey,
+        items: displayNavItems,
       ),
       drawer: Drawer(
          child: ListView(
             padding: EdgeInsets.zero,
             children: [
-                UserAccountsDrawerHeader(
-                    accountName: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(auth.employee?.name ?? user?.name ?? 'Technician', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        if (auth.jobTitleName != null) 
-                          Text(auth.jobTitleName!, style: const TextStyle(fontSize: 12)),
-                        if (auth.employee?.ttl != null)
-                          Text('Born: ${auth.employee?.ttl}', style: const TextStyle(fontSize: 10, color: Colors.white70)),
-                      ],
-                    ),
-                    accountEmail: Text(user?.username ?? ''),
-                    currentAccountPicture: GestureDetector(
-                      onTap: () => _showPhotoOptions(context, auth),
-                      child: CircleAvatar(
-                        backgroundImage: auth.employee?.photoUrl != null 
-                             ? NetworkImage('${AppConstants.defaultBaseUrl.replaceAll('/api', '')}${auth.employee!.photoUrl!}')
-                             : null,
-                        child: auth.employee?.photoUrl == null ? const Icon(Icons.person) : null,
+                DrawerHeader(
+                  decoration: const BoxDecoration(
+                    color: Colors.blue,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      GestureDetector(
+                        onTap: () => _showPhotoOptions(context, auth),
+                        child: CircleAvatar(
+                          radius: 32,
+                          backgroundColor: Colors.white,
+                          backgroundImage: auth.employee?.photoUrl != null
+                              ? NetworkImage(
+                                  '${AppConstants.defaultBaseUrl.replaceAll('/api', '')}${auth.employee!.photoUrl!}')
+                              : null,
+                          child: auth.employee?.photoUrl == null
+                              ? const Icon(Icons.person, size: 32, color: Colors.blue)
+                              : null,
+                        ),
                       ),
-                    ),
-                    decoration: const BoxDecoration(color: Colors.blue),
+                      const SizedBox(height: 12),
+                      Text(
+                        auth.employee?.name ?? user?.name ?? 'Technician',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: Colors.white,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (auth.jobTitleName != null)
+                        Text(
+                          auth.jobTitleName!,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Colors.white70,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (auth.employee?.ttl != null)
+                        Text(
+                          'Born: ${auth.employee?.ttl}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white60,
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        user?.username ?? '',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.bar_chart),

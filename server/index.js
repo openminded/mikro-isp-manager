@@ -11,6 +11,7 @@ import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory } from './mo
 import { Sequelize } from 'sequelize';
 import archiver from 'archiver';
 import AdmZip from 'adm-zip';
+import PDFDocument from 'pdfkit';
 
 const { Op } = Sequelize;
 
@@ -38,10 +39,21 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Serve Frontend Static Files
-// This assumes "dist" is in /www/wwwroot/telaju/dist
-const DIST_PATH = path.join(__dirname, '../dist');
+// Serve Frontend Static Files
+// Try multiple paths for robustness
+let DIST_PATH = path.join(__dirname, '../dist'); // Standard Dev
+if (!fs.existsSync(DIST_PATH)) {
+    DIST_PATH = path.join(__dirname, 'dist'); // If dist is inside server folder
+}
+if (!fs.existsSync(DIST_PATH)) {
+    DIST_PATH = path.join(__dirname, '../public_html'); // Fallback
+}
+
 if (fs.existsSync(DIST_PATH)) {
+    console.log(`[Frontend] Serving static files from: ${DIST_PATH}`);
     app.use(express.static(DIST_PATH));
+} else {
+    console.warn('[Frontend] Could not locate "dist" folder. Frontend may not load.');
 }
 
 // DB Helper
@@ -458,7 +470,9 @@ app.get('/api/billing/invoices', async (req, res) => {
             period,
             serverId,
             page = 1,
-            limit = 50
+            limit = 50,
+            sortBy,
+            order = 'ASC'
         } = req.query;
 
         const offset = (Number(page) - 1) * Number(limit);
@@ -489,10 +503,23 @@ app.get('/api/billing/invoices', async (req, res) => {
             includeCustomer.required = true;
         }
 
+        // Sorting Logic
+        let orderClause = [['generated_at', 'DESC']];
+        if (sortBy) {
+            const dir = String(order).toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+            if (sortBy === 'customer_name') {
+                orderClause = [[Customer, 'name', dir]];
+            } else if (sortBy === 'username') {
+                orderClause = [[Customer, 'mikrotik_name', dir]];
+            } else if (['period', 'due_date', 'amount', 'status'].includes(sortBy)) {
+                orderClause = [[sortBy, dir]];
+            }
+        }
+
         const { count, rows } = await Invoice.findAndCountAll({
             where: whereInvoice,
             include: [includeCustomer],
-            order: [['generated_at', 'DESC']],
+            order: orderClause,
             limit: Number(limit),
             offset: Number(offset)
         });
@@ -506,6 +533,31 @@ app.get('/api/billing/invoices', async (req, res) => {
                 limit: Number(limit)
             }
         });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Bulk Delete Invoices (Superadmin only)
+app.post('/api/billing/bulk-delete', async (req, res) => {
+    const { invoiceIds, user } = req.body;
+
+    if (!user || user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Access denied. Superadmin only.' });
+    }
+
+    if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+        return res.status(400).json({ error: 'No invoices selected' });
+    }
+
+    try {
+        // Safe Delete: Remove related records first (in case CASCADE is not synced yet or fails)
+        await Payment.destroy({ where: { invoice_id: invoiceIds } });
+        await InvoiceHistory.destroy({ where: { invoice_id: invoiceIds } });
+
+        await Invoice.destroy({ where: { id: invoiceIds } });
+        console.log(`[Billing] Bulk delete of ${invoiceIds.length} invoices by ${user.username}`);
+        res.json({ success: true, message: `Deleted ${invoiceIds.length} invoices` });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -583,8 +635,54 @@ app.post('/api/billing/generate', async (req, res) => {
         const activeCustomers = await Customer.findAll({ where: whereClause });
         const period = new Date().toISOString().slice(0, 7); // "2024-01"
 
+        // [OPTIMIZATION] Pre-load secrets cache for relevant servers
+        const serverSecretsMap = {}; // serverId -> { mikrotikName -> secretObj }
+        const customersMetaDB = getDB(); // Load customers.json (metadata)
+
         let count = 0;
         for (const customer of activeCustomers) {
+            // Rule 1: Skip if profile is "BELUM AKTIF"
+            if (customer.profile === 'BELUM AKTIF') {
+                console.log(`[Invoice] Skipped ${customer.mikrotik_name} (Profile: BELUM AKTIF)`);
+                continue;
+            }
+
+            // Rule 2: Skip if last-logged-out is epoch start (Never logged in)
+            // Load cache if not loaded
+            if (!serverSecretsMap[customer.server_id]) {
+                const cachePath = getCachePath(customer.server_id, 'secrets');
+                try {
+                    if (fs.existsSync(cachePath)) {
+                        const raw = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+                        // Index by name for fast lookup
+                        const secretsParams = {};
+                        if (Array.isArray(raw.data)) {
+                            raw.data.forEach(s => { if (s.name) secretsParams[s.name] = s; });
+                        }
+                        serverSecretsMap[customer.server_id] = secretsParams;
+                    } else {
+                        serverSecretsMap[customer.server_id] = {};
+                    }
+                } catch (e) {
+                    serverSecretsMap[customer.server_id] = {};
+                    console.error(`[Invoice] Failed to load secrets cache for server ${customer.server_id}`, e);
+                }
+            }
+
+            const secret = serverSecretsMap[customer.server_id][customer.mikrotik_name];
+            const meta = customersMetaDB[`${customer.server_id}-${customer.mikrotik_name}`] || {};
+            // Check cache, then customer object, then metadata file
+            const lastLogout = (secret && secret['last-logged-out']) || customer.last_logout || meta['last-logged-out'];
+
+            if (lastLogout) {
+                const lower = String(lastLogout).toLowerCase();
+                // Check for "never logged in" (epoch)
+                if (lower.startsWith('jan/01/1970') || lower.startsWith('1970-01-01')) {
+                    console.log(`[Invoice] Skipped ${customer.mikrotik_name} (Never logged in / 1970-01-01)`);
+                    continue;
+                }
+            }
+
             // Check if a VALID invoice exists (ignore INVALID/CANCELLED)
             const exists = await Invoice.findOne({
                 where: {
@@ -799,6 +897,103 @@ app.put('/api/billing/invoices/:id', async (req, res) => {
     }
 });
 
+// Download Invoice PDF
+app.get('/api/billing/invoices/:id/pdf', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const invoice = await Invoice.findOne({
+            where: { id },
+            include: [Customer]
+        });
+
+        if (!invoice) return res.status(404).send('Invoice not found');
+
+        const doc = new PDFDocument();
+
+        // Set headers
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=invoice-${invoice.id.split('-')[0]}.pdf`);
+
+        doc.pipe(res);
+
+        // Header
+        doc.fontSize(20).text('INVOICE', { align: 'center' });
+        doc.moveDown();
+
+        // Details
+        doc.fontSize(12).text(`Invoice Number: ${invoice.id.split('-')[0].toUpperCase()}`);
+        doc.text(`Date: ${invoice.createdAt.toISOString().split('T')[0]}`);
+        doc.text(`Status: ${invoice.status}`);
+        doc.moveDown();
+
+        // Customer
+        doc.text(`Customer: ${invoice.Customer?.name || 'Unknown'}`);
+        doc.text(`Username: ${invoice.Customer?.mikrotik_name || 'N/A'}`);
+        doc.moveDown();
+
+        // Items (Simple Table)
+        doc.text('-------------------------------------------------------');
+        doc.text(`Description                                   Amount`);
+        doc.text('-------------------------------------------------------');
+        doc.text(`Internet Service (${invoice.period})           Rp ${Number(invoice.amount).toLocaleString('id-ID')}`);
+        doc.moveDown();
+        doc.text('-------------------------------------------------------');
+        doc.fontSize(14).text(`Total: Rp ${Number(invoice.amount).toLocaleString('id-ID')}`, { align: 'right' });
+
+        // Footer
+        doc.moveDown(4);
+        doc.fontSize(10).text('Thank you for your business!', { align: 'center' });
+
+        // Stamp
+        const stampPath = path.join(__dirname, 'assets', 'stamp.jpg');
+        if (fs.existsSync(stampPath)) {
+            // Center bottom, semi-transparent if possible (pdfkit supports opacity), 
+            // but usually stamp is solid.
+            // Let's put it over the footer or slightly to the right.
+            // Page height ~792 for Letter/A4
+            // doc.image(path, x, y, options)
+            try {
+                // Determine y position dynamically or fixed near bottom
+                const y = doc.y + 20;
+                const x = doc.page.width - 200; // Right side
+                doc.image(stampPath, x, y, { width: 150 });
+            } catch (err) {
+                console.error('Error adding stamp image:', err);
+            }
+        }
+
+        doc.end();
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).send('Error generating PDF');
+    }
+});
+
+// Delete Invoice (Superadmin only)
+app.delete('/api/billing/invoices/:id', async (req, res) => {
+    const { id } = req.params;
+    const { user } = req.body; // Expect user object (containing role)
+
+    if (!user || user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Access denied. Superadmin only.' });
+    }
+
+    try {
+        const invoice = await Invoice.findByPk(id);
+        if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+        await invoice.destroy();
+
+        // Log activity (reuse logic if available or just skip/log to console for now as we don't have request based user in context easily for logActivity helper without middleware)
+        console.log(`[Billing] Invoice ${id} deleted by ${user.username}`);
+
+        res.json({ success: true, message: 'Invoice deleted successfully' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.put('/api/servers/:id', async (req, res) => {
     const { id } = req.params;
     const updatedData = req.body;
@@ -880,7 +1075,7 @@ app.post('/api/registrations', (req, res) => {
 });
 
 // Update Registration (General & Status)
-app.put('/api/registrations/:id', (req, res) => {
+app.put('/api/registrations/:id', async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
     const db = getRegistrationsDB();
@@ -891,7 +1086,20 @@ app.put('/api/registrations/:id', (req, res) => {
     }
 
     // Merge updates
-    db[index] = { ...db[index], ...updates };
+    const currentInstallation = db[index].installation || {};
+    const newInstallation = updates.installation || {};
+
+    // Deep merge for installation if provided
+    let mergedInstallation = undefined;
+    if (updates.installation) {
+        mergedInstallation = { ...currentInstallation, ...newInstallation };
+    }
+
+    db[index] = {
+        ...db[index],
+        ...updates,
+        installation: mergedInstallation || db[index].installation
+    };
 
     // Logic: If status becomes 'installation_process' and no workingOrderStatus yet, set it to 'pending'
     if (db[index].status === 'installation_process' && !db[index].workingOrderStatus) {
@@ -899,6 +1107,52 @@ app.put('/api/registrations/:id', (req, res) => {
     }
 
     saveRegistrationsDB(db);
+
+    // [NEW] Sync to SQL if status is 'done' and we have secret details
+    try {
+        if (db[index].status === 'done' && db[index].installation) {
+            const secretName = db[index].installation.secretName;
+            const coordinates = db[index].installation.coordinates;
+
+            if (secretName) {
+                // Find Server ID by Name (locationId)
+                const server = await Server.findOne({ where: { name: db[index].locationId } });
+
+                if (server) {
+                    // Upsert Customer
+                    const [customer, created] = await Customer.findOrCreate({
+                        where: { mikrotik_name: secretName, server_id: server.id },
+                        defaults: {
+                            name: db[index].fullName,
+                            phone_number: db[index].phoneNumber,
+                            address: db[index].address,
+                            status: 'active',
+                            sub_area_id: db[index].sub_area_id || null,
+                            odp_id: db[index].odpId || null,
+                            coordinates: coordinates || null
+                        }
+                    });
+
+                    if (!created) {
+                        // Update if exists
+                        await customer.update({
+                            name: db[index].fullName,
+                            phone_number: db[index].phoneNumber,
+                            address: db[index].address,
+                            status: 'active',
+                            sub_area_id: db[index].sub_area_id || customer.sub_area_id,
+                            coordinates: coordinates || customer.coordinates
+                        });
+                    }
+                    console.log(`[Sync] Customer ${secretName} synced to CRM/SQL successfully.`);
+                } else {
+                    console.warn(`[Sync] Server not found for location: ${db[index].locationId}`);
+                }
+            }
+        }
+    } catch (error) {
+        console.error("[Sync] Failed to sync customer to SQL in PUT:", error);
+    }
 
     logActivity(req, 'UPDATE_REGISTRATION', `Updated registration for ${db[index].fullName} (Status: ${db[index].status})`);
 
@@ -919,7 +1173,7 @@ app.delete('/api/registrations/:id', (req, res) => {
 // Complete Registration (Installation) with Photos
 app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, res) => {
     const { id } = req.params;
-    const { secretId, note, sub_area_id, secretName } = req.body;
+    const { secretId, note, sub_area_id, secretName, coordinates } = req.body;
     const files = req.files;
 
     const db = getRegistrationsDB();
@@ -935,6 +1189,19 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
 
     const photoPaths = files.map(f => `/uploads/${f.filename}`);
 
+    // Handle existing photos (parse JSON if sent as string, or array)
+    let finalPhotos = [...photoPaths];
+    if (req.body.existingPhotos) {
+        try {
+            const existing = JSON.parse(req.body.existingPhotos);
+            if (Array.isArray(existing)) {
+                finalPhotos = [...finalPhotos, ...existing];
+            }
+        } catch (e) {
+            console.error('Error parsing existingPhotos:', e);
+        }
+    }
+
     // Update Registration
     db[index] = {
         ...db[index],
@@ -945,8 +1212,9 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
         installation: {
             ...db[index].installation,
             finishDate: new Date().toISOString(),
-            photos: photoPaths,
-            secretId: secretId
+            photos: finalPhotos, // Use the combined list
+            secretId: secretId,
+            coordinates: coordinates || db[index].installation?.coordinates
         }
     };
 
@@ -1752,6 +2020,63 @@ app.post('/api/users/manage', (req, res) => {
     logActivity(req, actionType, `${actionType === 'CREATE_USER' ? 'Created' : 'Updated'} user ${username} (${role})`);
 
     res.json({ success: true });
+});
+
+// Backup Data
+app.get('/api/backup', async (req, res) => {
+    try {
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        res.attachment(`backup-${new Date().toISOString().split('T')[0]}.zip`);
+
+        archive.pipe(res);
+
+        // Append data directory
+        archive.directory(path.join(__dirname, 'data'), 'data');
+
+        // Append uploads directory
+        if (fs.existsSync(path.join(__dirname, 'uploads'))) {
+            archive.directory(path.join(__dirname, 'uploads'), 'uploads');
+        }
+
+        await archive.finalize();
+    } catch (error) {
+        console.error('Backup failed:', error);
+        res.status(500).send('Backup failed');
+    }
+});
+
+// Restore Data
+app.post('/api/restore', upload.single('backup'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    console.log(`[Restore] Received file: ${req.file.originalname} (${req.file.size} bytes)`);
+    console.log(`[Restore] Stored at: ${req.file.path}`);
+    console.log(`[Restore] Mimetype: ${req.file.mimetype}`);
+
+    if (req.file.size === 0) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'Uploaded file is empty.' });
+    }
+
+    try {
+        const zip = new AdmZip(req.file.path);
+
+        // Extract to server directory (overwriting data/ and uploads/)
+        zip.extractAllTo(__dirname, true);
+
+        // Clean up uploaded zip
+        fs.unlinkSync(req.file.path);
+
+        logActivity(req, 'RESTORE_DATA', 'System data restored from backup');
+
+        res.json({ success: true, message: 'Data restored successfully' });
+    } catch (error) {
+        console.error('Restore failed:', error);
+        res.status(500).json({ error: 'Restore failed: ' + error.message });
+        // Clean up
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
 });
 
 // Reset Data Endpoint (Selective)

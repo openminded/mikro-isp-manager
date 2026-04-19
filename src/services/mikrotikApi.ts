@@ -194,12 +194,14 @@ export const MikrotikApi = {
 
     async removeActivePppSession(server: MikrotikServer, username: string): Promise<void> {
         try {
-            // Find active session ID
-            const activeSessions = await runCommand(server, ['/ppp/active/print', `?name=${username}`]);
-            if (Array.isArray(activeSessions) && activeSessions.length > 0) {
-                const id = activeSessions[0]['.id'];
-                // Remove session
-                await runCommand(server, ['/ppp/active/remove', `=.id=${id}`]);
+            // WORKAROUND: Do not use '?name=' filter. node-routeros throws UNKNOWNREPLY (!empty) 
+            // when the filter yields no results on certain RouterOS versions, crashing the server.
+            const allSessions = await runCommand(server, ['/ppp/active/print']);
+            if (Array.isArray(allSessions)) {
+                const targetSession = allSessions.find((s: any) => s.name === username);
+                if (targetSession && targetSession['.id']) {
+                    await runCommand(server, ['/ppp/active/remove', `=.id=${targetSession['.id']}`]);
+                }
             }
         } catch (error) {
             console.error(`Failed to remove active session for ${username}:`, error);

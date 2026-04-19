@@ -454,7 +454,9 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
     const [formData, setFormData] = useState({
         name: '', ip: '', port: 8728, username: '', password: '',
         payment_due_days: 20, // Default 20th
-        installation_costs: [] as { name: string; price: number }[] // Setup installation costs
+        installation_costs: [] as { name: string; price: number }[], // Setup installation costs
+        lat: '' as number | '',
+        lng: '' as number | ''
     });
 
     // Load initial data for editing
@@ -467,10 +469,12 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
                 username: initialData.username,
                 password: initialData.password || '', // Note: Password might not be secure to populate like this in real apps, but for local storage app it is fine
                 payment_due_days: (initialData as any).payment_due_days || 7,
-                installation_costs: initialData.installation_costs || []
+                installation_costs: initialData.installation_costs || [],
+                lat: initialData.lat ?? '',
+                lng: initialData.lng ?? ''
             });
         } else {
-            setFormData({ name: '', ip: '', port: 8728, username: '', password: '', payment_due_days: 7, installation_costs: [] });
+            setFormData({ name: '', ip: '', port: 8728, username: '', password: '', payment_due_days: 7, installation_costs: [], lat: '', lng: '' });
         }
     }, [initialData, isOpen]);
 
@@ -540,6 +544,19 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
                             <label className="text-sm font-medium text-slate-700">Password</label>
                             <input type="password" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                                 value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">Latitude</label>
+                            <input type="number" step="any" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData.lat} onChange={e => setFormData({ ...formData, lat: parseFloat(e.target.value) })} placeholder="-0.363..." />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">Longitude</label>
+                            <input type="number" step="any" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData.lng} onChange={e => setFormData({ ...formData, lng: parseFloat(e.target.value) })} placeholder="101.55..." />
                         </div>
                     </div>
 

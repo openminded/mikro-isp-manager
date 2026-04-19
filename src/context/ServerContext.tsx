@@ -9,6 +9,8 @@ export interface MikrotikServer {
     password?: string; // stored locally, obviously not secure for production but fine for this demo
     isOnline: boolean;
     installation_costs?: { name: string; price: number }[];
+    lat?: number;
+    lng?: number;
 }
 
 interface ServerContextType {

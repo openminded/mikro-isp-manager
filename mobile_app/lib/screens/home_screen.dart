@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/work_provider.dart';
 import 'login_screen.dart';
 import 'tabs/dashboard_tab.dart';
 import 'tabs/installations_tab.dart';
@@ -12,6 +13,8 @@ import '../services/api_service.dart';
 import '../constants.dart';
 import 'tabs/tickets_tab.dart';
 import 'performance_screen.dart';
+import 'dart:async';
+import '../services/notification_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -22,6 +25,27 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  Timer? _pollingTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService().init();
+    
+    // Start Polling every 1 minute
+    _pollingTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+        final auth = Provider.of<AuthProvider>(context, listen: false);
+        if (auth.user != null) {
+            Provider.of<WorkProvider>(context, listen: false).refreshData(auth.user);
+        }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
 
   final List<Widget> _tabs = [
     const DashboardTab(),
@@ -221,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
        
        try {
            final picker = ImagePicker();
-           final XFile? image = await picker.pickImage(source: source);
+            final XFile? image = await picker.pickImage(source: source, imageQuality: 10);
            if (image == null) return;
 
            // Upload

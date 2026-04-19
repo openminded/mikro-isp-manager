@@ -12,6 +12,8 @@ import 'dart:io';
 import '../../models/registration.dart';
 import '../../constants.dart';
 
+import 'package:mobile_app/widgets/searchable_list_dialog.dart';
+
 class InstallationDetailScreen extends StatefulWidget {
   final WorkItem item;
 
@@ -322,8 +324,17 @@ class _InstallationDetailScreenState extends State<InstallationDetailScreen> {
                  )
              ] else if (widget.item.status == 'done') ...[
                  const SizedBox(height: 24),
+                 const SizedBox(height: 24),
                  const Divider(),
                  const Text('Installation Result', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                 if (widget.item.originalObject is Registration && (widget.item.originalObject as Registration).installation?.finishDate != null)
+                     Padding(
+                         padding: const EdgeInsets.only(top: 4, bottom: 8),
+                         child: Text(
+                             'Completed: ${DateFormat('dd MMM yyyy HH:mm').format(DateTime.parse((widget.item.originalObject as Registration).installation!.finishDate!).toLocal())}', 
+                             style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)
+                         ),
+                     ),
                  const SizedBox(height: 12),
                  if (widget.item.originalObject is Registration) _buildResultSection(widget.item.originalObject as Registration),
                  const SizedBox(height: 12),
@@ -629,16 +640,46 @@ class _InstallationCompletionDialogState extends State<InstallationCompletionDia
                         if (_secrets.isEmpty)
                             const Text('No secrets found on router.', style: TextStyle(color: Colors.red)),
                         if (_secrets.isNotEmpty)
-                            DropdownButton<String>(
-                                isExpanded: true,
-                                value: _selectedSecretId,
-                                hint: const Text('Select Account'),
-                                items: _secrets.map((s) => DropdownMenuItem<String>(
-                                    value: s['.id'],
-                                    child: Text(s['name'] ?? 'Unknown'),
-                                )).toList(),
-                                onChanged: (val) => setState(() => _selectedSecretId = val),
-                            ),
+                        if (_secrets.isNotEmpty)
+                             InkWell(
+                                 onTap: () async {
+                                     final selectedId = await showDialog<String>(
+                                         context: context,
+                                         builder: (ctx) => SearchableListDialog(
+                                             title: 'Select Account',
+                                             items: _secrets.map<Map<String, String?>>((s) => {
+                                                 'id': s['.id'].toString(),
+                                                 'label': (s['name'] ?? 'Unknown').toString(),
+                                                 'sub': s['comment']?.toString()
+                                             }).toList(),
+                                         )
+                                     );
+                                     if (selectedId != null) {
+                                         setState(() => _selectedSecretId = selectedId);
+                                     }
+                                 },
+                                 child: Container(
+                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                                     decoration: BoxDecoration(
+                                         border: Border.all(color: Colors.grey),
+                                         borderRadius: BorderRadius.circular(4)
+                                     ),
+                                     child: Row(
+                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                         children: [
+                                             Expanded(
+                                                 child: Text(
+                                                     _selectedSecretId == null 
+                                                         ? 'Select Account' 
+                                                         : (_secrets.firstWhere((s) => s['.id'] == _selectedSecretId, orElse: () => {'name': 'Unknown'})['name']),
+                                                     style: TextStyle(color: _selectedSecretId == null ? Colors.grey.shade600 : Colors.black)
+                                                 )
+                                             ),
+                                             const Icon(Icons.arrow_drop_down)
+                                         ],
+                                     ),
+                                 ),
+                             ),
                         const SizedBox(height: 12),
                         DropdownButton<String>(
                             isExpanded: true,
@@ -732,7 +773,7 @@ class _InstallationCompletionDialogState extends State<InstallationCompletionDia
                               InkWell(
                                   onTap: () async {
                                       final ImagePicker picker = ImagePicker();
-                                      final List<XFile> images = await picker.pickMultiImage();
+                                      final List<XFile> images = await picker.pickMultiImage(imageQuality: 10);
                                       if (images.isNotEmpty) {
                                           setState(() => _selectedPhotos.addAll(images));
                                       }

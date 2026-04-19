@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
@@ -38,6 +39,9 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<bool> _checkPermissions() async {
+      // Skip permission check on web - permission_handler doesn't work on web
+      if (kIsWeb) return true;
+
       var status = await Permission.location.status;
       
       if (status.isGranted) return true;
@@ -70,7 +74,6 @@ class _SplashScreenState extends State<SplashScreen> {
                               // For simplicity, let's just retry check after a delay or loop? 
                               // Simple recursion for now (but be careful of stack)
                               // actually better to just let user restart or provide a "Retry" button on screen? 
-                              // Let's return false and maybe let the UI handle a "Retry" state?
                               // But for Splash, let's just loop.
                               // _checkPermissions(); // Async recursion issue
                           }, 

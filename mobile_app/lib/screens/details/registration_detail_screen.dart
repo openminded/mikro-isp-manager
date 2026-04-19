@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/registration.dart';
 import '../../providers/work_provider.dart';
 import 'package:intl/intl.dart';
+import '../forms/registration_form_screen.dart';
 
 class RegistrationDetailScreen extends StatefulWidget {
   final Registration registration;
@@ -212,7 +213,23 @@ class _RegistrationDetailScreenState extends State<RegistrationDetailScreen> {
     final reg = widget.registration;
     
     return Scaffold(
-      appBar: AppBar(title: const Text('Registration Details')),
+      appBar: AppBar(
+        title: const Text('Registration Details'),
+        actions: [
+          if (reg.status != 'done')
+            IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => RegistrationFormScreen(registration: reg),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(

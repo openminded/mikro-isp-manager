@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/work_provider.dart';
+import '../../models/registration.dart';
 
 class RegistrationFormScreen extends StatefulWidget {
-  const RegistrationFormScreen({super.key});
+  final Registration? registration; // Optional for edit mode
+
+  const RegistrationFormScreen({super.key, this.registration});
 
   @override
   State<RegistrationFormScreen> createState() => _RegistrationFormScreenState();
@@ -20,11 +23,28 @@ class _RegistrationFormScreenState extends State<RegistrationFormScreen> {
   final _mapsController = TextEditingController();
   
   String? _selectedServerId;
+  String? _selectedSubAreaId;
   bool _isProcessing = false;
+
+  bool get isEdit => widget.registration != null;
 
   @override
   void initState() {
     super.initState();
+    
+    if (isEdit) {
+      final reg = widget.registration!;
+      _phoneController.text = reg.phoneNumber;
+      _nameController.text = reg.fullName;
+      _addressController.text = reg.address;
+      _mapsController.text = reg.mapsUrl ?? '';
+      _selectedServerId = reg.locationId;
+      _selectedSubAreaId = reg.subAreaId;
+      // KTP might not be in the model? Let's check. 
+      // Based on previous view_file of Registration model, KTP is not there.
+      // But it is in the createRegistration data. 
+    }
+
     // Ensure servers are loaded
     Future.microtask(() => 
        Provider.of<WorkProvider>(context, listen: false).refreshData(null)
@@ -43,8 +63,9 @@ class _RegistrationFormScreenState extends State<RegistrationFormScreen> {
       try {
           // Normalize Phone
           String phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
+          // Simple validation/normalization for Indonesia
           if (phone.startsWith('0')) phone = '62${phone.substring(1)}';
-          if (!phone.startsWith('62')) phone = '62$phone';
+          if (phone.isNotEmpty && !phone.startsWith('62')) phone = '62$phone';
 
           final data = {
               'phoneNumber': phone,
@@ -52,13 +73,20 @@ class _RegistrationFormScreenState extends State<RegistrationFormScreen> {
               'ktpNumber': _ktpController.text,
               'address': _addressController.text,
               'mapsUrl': _mapsController.text,
-              'locationId': _selectedServerId, // This should be server name usually for registration as per current schema, checking Dropdown values below
+              'locationId': _selectedServerId,
+              'sub_area_id': _selectedSubAreaId,
           };
 
-          await Provider.of<WorkProvider>(context, listen: false).createRegistration(data);
+          final provider = Provider.of<WorkProvider>(context, listen: false);
+          if (isEdit) {
+            await provider.updateRegistration(widget.registration!.id, data);
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registration Updated')));
+          } else {
+            await provider.createRegistration(data);
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registration Created')));
+          }
           
           if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registration Created')));
               Navigator.pop(context);
           }
       } catch (e) {
@@ -70,10 +98,12 @@ class _RegistrationFormScreenState extends State<RegistrationFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final servers = Provider.of<WorkProvider>(context).servers;
+    final workProvider = Provider.of<WorkProvider>(context);
+    final servers = workProvider.servers;
+    final subAreas = workProvider.subAreas;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('New Registration')),
+      appBar: AppBar(title: Text(isEdit ? 'Edit Registration' : 'New Registration')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(
@@ -117,13 +147,41 @@ class _RegistrationFormScreenState extends State<RegistrationFormScreen> {
                                 hint: const Text('Select Location'),
                                 value: _selectedServerId,
                                 items: servers.map((s) => DropdownMenuItem(
-                                    value: s.name, // Using Name as value because Registration model uses locationId as string name usually
+                                    value: s.name, 
                                     child: Text(s.name)
                                 )).toList(),
                                 onChanged: (val) => setState(() => _selectedServerId = val),
                             ),
                         ),
                     ),
+                    
+                    if (_selectedServerId != null) ...[
+                        const SizedBox(height: 16),
+                        const Text('Sub Area', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey.shade300),
+                                borderRadius: BorderRadius.circular(8)
+                            ),
+                            child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                    isExpanded: true,
+                                    hint: const Text('Select Sub Area'),
+                                    value: _selectedSubAreaId,
+                                    items: subAreas.where((sa) {
+                                        final server = servers.firstWhere((s) => s.name == _selectedServerId, orElse: () => servers.first); 
+                                        return sa.serverId == server.id;
+                                    }).map((sa) => DropdownMenuItem(
+                                        value: sa.id,
+                                        child: Text(sa.name)
+                                    )).toList(),
+                                    onChanged: (val) => setState(() => _selectedSubAreaId = val),
+                                ),
+                            ),
+                        ),
+                    ],
                     
                     const SizedBox(height: 16),
                     _buildTextField(
@@ -150,7 +208,7 @@ class _RegistrationFormScreenState extends State<RegistrationFormScreen> {
                             ),
                             child: _isProcessing 
                                 ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                : const Text('Create Registration', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                : Text(isEdit ? 'Update Registration' : 'Create Registration', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         ),
                     )
                 ],

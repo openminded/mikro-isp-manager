@@ -10,6 +10,7 @@ class Registration {
   final Installation? installation;
   final String createdAt;
   final String? mapsUrl;
+  final String? subAreaId;
 
   Registration({
     required this.id,
@@ -23,6 +24,7 @@ class Registration {
     this.installation,
     required this.createdAt,
     this.mapsUrl,
+    this.subAreaId,
   });
 
   factory Registration.fromJson(Map<String, dynamic> json) {
@@ -40,6 +42,7 @@ class Registration {
           : null,
       createdAt: json['createdAt'] ?? '',
       mapsUrl: json['mapsUrl'],
+      subAreaId: json['sub_area_id'],
     );
   }
 }

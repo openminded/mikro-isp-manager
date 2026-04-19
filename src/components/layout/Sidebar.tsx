@@ -35,21 +35,6 @@ const navigation = [
         ]
     },
     {
-        section: "Communication",
-        items: [
-            {
-                name: "WhatsApp",
-                icon: MessageSquare,
-                children: [
-                    { name: "Manager", href: "/whatsapp/manager", icon: Smartphone },
-                    { name: "Broadcast", href: "/whatsapp/broadcast", icon: Radio },
-                    { name: "Templates", href: "/whatsapp/templates", icon: FileText },
-                    { name: "Send Message", href: "/whatsapp/send", icon: Send },
-                ]
-            },
-        ]
-    },
-    {
         section: "Finance",
         items: [
             { name: "Billing & Invoices", href: "/finance", icon: CreditCard },

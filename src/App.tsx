@@ -23,10 +23,6 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { Settings } from "./pages/Settings";
 import { ActivityLogs } from "./pages/ActivityLogs";
 import { Monitoring } from "./pages/Monitoring";
-import { WhatsappManager } from "./pages/WhatsappManager";
-import { WhatsappSender } from "./pages/WhatsappSender";
-import { WhatsappTemplates } from "./pages/WhatsappTemplates";
-import { WhatsappBroadcast } from "./pages/WhatsappBroadcast";
 import { Finance } from "./pages/Finance";
 
 function App() {
@@ -54,10 +50,6 @@ function App() {
                     <Route path="/master/ip-pools" element={<IpPools />} />
                     <Route path="/master/damage-types" element={<DamageTypes />} />
                     <Route path="/tickets" element={<SupportTickets />} />
-                    <Route path="/whatsapp/manager" element={<WhatsappManager />} />
-                    <Route path="/whatsapp/send" element={<WhatsappSender />} />
-                    <Route path="/whatsapp/templates" element={<WhatsappTemplates />} />
-                    <Route path="/whatsapp/broadcast" element={<WhatsappBroadcast />} />
                     <Route path="/master/job-titles" element={<JobTitles />} />
                     <Route path="/master/payment-methods" element={<PaymentMethods />} />
                     <Route path="/master/sub-areas" element={<SubAreas />} />

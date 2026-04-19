@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2 } from "lucide-react";
+import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Mock Data for dev (replace with API calls later)
@@ -172,6 +172,19 @@ export function Finance() {
 
     const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
     const [generateServerId, setGenerateServerId] = useState('');
+    const [generateMonth, setGenerateMonth] = useState(new Date().getMonth() + 1);
+    const [generateYear, setGenerateYear] = useState(new Date().getFullYear());
+
+    const monthNames = [
+        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    ];
+
+    const formatPeriod = (periodStr: string) => {
+        if (!periodStr) return 'N/A';
+        const [year, month] = periodStr.split('-');
+        return `${monthNames[parseInt(month) - 1]} ${year}`;
+    };
 
     const handleGenerateClick = () => {
         setIsGenerateModalOpen(true);
@@ -183,7 +196,11 @@ export function Finance() {
             const res = await fetch('/api/billing/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ serverId: generateServerId || undefined }) // Empty string sends undefined to act as "all"
+                body: JSON.stringify({ 
+                    serverId: generateServerId || undefined,
+                    month: generateMonth,
+                    year: generateYear
+                }) 
             });
             const result = await res.json();
             alert(result.message);
@@ -575,6 +592,7 @@ export function Finance() {
                                             <InvoiceRow
                                                 key={inv.id}
                                                 invoice={inv}
+                                                formattedPeriod={formatPeriod(inv.period)}
                                                 selected={selectedIds.has(inv.id)}
                                                 onSelect={(c) => handleSelectOne(inv.id, c)}
                                                 onPay={() => handlePayClick(inv)}
@@ -590,6 +608,7 @@ export function Finance() {
                                     <InvoiceRow
                                         key={inv.id}
                                         invoice={inv}
+                                        formattedPeriod={formatPeriod(inv.period)}
                                         selected={selectedIds.has(inv.id)}
                                         onSelect={(c) => handleSelectOne(inv.id, c)}
                                         onPay={() => handlePayClick(inv)}
@@ -842,9 +861,9 @@ export function Finance() {
                                     <X className="w-5 h-5" />
                                 </button>
                             </div>
-                            <div className="p-6 space-y-4">
+                             <div className="p-6 space-y-4">
                                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                                    Select which server you want to generate invoices for. This will generate UNPAID invoices for active customers in the selected server(s) for the current month.
+                                    Select which server and period you want to generate invoices for. This will generate UNPAID invoices for active customers.
                                 </p>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -860,6 +879,37 @@ export function Finance() {
                                             <option key={srv.id} value={srv.id}>{srv.name}</option>
                                         ))}
                                     </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                            Bulan
+                                        </label>
+                                        <select
+                                            value={generateMonth}
+                                            onChange={(e) => setGenerateMonth(Number(e.target.value))}
+                                            className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                        >
+                                            {monthNames.map((name, i) => (
+                                                <option key={i} value={i + 1}>{name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                            Tahun
+                                        </label>
+                                        <select
+                                            value={generateYear}
+                                            onChange={(e) => setGenerateYear(Number(e.target.value))}
+                                            className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                        >
+                                            {[...Array(3)].map((_, i) => {
+                                                const y = new Date().getFullYear() - 1 + i;
+                                                return <option key={y} value={y}>{y}</option>;
+                                            })}
+                                        </select>
+                                    </div>
                                 </div>
                                 <button
                                     onClick={handleGenerateConfirm}
@@ -877,7 +927,7 @@ export function Finance() {
     );
 }
 
-function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory, onDelete }: { invoice: any, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void }) {
+ function InvoiceRow({ invoice, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete }: { invoice: any, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void }) {
     return (
         <tr className={cn("hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors", selected && "bg-blue-50/50 dark:bg-blue-900/10")}>
             <td className="px-4 py-4">
@@ -898,7 +948,7 @@ function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory,
                 </div>
             </td>
             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
-                {invoice.period}
+                {formattedPeriod}
             </td>
             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
                 {invoice.due_date}
@@ -926,6 +976,14 @@ function InvoiceRow({ invoice, selected, onSelect, onPay, onEdit, onViewHistory,
                         className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors"
                     >
                         <Download className="w-4 h-4" />
+                    </button>
+
+                    <button
+                        onClick={() => window.open(`/api/billing/invoices/${invoice.id}/thermal`, '_blank', 'width=400,height=600')}
+                        title="Print Thermal"
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                    >
+                        <Printer className="w-4 h-4" />
                     </button>
 
                     <button

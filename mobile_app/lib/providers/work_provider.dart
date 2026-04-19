@@ -7,6 +7,9 @@ import '../services/api_service.dart';
 import '../models/user.dart';
 import '../models/employee.dart';
 import '../models/job_title.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/notification_service.dart';
+import '../models/sub_area.dart';
 
 class WorkProvider with ChangeNotifier {
   final ApiService _api = ApiService();
@@ -18,10 +21,12 @@ class WorkProvider with ChangeNotifier {
 
   List<Employee> _employees = [];
   List<JobTitle> _jobTitles = [];
+  List<SubArea> _subAreas = [];
 
   List<WorkItem> get workItems => _workItems;
   List<Server> get servers => _servers;
   List<Registration> get registrations => _registrations;
+  List<SubArea> get subAreas => _subAreas;
   bool get isLoading => _isLoading;
   List<Employee> get technicians {
      final techTitles = _jobTitles.where((t) {
@@ -42,6 +47,7 @@ class WorkProvider with ChangeNotifier {
         _api.get('/tickets'),
         _api.get('/employees'),
         _api.get('/job-titles'),
+        _api.get('/sub-areas'),
       ]);
 
       final serverList = (results[0] as List).map((x) => Server.fromJson(x)).toList();
@@ -49,12 +55,19 @@ class WorkProvider with ChangeNotifier {
       final ticketList = (results[2] as List).map((x) => Ticket.fromJson(x)).toList();
       final empList = (results[3] as List).map((x) => Employee.fromJson(x)).toList();
       final titleList = (results[4] as List).map((x) => JobTitle.fromJson(x)).toList();
+      final subAreaList = (results[5] as List).map((x) => SubArea.fromJson(x)).toList();
 
       _servers = serverList;
       _registrations = regList;
       _employees = empList;
       _jobTitles = titleList;
+      _subAreas = subAreaList;
       _workItems = _processWorkItems(regList, ticketList, user);
+      
+      // Check for notifications
+      if (user != null) {
+         await _checkForNewItems(user);
+      }
     } catch (e) {
       print('Error fetching data: $e');
     } finally {
@@ -311,7 +324,54 @@ class WorkProvider with ChangeNotifier {
     await _api.post('/registrations', data);
   }
 
+  Future<void> updateRegistration(String id, Map<String, dynamic> data) async {
+    await _api.put('/registrations/$id', data);
+  }
+
   Future<void> createTicket(Map<String, dynamic> data) async {
     await _api.post('/tickets', data);
+  }
+
+
+  Future<void> _checkForNewItems(User user) async {
+      final prefs = await SharedPreferences.getInstance();
+      final lastKnownIds = prefs.getStringList('known_work_item_ids') ?? [];
+      
+      final currentIds = _workItems.map((i) => i.id).toList();
+      final newIds = currentIds.where((id) => !lastKnownIds.contains(id)).toList();
+      
+      if (newIds.isNotEmpty && lastKnownIds.isNotEmpty) {
+          // Only notify if we had previous data (to avoid spamming on first login)
+          // Or strictly notify for anything NEW that wasn't there before.
+          // Better: If lastKnownIds is empty, we just save currentIds and don't notify (initial load).
+          
+           for (var id in newIds) {
+               final item = _workItems.firstWhere((i) => i.id == id);
+               // Send Notification
+               // "Hi @namateknisi baru pesannya" -> "Hi @technicianName ..."
+               final techName = user.name;
+               final type = item.type == WorkItemType.installation ? 'Installation' : 'Ticket';
+               
+               // Construct message
+               // Requirement: "HI @namateknisi baru pesannya" (Assuming "baru pesannya" means "here is the message" or just content)
+               // User asked: "dalam pesan notifikasi, jangan lupa menambahkan HI @namateknisi baru pesannya"
+               // Interpreting "baru pesannya" as "then the message".
+               // Let's make it natural: "Hi @[Name], New [Type] available at [Address]"
+               
+               final title = 'New Work Item Received';
+               final body = 'Hi @$techName, you have a new $type at ${item.address}.';
+               
+               // Use hashcode of ID for notification ID (needs int)
+               await NotificationService().showNotification(
+                   id: id.hashCode, 
+                   title: title, 
+                   body: body,
+                   payload: id
+               );
+           }
+      }
+      
+      // Update known IDs
+      await prefs.setStringList('known_work_item_ids', currentIds);
   }
 }

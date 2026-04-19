@@ -20,6 +20,9 @@ export interface Customer {
     realName?: string; // From Registration (Full Name) based on phone match
     registrationId?: string; // To allow updating the registration
     sub_area_id?: string;
+    coordinates?: string; // lat,long
+    mapsUrl?: string; // Registration Location
+    odpId?: string; // Link to Topology ODP
 }
 
 export interface Profile {

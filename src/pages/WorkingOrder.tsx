@@ -837,7 +837,15 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                                             </div>
                                             <div className="flex items-center gap-1.5 text-xs text-slate-500">
                                                 <Calendar className="w-3.5 h-3.5" />
-                                                {item.date ? new Date(item.date).toLocaleDateString() : '-'}
+                                                {(item.status === 'done' && item.type === 'installation' && 'installation' in item.originalObject && (item.originalObject as any).installation?.finishDate) ? (
+                                                    <span className="text-emerald-600 font-medium">
+                                                        Done: {new Date((item.originalObject as any).installation.finishDate).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                ) : (
+                                                    <span>
+                                                        {item.date ? new Date(item.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                                                    </span>
+                                                )}
                                             </div>
                                             {item.type === 'ticket' && (
                                                 <div className="flex items-center gap-1.5 text-xs text-slate-700 mt-1">

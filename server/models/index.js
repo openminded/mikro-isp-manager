@@ -14,7 +14,9 @@ export const Server = sequelize.define('Server', {
     default_billing_day: { type: DataTypes.INTEGER, defaultValue: 1, validate: { min: 1, max: 28 } },
     payment_due_days: { type: DataTypes.INTEGER, defaultValue: 7, validate: { min: 1, max: 30 } },
     isOnline: { type: DataTypes.BOOLEAN, defaultValue: false },
-    installation_costs: { type: DataTypes.JSON, defaultValue: [] } // List of { name, price }
+    installation_costs: { type: DataTypes.JSON, defaultValue: [] }, // List of { name, price }
+    lat: { type: DataTypes.DECIMAL(10, 6), allowNull: true },
+    lng: { type: DataTypes.DECIMAL(10, 6), allowNull: true }
 });
 
 export const Customer = sequelize.define('Customer', {
@@ -30,7 +32,11 @@ export const Customer = sequelize.define('Customer', {
     address: { type: DataTypes.STRING, allowNull: true },
     coordinates: { type: DataTypes.STRING, allowNull: true }, // lat,long
     odp_id: { type: DataTypes.STRING, allowNull: true },
-    sub_area_id: { type: DataTypes.STRING, allowNull: true } // Link to sub_areas.json
+    sub_area_id: { type: DataTypes.STRING, allowNull: true }, // Link to sub_areas.json
+    photos: { type: DataTypes.JSON, defaultValue: [] },
+    ktp: { type: DataTypes.STRING, allowNull: true },
+    activationDate: { type: DataTypes.DATEONLY, allowNull: true },
+    mapsUrl: { type: DataTypes.STRING, allowNull: true } // Registration Location Link
 });
 
 export const Invoice = sequelize.define('Invoice', {
@@ -100,9 +106,59 @@ export const initDB = async () => {
             });
         }
 
+        // Check for Server lat/lng
+        const serverMapInfo = await sequelize.getQueryInterface().describeTable('Servers');
+        if (!serverMapInfo.lat) {
+            console.log('[Database] Adding missing column lat to Servers...');
+            await sequelize.getQueryInterface().addColumn('Servers', 'lat', {
+                type: DataTypes.DECIMAL(10, 6),
+                allowNull: true
+            });
+        }
+        if (!serverMapInfo.lng) {
+            console.log('[Database] Adding missing column lng to Servers...');
+            await sequelize.getQueryInterface().addColumn('Servers', 'lng', {
+                type: DataTypes.DECIMAL(10, 6),
+                allowNull: true
+            });
+        }
+
         if (!tableInfo.coordinates) {
             console.log('[Database] Adding missing column coordinates to Customers...');
             await sequelize.getQueryInterface().addColumn('Customers', 'coordinates', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
+        if (!tableInfo.photos) {
+            console.log('[Database] Adding missing column photos to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'photos', {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: []
+            });
+        }
+
+        if (!tableInfo.ktp) {
+            console.log('[Database] Adding missing column ktp to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'ktp', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
+        if (!tableInfo.activationDate) {
+            console.log('[Database] Adding missing column activationDate to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'activationDate', {
+                type: DataTypes.DATEONLY,
+                allowNull: true
+            });
+        }
+
+        if (!tableInfo.mapsUrl) {
+            console.log('[Database] Adding missing column mapsUrl to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'mapsUrl', {
                 type: DataTypes.STRING,
                 allowNull: true
             });

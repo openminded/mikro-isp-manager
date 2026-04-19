@@ -6,7 +6,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import whatsappRouter from './whatsapp.js';
 import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory } from './models/index.js';
 import { Sequelize } from 'sequelize';
 import archiver from 'archiver';
@@ -80,8 +79,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// WhatsApp Routes
-app.use('/api/whatsapp', whatsappRouter);
 
 // Proxy endpoint for Binary API
 app.post('/api/proxy', async (req, res) => {
@@ -164,6 +161,10 @@ app.post('/api/mikrotik/sync', async (req, res) => {
         password: server.password,
         keepalive: false,
         timeout: 20
+    });
+
+    client.on('error', (err) => {
+        console.error(`[Sync] Client Error for ${server.ip}:`, err.message);
     });
 
     try {
@@ -626,14 +627,20 @@ app.post('/api/billing/pay', upload.single('proof'), async (req, res) => {
 
 // Generate Invoices Manual Trigger
 app.post('/api/billing/generate', async (req, res) => {
-    const { serverId } = req.body || {};
+    const { serverId, month: customMonth, year: customYear } = req.body || {};
     // This would typically be a cron job
     try {
         const whereClause = { status: 'active' };
         if (serverId) whereClause.server_id = serverId;
 
         const activeCustomers = await Customer.findAll({ where: whereClause });
-        const period = new Date().toISOString().slice(0, 7); // "2024-01"
+        
+        let period;
+        if (customMonth && customYear) {
+            period = `${customYear}-${String(customMonth).padStart(2, '0')}`;
+        } else {
+            period = new Date().toISOString().slice(0, 7); // "2024-01"
+        }
 
         // [OPTIMIZATION] Pre-load secrets cache for relevant servers
         const serverSecretsMap = {}; // serverId -> { mikrotikName -> secretObj }
@@ -641,9 +648,10 @@ app.post('/api/billing/generate', async (req, res) => {
 
         let count = 0;
         for (const customer of activeCustomers) {
-            // Rule 1: Skip if profile is "BELUM AKTIF"
-            if (customer.profile === 'BELUM AKTIF') {
-                console.log(`[Invoice] Skipped ${customer.mikrotik_name} (Profile: BELUM AKTIF)`);
+            // Rule 1: Skip if profile is "BELUM AKTIF" or contains "GRATIS"
+            const profileLower = (customer.profile || '').toLowerCase();
+            if (profileLower.includes('belum aktif') || profileLower.includes('gratis')) {
+                console.log(`[Invoice] Skipped ${customer.mikrotik_name} (Profile: ${customer.profile})`);
                 continue;
             }
 
@@ -756,6 +764,10 @@ app.post('/api/billing/check-overdue', async (req, res) => {
                     user: server.username,
                     password: server.password,
                     timeout: 20
+                });
+
+                client.on('error', (err) => {
+                    console.error(`[Auto-Block] Client Error for ${server.ip}:`, err.message);
                 });
 
                 try {
@@ -967,6 +979,88 @@ app.get('/api/billing/invoices/:id/pdf', async (req, res) => {
     } catch (e) {
         console.error(e);
         res.status(500).send('Error generating PDF');
+    }
+});
+
+// Thermal Receipt HTML View
+app.get('/api/billing/invoices/:id/thermal', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const invoice = await Invoice.findOne({
+            where: { id },
+            include: [Customer]
+        });
+
+        if (!invoice) return res.status(404).send('Invoice not found');
+
+        const periodDate = new Date(invoice.period + '-01');
+        const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
+            "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+        const formattedPeriod = `${monthNames[periodDate.getMonth()]} ${periodDate.getFullYear()}`;
+
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    @page { margin: 0; }
+                    body { 
+                        font-family: 'Courier New', Courier, monospace; 
+                        width: 58mm; 
+                        margin: 0; 
+                        padding: 2mm;
+                        font-size: 10px;
+                        line-height: 1.2;
+                    }
+                    .center { text-align: center; }
+                    .bold { font-weight: bold; }
+                    .hr { border-top: 1px dashed black; margin: 2mm 0; }
+                    .flex { display: flex; justify-content: space-between; }
+                    @media print {
+                        .no-print { display: none; }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="center bold">MIKRO ISP MANAGER</div>
+                <div class="center">BUKTI PEMBAYARAN</div>
+                <div class="hr"></div>
+                <div>INV: ${invoice.id.split('-')[0].toUpperCase()}</div>
+                <div>TGL: ${new Date(invoice.createdAt).toLocaleDateString('id-ID')}</div>
+                <div class="hr"></div>
+                <div>PELANGGAN:</div>
+                <div class="bold">${invoice.Customer?.name || 'Unknown'}</div>
+                <div>USER: ${invoice.Customer?.mikrotik_name || 'N/A'}</div>
+                <div class="hr"></div>
+                <div class="flex">
+                    <span>Internet (${formattedPeriod})</span>
+                </div>
+                <div class="flex">
+                    <span>TOTAL:</span>
+                    <span class="bold">Rp ${Number(invoice.amount).toLocaleString('id-ID')}</span>
+                </div>
+                <div class="hr"></div>
+                <div class="center">Status: ${invoice.status}</div>
+                <div class="hr"></div>
+                <div class="center">Terima kasih atas</div>
+                <div class="center">kepercayaan Anda!</div>
+                <br>
+                <div class="no-print center">
+                    <button onclick="window.print()">Print Sekarang</button>
+                </div>
+                <script>
+                    window.onload = () => {
+                       // Uncomment if you want auto-print dialog
+                       // window.print();
+                    }
+                </script>
+            </body>
+            </html>
+        `);
+    } catch (e) {
+        console.error(e);
+        res.status(500).send('Error generating thermal receipt');
     }
 });
 
@@ -1237,7 +1331,12 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
                         address: db[index].address,
                         status: 'active',
                         sub_area_id: sub_area_id || null,
-                        odp_id: db[index].odpId || null
+                        odp_id: db[index].odpId || null,
+                        coordinates: coordinates || null,
+                        photos: finalPhotos || [],
+                        ktp: db[index].ktpNumber || null,
+                        activationDate: new Date().toISOString().split('T')[0],
+                        mapsUrl: db[index].mapsUrl || null
                     }
                 });
 
@@ -1248,8 +1347,13 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
                         phone_number: db[index].phoneNumber,
                         address: db[index].address,
                         status: 'active',
-                        sub_area_id: sub_area_id || null, // Update sub area
-                        odp_id: db[index].odpId || null
+                        sub_area_id: sub_area_id || customer.sub_area_id,
+                        odp_id: db[index].odpId || customer.odp_id,
+                        coordinates: coordinates || customer.coordinates,
+                        photos: finalPhotos || customer.photos,
+                        ktp: db[index].ktpNumber || customer.ktp,
+                        activationDate: customer.activationDate || new Date().toISOString().split('T')[0],
+                        mapsUrl: db[index].mapsUrl || customer.mapsUrl
                     });
                 }
                 console.log(`[Sync] Customer ${secretName} synced successfully.`);
@@ -1698,18 +1802,57 @@ app.delete('/api/network/nodes/:id', (req, res) => {
 });
 
 // Link Customer to ODP
-// We store this link in the Customer Meta Data (customers.json)
-app.post('/api/network/link-customer', (req, res) => {
+// We store this link in the Customer SQL DB, and auto-create ONT if not exists
+app.post('/api/network/link-customer', async (req, res) => {
     const { serverId, customerId, odpId } = req.body;
     if (!serverId || !customerId) return res.status(400).json({ error: 'Missing identity' });
 
-    const key = `${serverId}_${customerId}`;
-    const db = getDB(); // customers.json
-    db[key] = { ...db[key], odpId, lastUpdated: new Date() };
-    saveDB(db);
+    try {
+        // 1. Link customer → ODP in SQL
+        const customer = await Customer.findOne({ where: { server_id: serverId, mikrotik_name: customerId } });
+        if (customer) {
+            await customer.update({ odp_id: odpId });
+        } else {
+            await Customer.create({
+                server_id: serverId,
+                mikrotik_name: customerId,
+                odp_id: odpId,
+                status: 'active'
+            });
+        }
 
-    logActivity(req, 'LINK_CUSTOMER', `Linked ${customerId} to ODP ${odpId}`);
-    res.json({ success: true });
+        // 2. Auto-create ONT node if it doesn't already exist
+        const nodesDb = getNodesDB();
+        const existingOnt = nodesDb.find(n => n.type === 'ONT' && n.refId === customerId && n.parentId === odpId);
+        if (!existingOnt) {
+            // Find ODP position to place ONT nearby (slight offset so they don't overlap)
+            const odpNode = nodesDb.find(n => n.id === odpId);
+            const baseLat = odpNode ? odpNode.lat + 0.00005 : -0.366535;
+            const baseLng = odpNode ? odpNode.lng + 0.00005 : 101.556898;
+            
+            const ontNode = {
+                id: crypto.randomUUID(),
+                type: 'ONT',
+                name: customerId,
+                lat: baseLat,
+                lng: baseLng,
+                capacity: 1,
+                parentId: odpId,
+                refId: customerId,
+                notes: `Auto-created for PPPoE: ${customerId}`,
+                createdAt: new Date().toISOString()
+            };
+            nodesDb.push(ontNode);
+            saveNodesDB(nodesDb);
+            logActivity(req, 'CREATE_NODE', `Auto-created ONT node for: ${customerId}`);
+        }
+        
+        logActivity(req, 'LINK_CUSTOMER', `Linked ${customerId} to ODP ${odpId}`);
+        res.json({ success: true });
+    } catch (e) {
+        console.error("Failed to link customer", e);
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // --- Monitoring Status ---
@@ -1759,6 +1902,10 @@ const runNetworkMonitor = async () => {
                     password: server.password,
                     keepalive: false,
                     timeout: 30
+                });
+
+                client.on('error', (err) => {
+                    console.error(`[Ping] Client Error for ${server.ip}:`, err.message);
                 });
 
                 await client.connect();

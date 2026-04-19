@@ -4,7 +4,7 @@ import { useServers, type MikrotikServer } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
 import { useData } from '@/context/DataContext';
 import { type Customer } from '@/types';
-import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud } from 'lucide-react';
+import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud, Map as MapIcon, MapPin } from 'lucide-react';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { cn } from '@/lib/utils';
 
@@ -495,6 +495,41 @@ export function Customers() {
                                                     title="Push to Router"
                                                 >
                                                     <DownloadCloud className="w-4 h-4 rotate-180" />
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        if (customer.mapsUrl) {
+                                                            window.open(customer.mapsUrl, '_blank');
+                                                        }
+                                                    }}
+                                                    disabled={!customer.mapsUrl}
+                                                    className={cn(
+                                                        "p-1.5 rounded-lg transition-colors",
+                                                        customer.mapsUrl
+                                                            ? "text-slate-400 hover:text-green-600 hover:bg-green-50"
+                                                            : "text-slate-200 cursor-not-allowed"
+                                                    )}
+                                                    title="Open Registration Map"
+                                                >
+                                                    <MapPin className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        const coords = customer.coordinates || (customer.lat && customer.long ? `${customer.lat},${customer.long}` : '');
+                                                        if (coords) {
+                                                            window.open(`https://www.google.com/maps/search/?api=1&query=${coords}`, '_blank');
+                                                        }
+                                                    }}
+                                                    disabled={!customer.coordinates && (!customer.lat || !customer.long)}
+                                                    className={cn(
+                                                        "p-1.5 rounded-lg transition-colors",
+                                                        (customer.coordinates || (customer.lat && customer.long))
+                                                            ? "text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                                            : "text-slate-200 cursor-not-allowed"
+                                                    )}
+                                                    title="Open Location in Maps"
+                                                >
+                                                    <MapIcon className="w-4 h-4" />
                                                 </button>
                                                 <button
                                                     onClick={() => handleEdit(customer)}

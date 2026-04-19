@@ -15,6 +15,8 @@ class DashboardTab extends StatefulWidget {
 }
 
 class _DashboardTabState extends State<DashboardTab> {
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
@@ -27,19 +29,28 @@ class _DashboardTabState extends State<DashboardTab> {
   @override
   Widget build(BuildContext context) {
     final workFn = Provider.of<WorkProvider>(context);
-    final workItems = workFn.workItems;
+    final allItems = workFn.workItems;
     final isLoading = workFn.isLoading;
 
+    // Filter by search query
+    final workItems = allItems.where((i) {
+      final query = _searchQuery.toLowerCase();
+      if (query.isEmpty) return true;
+      return i.customerName.toLowerCase().contains(query) || 
+             i.phoneNumber.contains(query) || 
+             i.address.toLowerCase().contains(query);
+    }).toList();
+
     // Summary Stats
-    final myPending = workItems.where((i) => i.status != 'done' && i.status != 'cancel').length;
-    final myCompleted = workItems.where((i) => i.status == 'done').length;
+    final myPending = allItems.where((i) => i.status != 'done' && i.status != 'cancel').length;
+    final myCompleted = allItems.where((i) => i.status == 'done').length;
 
     return RefreshIndicator(
         onRefresh: () async {
             final user = Provider.of<AuthProvider>(context, listen: false).user;
             await workFn.refreshData(user);
         },
-        child: isLoading && workItems.isEmpty
+        child: isLoading && allItems.isEmpty
             ? const Center(child: CircularProgressIndicator())
             : ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -53,12 +64,31 @@ class _DashboardTabState extends State<DashboardTab> {
                         ],
                     ),
                     const SizedBox(height: 24),
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search assignments...',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                      ),
+                      onChanged: (val) {
+                        setState(() {
+                          _searchQuery = val;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 24),
                     const Text('Recent Assignments', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     if (workItems.isEmpty)
-                       const Padding(padding: EdgeInsets.all(24), child: Text("No jobs assigned.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))),
+                       Padding(padding: const EdgeInsets.all(24), child: Text(_searchQuery.isEmpty ? "No jobs assigned." : "No matching assignments.", textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey))),
                     
-                    ...workItems.take(5).map((item) => WorkItemCard(
+                    ...workItems.take(10).map((item) => WorkItemCard(
                         item: item,
                         onTap: () {
                            if (item.type == WorkItemType.installation) {

@@ -106,7 +106,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                             long: meta.long,
                             photos: meta.photos || [],
                             ktp: meta.ktp,
-                            activationDate: meta.activationDate
+                            activationDate: meta.activationDate,
+                            odpId: meta.odp_id || meta.odpId
                         });
                     });
                 } catch (e) {

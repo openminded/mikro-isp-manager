@@ -23,6 +23,7 @@ export const Customer = sequelize.define('Customer', {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     mikrotik_name: { type: DataTypes.STRING, allowNull: false }, // Username in PPPoE
     name: { type: DataTypes.STRING, allowNull: true }, // Real Name
+    comment: { type: DataTypes.STRING, allowNull: true }, // Mikrotik Comment
     phone_number: { type: DataTypes.STRING, allowNull: true },
     profile: { type: DataTypes.STRING, allowNull: true },
     server_id: { type: DataTypes.UUID, allowNull: false }, // FK to Server
@@ -159,6 +160,14 @@ export const initDB = async () => {
         if (!tableInfo.mapsUrl) {
             console.log('[Database] Adding missing column mapsUrl to Customers...');
             await sequelize.getQueryInterface().addColumn('Customers', 'mapsUrl', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
+        if (!tableInfo.comment) {
+            console.log('[Database] Adding missing column comment to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'comment', {
                 type: DataTypes.STRING,
                 allowNull: true
             });

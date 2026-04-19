@@ -218,7 +218,8 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                     if (existing) {
                         await existing.update({
                             profile: item.profile,
-                            status: status
+                            status: status,
+                            comment: item.comment || ''
                         });
                     } else {
                         // Create new customer from Mikrotik
@@ -227,7 +228,8 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                             mikrotik_name: item.name,
                             profile: item.profile,
                             status: status,
-                            name: item.comment || item.name // fallback
+                            comment: item.comment || '',
+                            name: item.comment || item.name // fallback for 'name' col
                         });
                     }
                 } catch (err) {

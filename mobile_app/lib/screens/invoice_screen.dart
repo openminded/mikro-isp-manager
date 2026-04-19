@@ -163,7 +163,7 @@ class _InvoiceScreenState extends State<InvoiceScreen> with SingleTickerProvider
           elevation: 2,
           margin: const EdgeInsets.only(bottom: 12),
           child: ExpansionTile(
-            title: Text(inv.customer?.name ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
+            title: Text(inv.customer?.comment ?? inv.customer?.name ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text('${inv.period} - Rp ${inv.amount.toInt()}'),
             trailing: _StatusBadge(status: inv.status),
             children: [
@@ -172,7 +172,7 @@ class _InvoiceScreenState extends State<InvoiceScreen> with SingleTickerProvider
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _InfoRow(label: 'Username', value: inv.customer?.mikrotik_name ?? '-'),
+                    _InfoRow(label: 'Username', value: inv.customer?.name ?? '-'),
                     _InfoRow(label: 'Due Date', value: inv.dueDate),
                     _InfoRow(label: 'Created At', value: inv.createdAt.split('T')[0]),
                     const Divider(),

@@ -946,7 +946,7 @@ export function Finance() {
             </td>
             <td className="px-6 py-4">
                 <div className="font-medium text-slate-700 dark:text-slate-200">
-                    {invoice.Customer?.name || 'Unknown'}
+                    {invoice.Customer?.comment || invoice.Customer?.name || 'Unknown'}
                 </div>
             </td>
             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">

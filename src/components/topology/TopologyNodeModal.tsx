@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 import type { NetworkNode } from '@/pages/Monitoring';
 import { useServers } from '@/context/ServerContext';
 
@@ -29,12 +30,15 @@ export function TopologyNodeModal({ isOpen, onClose, onSave, nodeType, initialLa
     const [parentId, setParentId] = useState(''); // Uplink node ID
 
     const { servers, editServer } = useServers();
+    const [subAreas, setSubAreas] = useState<any[]>([]);
+    const [subAreaId, setSubAreaId] = useState('');
 
     const [manualCoords, setManualCoords] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
             setManualCoords(false);
+            axios.get('/api/sub-areas').then((res: any) => setSubAreas(res.data)).catch(console.error);
             
             if (initialData) {
                 setName(initialData.name || '');
@@ -50,6 +54,7 @@ export function TopologyNodeModal({ isOpen, onClose, onSave, nodeType, initialLa
                 }
                 setRefId(initialData.refId || '');
                 setParentId(initialData.parentId || '');
+                setSubAreaId(initialData.subAreaId || '');
                 if (initialData.type === 'ONT') {
                     // Usually we set identifierType based on info, hardcoding for now
                     setIdentifierType('PPPoE');
@@ -62,6 +67,7 @@ export function TopologyNodeModal({ isOpen, onClose, onSave, nodeType, initialLa
                 setSplitterType(nodeType === 'ODC' ? '1:4' : '1:8'); // Defaults based on typical usage
                 setRefId('');
                 setParentId('');
+                setSubAreaId('');
                 setIdentifierType('PPPoE');
             }
         }
@@ -121,7 +127,8 @@ export function TopologyNodeModal({ isOpen, onClose, onSave, nodeType, initialLa
             refId: (nodeType === 'ONT' || nodeType === 'SERVER') ? refId : undefined,
             parentId: parentId,
             type: nodeType,
-            ponColors: nodeType === 'OLT' ? ponColors : undefined
+            ponColors: nodeType === 'OLT' ? ponColors : undefined,
+            subAreaId: subAreaId || undefined
         };
 
         onSave(payload);
@@ -272,6 +279,21 @@ export function TopologyNodeModal({ isOpen, onClose, onSave, nodeType, initialLa
                             <option value="">-- No Source / Root --</option>
                             {nodes?.filter(n => !initialData || n.id !== initialData.id).map(n => (
                                 <option key={n.id} value={n.id}>{n.type} - {n.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* SUB AREA */}
+                    <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1.5">Sub Area <span className="text-slate-400 font-normal ml-1">(Optional)</span></label>
+                        <select 
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm font-medium"
+                            value={subAreaId}
+                            onChange={e => setSubAreaId(e.target.value)}
+                        >
+                            <option value="">-- No Sub Area --</option>
+                            {subAreas.map(sa => (
+                                <option key={sa.id} value={sa.id}>{sa.name}</option>
                             ))}
                         </select>
                     </div>

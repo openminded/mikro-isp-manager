@@ -83,6 +83,7 @@ export interface NetworkNode {
     splitterType?: string;
     refId?: string; // Link to Customers DB if ONT
     ponColors?: string[]; // Custom colors for OLT PON ports
+    subAreaId?: string; // Link to sub_areas.json
 }
 
 type Tool = 'SELECT' | 'SERVER' | 'OLT' | 'ODC' | 'ODP' | 'ONT' | 'FIBER_LINE';
@@ -92,6 +93,14 @@ function MapEvents({ onClick, onMouseMove }: { onClick: (lat: number, lng: numbe
         click(e) { onClick(e.latlng.lat, e.latlng.lng); },
         mousemove(e) { onMouseMove && onMouseMove(e.latlng.lat, e.latlng.lng); }
     });
+    return null;
+}
+
+function MapFocus({ pos }: { pos: [number, number] }) {
+    const map = useMapEvents({});
+    useEffect(() => {
+        if (pos) map.setView(pos, 19);
+    }, [pos, map]);
     return null;
 }
 
@@ -132,6 +141,9 @@ export function Monitoring() {
 
     // Network Status (Pings)
     const [networkStatus, setNetworkStatus] = useState<Record<string, { isOnline: boolean, lastCheck: string, latency: number }>>({});
+
+    // Map State
+    const [focusedPosition, setFocusedPosition] = useState<[number, number] | null>(null);
 
     useEffect(() => { 
         fetchNodes(); 
@@ -313,6 +325,11 @@ export function Monitoring() {
         }
     };
 
+    const handleViewOnMap = (lat: number, lng: number) => {
+        setFocusedPosition([lat, lng]);
+        setViewMode('map');
+    };
+
     const getCapacityInfo = (node: NetworkNode) => {
         const children = nodes.filter(n => n.parentId === node.id);
         const used = children.length;
@@ -445,11 +462,10 @@ export function Monitoring() {
                             <TopologyListView 
                                 nodes={nodes} 
                                 searchQuery={searchQuery} 
-                                filterType={filterType} 
-                                customers={customers} 
                                 networkStatus={networkStatus}
                                 onDelete={handleDeleteMultipleNodes}
                                 onUnassignOnt={() => fetchNodes()}
+                                onViewOnMap={handleViewOnMap}
                             />
                         )}
 
@@ -499,6 +515,7 @@ export function Monitoring() {
 
                             return (
                                 <MapContainer center={[mapSettings.defaultLat, mapSettings.defaultLng]} zoom={mapSettings.defaultZoom} style={{ height: '100%', width: '100%', cursor: activeTool === 'FIBER_LINE' ? 'crosshair' : activeTool !== 'SELECT' ? 'crosshair' : 'grab' }}>
+                                    {focusedPosition && <MapFocus pos={focusedPosition} />}
                                     <TileLayer url={`https://mt1.google.com/vt/lyrs=${mapSettings.mapStyle || 'm'}&x={x}&y={y}&z={z}`} attribution='&copy; Google Maps' maxZoom={mapSettings.maxZoomIn || 22} />
                                     <MapEvents onClick={handleMapClick} onMouseMove={(lat, lng) => setMousePos([lat, lng])} />
 

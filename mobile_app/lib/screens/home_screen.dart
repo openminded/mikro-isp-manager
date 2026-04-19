@@ -14,6 +14,7 @@ import '../constants.dart';
 import 'tabs/tickets_tab.dart';
 import 'invoice_screen.dart';
 import 'performance_screen.dart';
+import 'technician_customer_list_screen.dart';
 import 'dart:async';
 import '../services/notification_service.dart';
 
@@ -201,6 +202,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
+                ),
+                 ListTile(
+                  leading: const Icon(Icons.people),
+                  title: const Text('Customer List'),
+                  onTap: () {
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TechnicianCustomerListScreen()));
+                  },
                 ),
                 ListTile(
                   leading: const Icon(Icons.bar_chart),

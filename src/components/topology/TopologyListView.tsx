@@ -1,48 +1,104 @@
-
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { Trash2, UserPlus, X, Monitor, Clock, Search, UserMinus } from 'lucide-react';
+import { Trash2, UserPlus, X, Search, UserMinus, ChevronLeft, ChevronRight, Filter, Eye } from 'lucide-react';
 import type { NetworkNode } from '@/pages/Monitoring';
 import { useData } from '@/context/DataContext';
+import { useServers } from '@/context/ServerContext';
 import axios from 'axios';
 
 interface TopologyListViewProps {
     nodes: NetworkNode[];
     searchQuery: string;
-    filterType: string;
+    filterType?: string;
     customers?: any[];
     networkStatus: Record<string, any>;
     onDelete?: (ids: string[]) => void;
     onUnassignOnt?: (ontNode: NetworkNode) => void;
+    onViewOnMap?: (lat: number, lng: number) => void;
 }
 
-export function TopologyListView({ nodes, searchQuery, filterType, networkStatus, onDelete, onUnassignOnt }: TopologyListViewProps) {
+const TABS = [
+    { id: 'SERVER', label: 'Server' },
+    { id: 'OLT', label: 'OLT' },
+    { id: 'ODC', label: 'ODC' },
+    { id: 'ODP', label: 'ODP' },
+    { id: 'ONT', label: 'ONT' },
+];
+
+export function TopologyListView({ nodes, searchQuery: externalSearch, networkStatus, onDelete, onUnassignOnt, onViewOnMap }: TopologyListViewProps) {
     const { customers, refreshCustomers } = useData();
+    const { servers } = useServers();
+    const [subAreas, setSubAreas] = useState<any[]>([]);
+    
+    const [activeTab, setActiveTab] = useState('SERVER');
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     
+    // Filters
+    const [localSearch, setLocalSearch] = useState('');
+    const [selectedServerId, setSelectedServerId] = useState('all');
+    const [selectedSubAreaId, setSelectedSubAreaId] = useState('all');
+    
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage] = useState(10);
+
     // Assigning State
     const [assigningOdp, setAssigningOdp] = useState<NetworkNode | null>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
     const [assignSearchQuery, setAssignSearchQuery] = useState<string>('');
 
-    const filteredNodes = nodes.filter(node => {
-        const matchesSearch = node.name.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesType = filterType === 'All Types' || node.type === filterType;
-        return matchesSearch && matchesType;
-    });
+    useEffect(() => {
+        axios.get('/api/sub-areas').then((res: any) => setSubAreas(res.data)).catch(console.error);
+    }, []);
 
-    const getTypeColor = (type: string) => {
-        switch (type) {
-            case 'SERVER': return 'bg-purple-600';
-            case 'ODC': return 'bg-blue-600';
-            case 'ODP': return 'bg-cyan-500';
-            case 'ONT': return 'bg-green-500';
-            default: return 'bg-slate-500';
+    // Helper to find root server for any node
+    const getRootServer = (node: NetworkNode) => {
+        let current: NetworkNode | undefined = node;
+        while (current && current.type !== 'SERVER') {
+            current = nodes.find(n => n.id === current?.parentId);
         }
+        return current;
     };
 
+    const filteredNodes = useMemo(() => {
+        return nodes.filter(node => {
+            // Tab Filter
+            if (node.type !== activeTab) return false;
+
+            // Search Filter
+            const search = (localSearch || externalSearch).toLowerCase();
+            const matchesSearch = node.name.toLowerCase().includes(search) || 
+                                 (node.notes || '').toLowerCase().includes(search);
+            if (!matchesSearch) return false;
+
+            // Server Filter
+            if (selectedServerId !== 'all') {
+                const root = getRootServer(node);
+                if (!root || root.refId !== selectedServerId) return false;
+            }
+
+            // Sub Area Filter
+            if (selectedSubAreaId !== 'all') {
+                if (node.subAreaId !== selectedSubAreaId) return false;
+            }
+
+            return true;
+        });
+    }, [nodes, activeTab, localSearch, externalSearch, selectedServerId, selectedSubAreaId]);
+
+    // Pagination Logic
+    const totalPages = Math.ceil(filteredNodes.length / itemsPerPage);
+    const paginatedNodes = filteredNodes.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+    useEffect(() => {
+        setCurrentPage(1);
+        setSelectedIds([]);
+    }, [activeTab, localSearch, externalSearch, selectedServerId, selectedSubAreaId]);
+
+    // Removed unused getTypeColor
+
     const getCapacity = (node: NetworkNode) => {
-        if (node.type === 'SERVER') return null; // Server doesn't have strict ports typically
+        if (node.type === 'SERVER') return null;
         
         let used = 0;
         let online = 0;
@@ -70,7 +126,7 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
 
     const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.checked) {
-            setSelectedIds(filteredNodes.map(n => n.id));
+            setSelectedIds(paginatedNodes.map(n => n.id));
         } else {
             setSelectedIds([]);
         }
@@ -90,17 +146,6 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
         }
     };
 
-    const getRootServer = (odpNode: NetworkNode) => {
-        let current = odpNode;
-        while (current && current.type !== 'SERVER') {
-            const parent = nodes.find(n => n.id === current.parentId);
-            if (!parent) break;
-            current = parent;
-        }
-        return current;
-    };
-
-    // ─── Hierarchical Health Logic ──────────────────────────────────────────
     const getRootServerId = (nodeId: string): string | null => {
         let current = nodes.find(n => n.id === nodeId);
         while (current && current.type !== 'SERVER') {
@@ -138,6 +183,7 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
         if (!selectedCustomerId || !assigningOdp) return;
         try {
             const rootServer = getRootServer(assigningOdp);
+            if (!rootServer) return;
             await axios.post('/api/network/link-customer', {
                 serverId: rootServer.refId,
                 customerId: selectedCustomerId,
@@ -155,7 +201,6 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
     const handleUnassignFromList = async (ontNode: NetworkNode) => {
         if (!confirm(`Unassign "${ontNode.name}" and remove from map?`)) return;
         try {
-            // Walk up to find server
             let current = nodes.find(n => n.id === ontNode.parentId);
             let serverNode: NetworkNode | undefined;
             while (current) {
@@ -178,47 +223,97 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
     };
 
     return (
-        <div className="flex-1 bg-white p-6 overflow-y-auto w-full">
-            <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm text-slate-500 font-medium">Showing {filteredNodes.length} of {nodes.length} nodes</h2>
-                
-                {selectedIds.length > 0 && onDelete && (
+        <div className="flex-1 bg-white flex flex-col overflow-hidden w-full">
+            {/* Tab Bar */}
+            <div className="px-6 border-b border-slate-100 flex items-center bg-white shrink-0 overflow-x-auto no-scrollbar">
+                {TABS.map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cn(
+                            "py-4 px-6 text-sm font-bold border-b-2 transition-all whitespace-nowrap",
+                            activeTab === tab.id 
+                                ? "border-blue-600 text-blue-600 bg-blue-50/30" 
+                                : "border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                        )}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* Filter Bar */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center gap-4 shrink-0">
+                <div className="relative flex-1 min-w-[200px]">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input 
+                        type="text" 
+                        placeholder={`Search ${activeTab.toLowerCase()}...`}
+                        value={localSearch}
+                        onChange={e => setLocalSearch(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-slate-400" />
+                    <select 
+                        className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        value={selectedServerId}
+                        onChange={e => setSelectedServerId(e.target.value)}
+                    >
+                        <option value="all">All Servers</option>
+                        {servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+
+                    <select 
+                        className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        value={selectedSubAreaId}
+                        onChange={e => setSelectedSubAreaId(e.target.value)}
+                    >
+                        <option value="all">All Areas</option>
+                        {subAreas.map(sa => <option key={sa.id} value={sa.id}>{sa.name}</option>)}
+                    </select>
+                </div>
+
+                {selectedIds.length > 0 && (
                     <button 
                         onClick={handleDeleteSelected}
                         className="bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
                     >
-                        <Trash2 className="w-3.5 h-3.5" /> Delete Selected ({selectedIds.length})
+                        <Trash2 className="w-3.5 h-3.5" /> Delete ({selectedIds.length})
                     </button>
                 )}
             </div>
-            
-            <div className="border border-slate-200 rounded-lg overflow-hidden text-sm w-full">
-                <table className="w-full text-left">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-semibold tracking-wider">
+
+            {/* Table Area */}
+            <div className="flex-1 overflow-y-auto w-full">
+                <table className="w-full text-left border-collapse">
+                    <thead className="bg-white border-b border-slate-200 text-slate-400 text-[10px] font-bold uppercase tracking-wider sticky top-0 z-10">
                         <tr>
-                            <th className="px-4 py-4 w-12 text-center">
+                            <th className="px-6 py-4 w-12 text-center">
                                 <input 
                                     type="checkbox" 
                                     className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
-                                    checked={selectedIds.length > 0 && selectedIds.length === filteredNodes.length}
+                                    checked={selectedIds.length > 0 && selectedIds.length === paginatedNodes.length}
                                     onChange={handleSelectAll}
                                 />
                             </th>
-                            <th className="px-6 py-4">TYPE</th>
-                            <th className="px-6 py-4">NAME</th>
-                            <th className="px-6 py-4">LOCATION</th>
-                            <th className="px-6 py-4 w-64">AVAILABLE SLOTS</th>
-                            <th className="px-6 py-4">STATUS</th>
-                            <th className="px-6 py-4">NOTES</th>
+                            <th className="px-6 py-4">Node Name</th>
+                            <th className="px-6 py-4">Location</th>
+                            <th className="px-6 py-4">Capacity / Usage</th>
+                            <th className="px-6 py-4">Health Status</th>
+                            <th className="px-6 py-4 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {filteredNodes.map(node => {
+                        {paginatedNodes.map(node => {
                             const cap = getCapacity(node);
+                            const health = getNodeHealth(node);
                             
                             return (
-                                <tr key={node.id} className={cn("hover:bg-slate-50 transition-colors", selectedIds.includes(node.id) && "bg-blue-50/50")}>
-                                    <td className="px-4 py-4 text-center">
+                                <tr key={node.id} className={cn("hover:bg-slate-50 transition-colors group", selectedIds.includes(node.id) && "bg-blue-50/50")}>
+                                    <td className="px-6 py-3 text-center">
                                         <input 
                                             type="checkbox" 
                                             className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
@@ -226,97 +321,93 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
                                             onChange={() => handleSelectOne(node.id)}
                                         />
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <span className={cn("px-2.5 py-1 text-white text-[10px] uppercase font-medium rounded-full", getTypeColor(node.type))}>
-                                            {node.type === 'SERVER' ? 'Server/OLT' : node.type}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 font-medium text-slate-800">
-                                        {node.name}
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-500 text-xs">
-                                        {node.lat}, {node.lng}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        {cap ? (
-                                            <div>
-                                                <div className="flex justify-between text-xs mb-1.5">
-                                                    <span className="font-medium text-slate-700">{cap.available} available</span>
-                                                    <span className="text-slate-400">{cap.used}/{cap.total}</span>
-                                                </div>
-                                                <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-1.5">
-                                                    <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${cap.percent}%` }} />
-                                                </div>
-                                                {node.type === 'ODP' && cap.used > 0 && (
-                                                    <div className="flex items-center gap-2 text-[10px] font-medium mt-2">
-                                                        <span className="text-green-700 bg-green-50 px-1.5 py-0.5 rounded leading-none border border-green-200">{cap.online} Online</span>
-                                                        <span className="text-red-700 bg-red-50 px-1.5 py-0.5 rounded leading-none border border-red-200">{cap.offline} Offline</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ) : (
-                                            <span className="text-slate-400">-</span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            {node.type === 'ONT' ? (() => {
-                                                const cust = node.refId ? customers.find(c => c.name === node.refId) : null;
-                                                const health = getNodeHealth(node);
-                                                return (
-                                                    <>
-                                                        <div className="flex flex-col">
-                                                            <span className={cn(
-                                                                "font-medium px-2 py-1 text-[11px] rounded border",
-                                                                health === 'offline' 
-                                                                    ? "text-red-600 bg-red-50 border-red-200" 
-                                                                    : "text-green-600 bg-green-50 border-green-200"
-                                                            )}>
-                                                                {cust?.comment || cust?.name || node.refId || 'Unlinked'}
-                                                            </span>
-                                                            {cust && <span className="text-[10px] text-slate-400 mt-0.5 ml-1 font-mono">{cust.name}</span>}
-                                                        </div>
-                                                        <button 
-                                                            onClick={() => handleUnassignFromList(node)} 
-                                                            className="bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200 px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider flex items-center gap-1 transition-colors"
-                                                            title="Unassign customer"
-                                                        >
-                                                            <UserMinus className="w-3 h-3" /> Unassign
-                                                        </button>
-                                                    </>
-                                                );
-                                            })() : (() => {
-                                                const health = getNodeHealth(node);
-                                                return (
-                                                    <>
-                                                        {health === 'offline' ? (
-                                                            <span className="text-red-600 bg-red-50 font-medium px-2 py-1 text-[11px] rounded border border-red-200 uppercase tracking-tighter">Offline</span>
-                                                        ) : (
-                                                            <span className="text-green-600 bg-green-50 font-medium px-2 py-1 text-[11px] rounded">Active</span>
-                                                        )}
-                                                        {node.type === 'ODP' && (
-                                                            <button 
-                                                                onClick={() => { setAssigningOdp(node); setSelectedCustomerId(''); setAssignSearchQuery(''); }} 
-                                                                className="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider flex items-center gap-1 transition-colors"
-                                                            >
-                                                                <UserPlus className="w-3 h-3" /> Assign
-                                                            </button>
-                                                        )}
-                                                    </>
-                                                );
-                                            })()}
+                                    <td className="px-6 py-3">
+                                        <div className="flex flex-col">
+                                            <span className="font-bold text-slate-800 text-sm">{node.name}</span>
+                                            <span className="text-[10px] text-slate-400 mt-0.5">{node.notes || 'No description'}</span>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-slate-400 text-xs italic">
-                                        No notes
+                                    <td className="px-6 py-3">
+                                        <div className="flex flex-col">
+                                            <span className="text-[11px] text-slate-600 font-medium">{node.lat.toFixed(6)}, {node.lng.toFixed(6)}</span>
+                                            {node.subAreaId && (
+                                                <span className="text-[10px] text-blue-600 mt-0.5 font-bold uppercase tracking-tighter">
+                                                    {subAreas.find(sa => sa.id === node.subAreaId)?.name || 'Unknown Area'}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                        {cap ? (
+                                            <div className="w-40">
+                                                <div className="flex justify-between text-[10px] mb-1 font-bold">
+                                                    <span className="text-slate-500">{cap.used} / {cap.total} used</span>
+                                                    <span className={cn(cap.available === 0 ? "text-red-500" : "text-green-600")}>{cap.available} free</span>
+                                                </div>
+                                                <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                    <div 
+                                                        className={cn("h-full rounded-full transition-all", cap.percent > 90 ? "bg-red-500" : "bg-blue-500")} 
+                                                        style={{ width: `${cap.percent}%` }} 
+                                                    />
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <span className="text-slate-400 text-xs">-</span>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <div className={cn("w-2 h-2 rounded-full", health === 'online' ? "bg-green-500 animate-pulse" : "bg-red-500")} />
+                                            <span className={cn("text-xs font-bold uppercase tracking-wider", health === 'online' ? "text-green-600" : "text-red-600")}>
+                                                {health}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-3 text-right">
+                                        <div className="flex justify-end gap-2 items-center">
+                                            <button 
+                                                onClick={() => onViewOnMap && onViewOnMap(node.lat, node.lng)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-[10px] font-bold uppercase transition-colors"
+                                            >
+                                                <Eye className="w-3.5 h-3.5" /> View
+                                            </button>
+
+                                            {node.type === 'ODP' && (
+                                                <button 
+                                                    onClick={() => { setAssigningOdp(node); setSelectedCustomerId(''); setAssignSearchQuery(''); }} 
+                                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                    title="Assign Customer"
+                                                >
+                                                    <UserPlus className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                            {node.type === 'ONT' && (
+                                                <button 
+                                                    onClick={() => handleUnassignFromList(node)} 
+                                                    className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                                    title="Unassign"
+                                                >
+                                                    <UserMinus className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                            <button 
+                                                onClick={() => onDelete && onDelete([node.id])}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-[10px] font-bold uppercase transition-colors"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" /> Remove
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             );
                         })}
                         {filteredNodes.length === 0 && (
                             <tr>
-                                <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
-                                    No nodes found matching your criteria.
+                                <td colSpan={6} className="px-6 py-20 text-center">
+                                    <div className="flex flex-col items-center justify-center text-slate-400">
+                                        <Search className="w-10 h-10 mb-4 opacity-20" />
+                                        <p className="text-sm font-medium">No results found for current filters</p>
+                                    </div>
                                 </td>
                             </tr>
                         )}
@@ -324,11 +415,49 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
                 </table>
             </div>
 
-            {/* ASSIGN ODP MODAL */}
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+                <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between bg-white shrink-0">
+                    <div className="text-xs text-slate-500 font-medium">
+                        Showing <span className="text-slate-900">{(currentPage - 1) * itemsPerPage + 1}</span> to <span className="text-slate-900">{Math.min(currentPage * itemsPerPage, filteredNodes.length)}</span> of <span className="text-slate-900">{filteredNodes.length}</span> entries
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                            className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                        >
+                            <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <div className="flex items-center gap-1">
+                            {Array.from({ length: totalPages }).map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentPage(i + 1)}
+                                    className={cn(
+                                        "w-8 h-8 text-xs font-bold rounded-lg transition-all",
+                                        currentPage === i + 1 ? "bg-blue-600 text-white shadow-md shadow-blue-200" : "text-slate-500 hover:bg-slate-50"
+                                    )}
+                                >
+                                    {i + 1}
+                                </button>
+                            ))}
+                        </div>
+                        <button 
+                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                            disabled={currentPage === totalPages}
+                            className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                        >
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ASSIGN ODP MODAL (Repurposed from previous) */}
             {assigningOdp && (() => {
                 const rootServer = getRootServer(assigningOdp);
                 const serverName = rootServer ? rootServer.name : 'Unknown Server';
-                
                 const validCustomers = customers.filter(c => c.serverId === rootServer?.refId);
                 const filteredValid = validCustomers.filter(c => {
                     if (!assignSearchQuery) return true;
@@ -340,37 +469,33 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
 
                 return (
                     <div className="fixed inset-0 z-[1000] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-                        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]" style={{ animation: 'easeOut 0.2s' }}>
-                            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+                            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
                                 <div>
                                     <h3 className="font-bold text-slate-800">Assign Customer to ODP</h3>
-                                    <p className="text-xs text-slate-500 mt-1">Target: <span className="font-bold text-blue-600">{assigningOdp.name}</span></p>
+                                    <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-wider">Target Node: <span className="text-blue-600">{assigningOdp.name}</span></p>
                                 </div>
-                                <button onClick={() => setAssigningOdp(null)} className="text-slate-400 hover:text-slate-600">
+                                <button onClick={() => setAssigningOdp(null)} className="text-slate-400 hover:bg-slate-100 p-1.5 rounded-lg">
                                     <X className="w-5 h-5"/>
                                 </button>
                             </div>
                             
-                            <div className="p-6 flex-1 overflow-hidden flex flex-col">
-                                <div className="mb-3 shrink-0">
-                                    <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Select PPPoE Client from {serverName}</label>
-                                    <div className="relative">
-                                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                                        <input 
-                                            type="text" 
-                                            placeholder="Search by username, comment, or IP..." 
-                                            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-shadow"
-                                            value={assignSearchQuery}
-                                            onChange={e => setAssignSearchQuery(e.target.value)}
-                                        />
-                                    </div>
+                            <div className="p-6 flex-1 overflow-hidden flex flex-col space-y-4">
+                                <div className="relative">
+                                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <input 
+                                        type="text" 
+                                        placeholder={`Search clients in ${serverName}...`} 
+                                        className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+                                        value={assignSearchQuery}
+                                        onChange={e => setAssignSearchQuery(e.target.value)}
+                                    />
                                 </div>
 
-                                <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg bg-slate-50 min-h-[300px]">
+                                <div className="flex-1 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50/50">
                                     {filteredValid.length === 0 ? (
-                                        <div className="p-8 text-center text-sm text-slate-400 flex flex-col items-center justify-center h-full">
-                                            <Search className="w-8 h-8 text-slate-300 mb-3" />
-                                            No matching clients found in {serverName}
+                                        <div className="p-12 text-center text-slate-400">
+                                            <p className="text-xs font-medium">No available clients found</p>
                                         </div>
                                     ) : (
                                         <div className="divide-y divide-slate-100">
@@ -379,28 +504,16 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
                                                     key={c.id} 
                                                     onClick={() => setSelectedCustomerId(c.name)}
                                                     className={cn(
-                                                        "w-full text-left p-4 hover:bg-blue-50/50 transition-colors flex items-start gap-3",
-                                                        selectedCustomerId === c.name ? 'bg-blue-50 border-l-4 border-l-blue-600' : 'bg-white border-l-4 border-l-transparent'
+                                                        "w-full text-left p-4 hover:bg-white transition-all flex items-start gap-3",
+                                                        selectedCustomerId === c.name ? 'bg-white ring-2 ring-blue-500/20 z-10' : 'bg-transparent'
                                                     )}
                                                 >
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex justify-between items-center mb-1">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className={cn("font-bold text-sm truncate", selectedCustomerId === c.name ? "text-blue-700" : "text-slate-800")}>{c.name}</span>
-                                                                {c.disabled ? (
-                                                                    <span className="w-1.5 h-1.5 rounded-full bg-red-400" title="Disabled"></span>
-                                                                ) : (
-                                                                    <span className="w-1.5 h-1.5 rounded-full bg-green-400" title="Active"></span>
-                                                                )}
-                                                            </div>
-                                                            {c.odpId === assigningOdp.id && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Current</span>}
-                                                            {c.odpId && c.odpId !== assigningOdp.id && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Used in other ODP</span>}
+                                                            <span className={cn("font-bold text-sm", selectedCustomerId === c.name ? "text-blue-600" : "text-slate-800")}>{c.name}</span>
+                                                            <div className={cn("w-1.5 h-1.5 rounded-full", c.disabled ? "bg-red-400" : "bg-green-400")} />
                                                         </div>
-                                                        <div className="text-xs text-slate-600 mb-2 font-medium">{c.comment || <span className="italic text-slate-400 font-normal">No comment</span>}</div>
-                                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-medium tracking-wide border-t border-slate-50 pt-2">
-                                                            <span className="flex items-center gap-1.5"><Monitor className="w-3 h-3 text-slate-400"/> {c["remote-address"] || 'No IP'}</span>
-                                                            <span className="flex items-center gap-1.5"><Clock className="w-3 h-3 text-slate-400"/> {c["last-logged-out"] || 'Never'}</span>
-                                                        </div>
+                                                        <div className="text-xs text-slate-500 line-clamp-1">{c.comment || 'No comment'}</div>
                                                     </div>
                                                 </button>
                                             ))}
@@ -409,23 +522,22 @@ export function TopologyListView({ nodes, searchQuery, filterType, networkStatus
                                 </div>
                             </div>
                             
-                            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 shrink-0">
-                                <button onClick={() => setAssigningOdp(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors">
+                            <div className="px-6 py-4 border-t border-slate-100 bg-white flex justify-end gap-2">
+                                <button onClick={() => setAssigningOdp(null)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700">
                                     Cancel
                                 </button>
                                 <button 
                                     onClick={handleAssignSubmit} 
-                                    disabled={!selectedCustomerId || validCustomers.find(c=>c.name===selectedCustomerId)?.odpId === assigningOdp.id}
-                                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg shadow-sm transition-all flex items-center gap-2"
+                                    disabled={!selectedCustomerId}
+                                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-200 transition-all"
                                 >
-                                    <UserPlus className="w-4 h-4"/> Confirm Assign
+                                    Confirm Assign
                                 </button>
                             </div>
                         </div>
                     </div>
                 );
             })()}
-
         </div>
     );
 }

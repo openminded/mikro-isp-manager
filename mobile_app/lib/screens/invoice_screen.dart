@@ -100,7 +100,10 @@ class _InvoiceScreenState extends State<InvoiceScreen> with SingleTickerProvider
                     ...work.servers.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))),
                   ],
                   onChanged: (val) {
-                    setState(() => _selectedServerId = val);
+                    setState(() {
+                      _selectedServerId = val;
+                      _selectedSubAreaId = null; // Reset sub-area when server changes
+                    });
                     _fetchInvoices();
                   },
                 ),
@@ -116,7 +119,9 @@ class _InvoiceScreenState extends State<InvoiceScreen> with SingleTickerProvider
                   ),
                   items: [
                     const DropdownMenuItem(value: null, child: Text('All Areas')),
-                    ...work.subAreas.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))),
+                    ...work.subAreas
+                        .where((s) => _selectedServerId == null || s.serverId == _selectedServerId)
+                        .map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))),
                   ],
                   onChanged: (val) {
                     setState(() => _selectedSubAreaId = val);

@@ -997,6 +997,7 @@ app.get('/api/billing/invoices/:id/thermal', async (req, res) => {
         const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
             "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
         const formattedPeriod = `${monthNames[periodDate.getMonth()]} ${periodDate.getFullYear()}`;
+        const petugas = req.query.petugas || 'Admin';
 
         res.send(`
             <!DOCTYPE html>
@@ -1023,8 +1024,8 @@ app.get('/api/billing/invoices/:id/thermal', async (req, res) => {
                 </style>
             </head>
             <body>
+                <div class="center bold">Bukti Pembayaran Wifi</div>
                 <div class="center bold">MIKRO ISP MANAGER</div>
-                <div class="center">BUKTI PEMBAYARAN</div>
                 <div class="hr"></div>
                 <div>INV: ${invoice.id.split('-')[0].toUpperCase()}</div>
                 <div>TGL: ${new Date(invoice.createdAt).toLocaleDateString('id-ID')}</div>
@@ -1042,6 +1043,7 @@ app.get('/api/billing/invoices/:id/thermal', async (req, res) => {
                 </div>
                 <div class="hr"></div>
                 <div class="center">Status: ${invoice.status}</div>
+                <div>PETUGAS: ${petugas}</div>
                 <div class="hr"></div>
                 <div class="center">Terima kasih atas</div>
                 <div class="center">kepercayaan Anda!</div>

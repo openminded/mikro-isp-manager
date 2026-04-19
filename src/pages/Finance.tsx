@@ -592,6 +592,7 @@ export function Finance() {
                                             <InvoiceRow
                                                 key={inv.id}
                                                 invoice={inv}
+                                                petugasName={user?.name || ''}
                                                 formattedPeriod={formatPeriod(inv.period)}
                                                 selected={selectedIds.has(inv.id)}
                                                 onSelect={(c) => handleSelectOne(inv.id, c)}
@@ -608,6 +609,7 @@ export function Finance() {
                                     <InvoiceRow
                                         key={inv.id}
                                         invoice={inv}
+                                        petugasName={user?.name || ''}
                                         formattedPeriod={formatPeriod(inv.period)}
                                         selected={selectedIds.has(inv.id)}
                                         onSelect={(c) => handleSelectOne(inv.id, c)}
@@ -927,7 +929,7 @@ export function Finance() {
     );
 }
 
- function InvoiceRow({ invoice, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete }: { invoice: any, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void }) {
+ function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void }) {
     return (
         <tr className={cn("hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors", selected && "bg-blue-50/50 dark:bg-blue-900/10")}>
             <td className="px-4 py-4">
@@ -979,7 +981,7 @@ export function Finance() {
                     </button>
 
                     <button
-                        onClick={() => window.open(`/api/billing/invoices/${invoice.id}/thermal`, '_blank', 'width=400,height=600')}
+                        onClick={() => window.open(`/api/billing/invoices/${invoice.id}/thermal?petugas=${encodeURIComponent(petugasName)}`, '_blank', 'width=400,height=600')}
                         title="Print Thermal"
                         className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                     >

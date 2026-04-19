@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import '../constants.dart';
 import 'tabs/tickets_tab.dart';
+import 'invoice_screen.dart';
 import 'performance_screen.dart';
 import 'dart:async';
 import '../services/notification_service.dart';
@@ -74,18 +75,21 @@ class _HomeScreenState extends State<HomeScreen> {
             const InstallationsTab(),
             const CustomersTab(),
             const TicketsTab(),
+            const InvoiceScreen(),
         ];
         displayTitles = [
             'Registrations',
             'Working Order', 
             'Customers',
             'Support Tickets',
+            'Invoices',
         ];
         displayNavItems = const [
             BottomNavigationBarItem(icon: Icon(Icons.app_registration), label: 'Registrations'),
             BottomNavigationBarItem(icon: Icon(Icons.work), label: 'Working Order'),
             BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Customers'),
             BottomNavigationBarItem(icon: Icon(Icons.confirmation_number), label: 'Tickets'),
+            BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: 'Invoices'),
         ];
     } else {
         displayTabs = _tabs;

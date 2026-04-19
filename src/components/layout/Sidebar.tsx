@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, MessageSquare, Smartphone, Send, Radio, FileText, CreditCard } from "lucide-react";
+import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, CreditCard } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 

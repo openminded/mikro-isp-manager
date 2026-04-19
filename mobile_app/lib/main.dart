@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/work_provider.dart';
 import 'providers/customer_provider.dart';
+import 'providers/invoice_provider.dart';
 import 'screens/splash_screen.dart';
 
 void main() {
@@ -19,6 +20,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => WorkProvider()),
         ChangeNotifierProvider(create: (_) => CustomerProvider()),
+        ChangeNotifierProvider(create: (_) => InvoiceProvider()),
       ],
       child: MaterialApp(
         title: 'Telaju',

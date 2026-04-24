@@ -269,9 +269,33 @@ export function Monitoring() {
         }
     };
 
+    const unlinkCustomerIfOnt = async (nodeId: string) => {
+        const node = nodes.find(n => n.id === nodeId);
+        if (!node || node.type !== 'ONT' || !node.refId) return;
+
+        try {
+            let current = nodes.find(n => n.id === node.parentId);
+            let serverNode: NetworkNode | undefined;
+            while (current) {
+                if (current.type === 'SERVER') { serverNode = current; break; }
+                current = nodes.find(n => n.id === current?.parentId);
+            }
+            if (serverNode?.refId) {
+                await axios.post('/api/network/link-customer', {
+                    serverId: serverNode.refId,
+                    customerId: node.refId,
+                    odpId: null
+                });
+            }
+        } catch (e) {
+            console.warn('Failed to unlink customer during node deletion:', e);
+        }
+    };
+
     const handleDeleteNode = async (id: string) => {
         if (!confirm('Are you sure you want to delete this node? Child nodes will lose connection.')) return;
         try {
+            await unlinkCustomerIfOnt(id);
             await axios.delete(`/api/network/nodes/${id}`);
             fetchNodes();
         } catch (e) {
@@ -281,6 +305,9 @@ export function Monitoring() {
 
     const handleDeleteMultipleNodes = async (ids: string[]) => {
         try {
+            for (const id of ids) {
+                await unlinkCustomerIfOnt(id);
+            }
             await Promise.all(ids.map(id => axios.delete(`/api/network/nodes/${id}`)));
             fetchNodes();
         } catch (e) {
@@ -463,6 +490,7 @@ export function Monitoring() {
                                 nodes={nodes} 
                                 searchQuery={searchQuery} 
                                 networkStatus={networkStatus}
+                                onEdit={openEditModal}
                                 onDelete={handleDeleteMultipleNodes}
                                 onUnassignOnt={() => fetchNodes()}
                                 onViewOnMap={handleViewOnMap}

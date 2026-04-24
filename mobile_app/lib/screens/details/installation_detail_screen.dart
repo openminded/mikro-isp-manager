@@ -229,13 +229,30 @@ class _InstallationDetailScreenState extends State<InstallationDetailScreen> {
       );
   }
 
-  Future<void> _performCompletion(String secretId, String? profileName, String coordinates, String secretName, List<XFile> photos, List<String> finalExistingPhotos) async {
+  Future<void> _performCompletion(
+    String secretId, 
+    String? profileName, 
+    String coordinates, 
+    String secretName, 
+    List<XFile> photos, 
+    List<String> finalExistingPhotos,
+    {
+      String? ssidName,
+      String? ssidPassword,
+      String? signalLevel,
+      String? installationDate,
+    }
+  ) async {
      // Delegate loading UI to the Dialog itself to keep it visible
      try {
          final photoPaths = photos.map((e) => e.path).toList();
          await Provider.of<WorkProvider>(context, listen: false).completeInstallation(
             widget.item.id, secretId, widget.item.server, profileName, coordinates, secretName, photoPaths, 
-            existingPhotos: finalExistingPhotos
+            existingPhotos: finalExistingPhotos,
+            ssidName: ssidName,
+            ssidPassword: ssidPassword,
+            signalLevel: signalLevel,
+            installationDate: installationDate
          );
          
          // Success action handled by caller (Dialog) clearing itself, or we can show snackbar here?
@@ -391,6 +408,12 @@ class _InstallationDetailScreenState extends State<InstallationDetailScreen> {
                     ),
                   ),
                if (inst.secretName != null) Text('PPPoE Account: ${inst.secretName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+               if (inst.ssidName != null && inst.ssidName!.isNotEmpty) Text('SSID: ${inst.ssidName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+               if (inst.ssidPassword != null && inst.ssidPassword!.isNotEmpty) Text('SSID Password: ${inst.ssidPassword}', style: const TextStyle(fontWeight: FontWeight.bold)),
+               if (inst.signalLevel != null && inst.signalLevel!.isNotEmpty) 
+                  Text('Signal/Redaman: ${inst.signalLevel} dBm', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+               if (inst.installationDate != null && inst.installationDate!.isNotEmpty) 
+                  Text('Installation Date: ${inst.installationDate}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
                if (inst.coordinates != null) 
                   InkWell(
                       onTap: () async {
@@ -513,7 +536,20 @@ class InstallationCompletionDialog extends StatefulWidget {
   final List<String> initialPhotos;
   final String? initialSecretId;
   final bool isUpdate;
-  final Future<void> Function(String secretId, String? profileName, String coordinates, String secretName, List<XFile> photos, List<String> finalExistingPhotos) onConfirm;
+  final Future<void> Function(
+    String secretId, 
+    String? profileName, 
+    String coordinates, 
+    String secretName, 
+    List<XFile> photos, 
+    List<String> finalExistingPhotos,
+    {
+      String? ssidName,
+      String? ssidPassword,
+      String? signalLevel,
+      String? installationDate,
+    }
+  ) onConfirm;
 
   const InstallationCompletionDialog({
     super.key,
@@ -539,6 +575,12 @@ class _InstallationCompletionDialogState extends State<InstallationCompletionDia
   bool _isGettingLocation = false;
   bool _isSubmitting = false; // Add this
   List<XFile> _selectedPhotos = [];
+  
+  // New Field Controllers
+  final _ssidNameController = TextEditingController();
+  final _ssidPasswordController = TextEditingController();
+  final _redamanController = TextEditingController();
+  DateTime _installationDate = DateTime.now();
   // Existing photos are managed by parent usually, but here we just need to know if we have ANY photos (new or old) for validation.
   // Actually, the parent handles passing existing photos to the complete function. The dialog just handles NEW photos collection?
   // Wait, if I want to show existing photos, I need them passed in.
@@ -563,6 +605,22 @@ class _InstallationCompletionDialogState extends State<InstallationCompletionDia
     _selectedSecretId = widget.initialSecretId;
     _capturedCoordinates = widget.initialCoordinates;
     _currentExistingPhotos = List.from(widget.initialPhotos);
+    
+    // Initialize if update
+    if (widget.isUpdate) {
+        final reg = Provider.of<WorkProvider>(context, listen: false).registrations.firstWhere((r) => r.installation?.secretId == widget.initialSecretId, orElse: () => throw Exception('Reg not found'));
+        if (reg.installation != null) {
+            _ssidNameController.text = reg.installation!.ssidName ?? '';
+            _ssidPasswordController.text = reg.installation!.ssidPassword ?? '';
+            _redamanController.text = reg.installation!.signalLevel ?? '';
+            if (reg.installation!.installationDate != null) {
+                try {
+                    _installationDate = DateTime.parse(reg.installation!.installationDate!);
+                } catch(_) {}
+            }
+        }
+    }
+
     _loadData();
     if (_capturedCoordinates == null) {
         _autoGetLocation();
@@ -617,6 +675,14 @@ class _InstallationCompletionDialogState extends State<InstallationCompletionDia
       } finally {
           if (mounted) setState(() => _isGettingLocation = false);
       }
+  }
+
+  @override
+  void dispose() {
+    _ssidNameController.dispose();
+    _ssidPasswordController.dispose();
+    _redamanController.dispose();
+    super.dispose();
   }
 
   @override
@@ -690,6 +756,50 @@ class _InstallationCompletionDialogState extends State<InstallationCompletionDia
                                 child: Text(p['name'] ?? 'Unknown'),
                             )).toList(),
                             onChanged: (val) => setState(() => _selectedProfile = val),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // NEW FIELDS
+                        const Text('Setup Details:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        
+                        InkWell(
+                          onTap: () async {
+                            final d = await showDatePicker(
+                              context: context, 
+                              initialDate: _installationDate, 
+                              firstDate: DateTime(2020), 
+                              lastDate: DateTime(2030)
+                            );
+                            if (d != null) setState(() => _installationDate = d);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(4)),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Installation Date: ${DateFormat('yyyy-MM-dd').format(_installationDate)}'),
+                                const Icon(Icons.calendar_today, size: 16),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _ssidNameController,
+                          decoration: const InputDecoration(labelText: 'SSID Name (Optional)', border: OutlineInputBorder()),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _ssidPasswordController,
+                          decoration: const InputDecoration(labelText: 'SSID Password (Optional)', border: OutlineInputBorder()),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _redamanController,
+                          decoration: const InputDecoration(labelText: 'Redaman / Signal Level (dBm)', border: OutlineInputBorder()),
+                          keyboardType: TextInputType.text,
                         ),
                         const SizedBox(height: 16),
                         
@@ -808,7 +918,18 @@ class _InstallationCompletionDialogState extends State<InstallationCompletionDia
                       final secretName = _secrets.firstWhere((s) => s['.id'] == _selectedSecretId)['name'];
                       
                       try {
-                          await widget.onConfirm(_selectedSecretId!, _selectedProfile, _capturedCoordinates!, secretName, _selectedPhotos, _currentExistingPhotos);
+                          await widget.onConfirm(
+                              _selectedSecretId!, 
+                              _selectedProfile, 
+                              _capturedCoordinates!, 
+                              secretName, 
+                              _selectedPhotos, 
+                              _currentExistingPhotos,
+                              ssidName: _ssidNameController.text,
+                              ssidPassword: _ssidPasswordController.text,
+                              signalLevel: _redamanController.text,
+                              installationDate: DateFormat('yyyy-MM-dd').format(_installationDate),
+                          );
                           if(mounted) Navigator.pop(context);
                       } catch(e) {
                           // Error shown by parent Scaffold logic or here?

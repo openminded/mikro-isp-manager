@@ -71,7 +71,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
                     const secrets = await MikrotikApi.getPPPSecrets(server); // Reads cache
                     secrets.forEach((s: any) => {
-                        const key = `${server.id}_${s.name}`;
+                        const key = `${String(server.id).toLowerCase()}-${String(s.name).toLowerCase().trim()}`;
                         const meta = metaData[key] || {};
 
                         // Link with Registration
@@ -99,14 +99,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                             comment: s.comment,
                             serverName: server.name,
                             serverId: server.id,
+                            crmId: meta.crmId, // Fix: Map the SQL UUID
                             whatsapp: meta.whatsapp,
-                            realName: realName,
+                            realName: meta.realName || realName, // Fix: Prioritize SQL realName
                             registrationId: registrationId,
                             lat: meta.lat,
                             long: meta.long,
                             photos: meta.photos || [],
                             ktp: meta.ktp,
                             activationDate: meta.activationDate,
+                            installationDate: meta.installationDate,
+                            sub_area_id: meta.sub_area_id,
+                            ssidName: meta.ssidName,
+                            ssidPassword: meta.ssidPassword,
+                            signalLevel: meta.signalLevel,
                             odpId: meta.odp_id || meta.odpId
                         });
                     });

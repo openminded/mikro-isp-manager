@@ -171,7 +171,20 @@ class WorkProvider with ChangeNotifier {
     await _api.put('/registrations/$id', updates);
   }
   
-  Future<void> completeInstallation(String id, String secretId, String serverId, String? profileName, String coordinates, String secretName, List<String> photoPaths, {List<String>? existingPhotos}) async {
+  Future<void> completeInstallation(
+    String id, 
+    String secretId, 
+    String serverId, 
+    String? profileName, 
+    String coordinates, 
+    String secretName, 
+    List<String> photoPaths, {
+    List<String>? existingPhotos,
+    String? ssidName,
+    String? ssidPassword,
+    String? signalLevel,
+    String? installationDate,
+  }) async {
      
      final server = _servers.firstWhere((s) => s.id == serverId || s.name == serverId, orElse: () => throw Exception('Server not found'));
      
@@ -196,12 +209,15 @@ class WorkProvider with ChangeNotifier {
         'command': command
      });
 
-     // 2. Update Registration via Multipart (Complete Endpoint)
      Map<String, String> fields = {
         'secretId': secretId,
         'secretName': secretName,
         'note': reg.workingOrderNote ?? '', 
-        'coordinates': coordinates
+        'coordinates': coordinates,
+        'ssidName': ssidName ?? '',
+        'ssidPassword': ssidPassword ?? '',
+        'signalLevel': signalLevel ?? '',
+        'installationDate': installationDate ?? ''
      };
      
      if (existingPhotos != null && existingPhotos.isNotEmpty) {

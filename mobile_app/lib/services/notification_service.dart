@@ -1,5 +1,6 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -16,7 +17,7 @@ class NotificationService {
   bool _isInitialized = false;
 
   Future<void> init() async {
-    if (_isInitialized) return;
+    if (_isInitialized || kIsWeb) return;
 
     // Android Initialization
     const AndroidInitializationSettings initializationSettingsAndroid =
@@ -65,6 +66,7 @@ class NotificationService {
     required String body,
     String? payload,
   }) async {
+    if (kIsWeb) return;
     const AndroidNotificationDetails androidPlatformChannelSpecifics =
         AndroidNotificationDetails(
       'work_updates_channel', // channel id

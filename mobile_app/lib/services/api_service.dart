@@ -55,6 +55,9 @@ class ApiService {
 
   Future<dynamic> get(String endpoint) async {
     final uri = Uri.parse('$baseUrl$endpoint');
+    if (kDebugMode) {
+      print('[API] GET Request: $uri');
+    }
     final response = await http.get(uri, headers: _headers);
     return _processResponse(response);
   }
@@ -134,13 +137,26 @@ class ApiService {
   dynamic _processResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return null;
-      return jsonDecode(response.body);
+      try {
+        return jsonDecode(response.body);
+      } catch (e) {
+        if (kDebugMode) {
+          print('[API] JSON Parsing Error: $e');
+          print('[API] Body: ${response.body}');
+        }
+        throw Exception('Invalid JSON response');
+      }
     } else {
       String message = 'Unknown error';
       try {
         final body = jsonDecode(response.body);
         message = body['error'] ?? message;
-      } catch (_) {}
+      } catch (e) {
+        if (kDebugMode) {
+          print('[API] Response Error: ${response.statusCode}');
+          print('[API] Body: ${response.body}');
+        }
+      }
       throw Exception(message);
     }
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/customer.dart';
 import '../../providers/customer_provider.dart';
+import '../../providers/auth_provider.dart';
 
 class CustomerDetailScreen extends StatefulWidget {
   final Customer customer;
@@ -55,6 +56,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
        final nameController = TextEditingController(text: widget.customer.realName ?? widget.customer.name);
        final whatsappController = TextEditingController(text: widget.customer.whatsapp);
        final addressController = TextEditingController(text: widget.customer.address);
+       final installationDateController = TextEditingController(text: widget.customer.installationDate);
+       final ssidNameController = TextEditingController(text: widget.customer.ssidName);
+       final ssidPasswordController = TextEditingController(text: widget.customer.ssidPassword);
+       final signalLevelController = TextEditingController(text: widget.customer.signalLevel);
        
        showDialog(
           context: context,
@@ -67,6 +72,15 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                           TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Real Name')),
                           TextField(controller: whatsappController, decoration: const InputDecoration(labelText: 'WhatsApp')),
                           TextField(controller: addressController, decoration: const InputDecoration(labelText: 'Address')),
+                          const Divider(height: 32),
+                          const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text('Installation Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))
+                          ),
+                          TextField(controller: installationDateController, decoration: const InputDecoration(labelText: 'Installation Date (YYYY-MM-DD)')),
+                          TextField(controller: ssidNameController, decoration: const InputDecoration(labelText: 'SSID Name')),
+                          TextField(controller: ssidPasswordController, decoration: const InputDecoration(labelText: 'SSID Password')),
+                          TextField(controller: signalLevelController, decoration: const InputDecoration(labelText: 'Redaman / Signal Level')),
                       ],
                   ),
               ),
@@ -83,8 +97,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                                       'realName': nameController.text,
                                       'whatsapp': whatsappController.text,
                                       'address': addressController.text,
+                                      'installationDate': installationDateController.text,
+                                      'ssidName': ssidNameController.text,
+                                      'ssidPassword': ssidPasswordController.text,
+                                      'signalLevel': signalLevelController.text,
                                       'serverId': widget.customer.serverId,
-                                      'name': widget.customer.name // keep existing mikrotik name/id reference
+                                      'name': widget.customer.name
                                   }
                               );
                               if (mounted) {
@@ -107,6 +125,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final customer = widget.customer;
+    final user = Provider.of<AuthProvider>(context).user;
+    final isAdmin = user?.role == 'admin' || user?.role == 'superadmin';
     
     return Scaffold(
       appBar: AppBar(title: const Text('Customer Details')),
@@ -147,29 +167,37 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                  _buildRow('WhatsApp', customer.whatsapp ?? '-'),
                  _buildRow('Address', customer.address ?? '-'),
               ]),
+              const SizedBox(height: 24),
+              _buildSection('Setup & Installation', [
+                 _buildRow('Install Date', customer.installationDate ?? '-'),
+                 _buildRow('Signal/Redaman', customer.signalLevel ?? '-'),
+                 _buildRow('SSID Name', customer.ssidName ?? '-'),
+                 _buildRow('SSID Password', customer.ssidPassword ?? '-'),
+              ]),
               
-              const SizedBox(height: 32),
-              
-              SizedBox(
-                 width: double.infinity,
-                 child: ElevatedButton.icon(
-                    onPressed: _isProcessing ? null : _showEditDialog,
-                    icon: const Icon(Icons.edit),
-                    label: const Text('Edit Details'),
-                    style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
-                 ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                 width: double.infinity,
-                 child: OutlinedButton.icon(
-                    onPressed: _isProcessing ? null : _toggleStatus,
-                    icon: Icon(customer.disabled ? Icons.check_circle : Icons.block, color: customer.disabled ? Colors.green : Colors.red),
-                    label: Text(customer.disabled ? 'Unblock Customer' : 'Block Customer', 
-                        style: TextStyle(color: customer.disabled ? Colors.green : Colors.red)),
-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(16)),
-                 ),
-              ),
+              if (isAdmin) ...[
+                  const SizedBox(height: 32),
+                  SizedBox(
+                     width: double.infinity,
+                     child: ElevatedButton.icon(
+                        onPressed: _isProcessing ? null : _showEditDialog,
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Edit Details'),
+                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
+                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                     width: double.infinity,
+                     child: OutlinedButton.icon(
+                        onPressed: _isProcessing ? null : _toggleStatus,
+                        icon: Icon(customer.disabled ? Icons.check_circle : Icons.block, color: customer.disabled ? Colors.green : Colors.red),
+                        label: Text(customer.disabled ? 'Unblock Customer' : 'Block Customer', 
+                            style: TextStyle(color: customer.disabled ? Colors.green : Colors.red)),
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(16)),
+                     ),
+                  ),
+              ],
            ],
         ),
       ),

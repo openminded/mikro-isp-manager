@@ -56,6 +56,10 @@ class Installation {
   final String? coordinates;
   final String? secretId;
   final String? secretName;
+  final String? ssidName;
+  final String? ssidPassword;
+  final String? signalLevel;
+  final String? installationDate;
   final InstallationCost? cost;
 
   Installation({
@@ -67,6 +71,10 @@ class Installation {
     this.coordinates,
     this.secretId,
     this.secretName,
+    this.ssidName,
+    this.ssidPassword,
+    this.signalLevel,
+    this.installationDate,
     this.cost,
   });
 
@@ -80,6 +88,10 @@ class Installation {
       coordinates: json['coordinates'],
       secretId: json['secretId'],
       secretName: json['secretName'],
+      ssidName: json['ssidName'],
+      ssidPassword: json['ssidPassword'],
+      signalLevel: json['signalLevel'],
+      installationDate: json['installationDate'],
       cost: json['cost'] != null ? InstallationCost.fromJson(json['cost']) : null,
     );
   }

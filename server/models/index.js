@@ -37,7 +37,12 @@ export const Customer = sequelize.define('Customer', {
     photos: { type: DataTypes.JSON, defaultValue: [] },
     ktp: { type: DataTypes.STRING, allowNull: true },
     activationDate: { type: DataTypes.DATEONLY, allowNull: true },
-    mapsUrl: { type: DataTypes.STRING, allowNull: true } // Registration Location Link
+    mapsUrl: { type: DataTypes.STRING, allowNull: true }, // Registration Location Link
+    // Installation Data
+    installationDate: { type: DataTypes.DATEONLY, allowNull: true },
+    ssidName: { type: DataTypes.STRING, allowNull: true },
+    ssidPassword: { type: DataTypes.STRING, allowNull: true },
+    signalLevel: { type: DataTypes.STRING, allowNull: true } // Redaman
 });
 
 export const Invoice = sequelize.define('Invoice', {
@@ -96,6 +101,20 @@ export const initDB = async () => {
         // [FIX] Disable alter: true to prevent SQLite corruption "table has 10 columns but 11 values supplied"
         // We handle critical schema updates manually below or via scripts.
         await sequelize.sync({ alter: false });
+
+        // [MIGRATION-V3] Standardize all existing mikrotik_names to lowercase for consistency
+        // This is critical for Linux-based production servers like aaPanel.
+        console.log('[Database] Running mikrotik_name standardization (V3)...');
+        const customersToFix = await Customer.findAll();
+        for (const c of customersToFix) {
+            const currentName = c.mikrotik_name || '';
+            const lowerName = currentName.toLowerCase().trim();
+            if (currentName !== lowerName) {
+                await c.update({ mikrotik_name: lowerName });
+                console.log(`[Database] Migrated: ${currentName} -> ${lowerName}`);
+            }
+        }
+        console.log('[Database] Standardization complete.');
 
         // Explicitly check for sub_area_id column in Customers
         const tableInfo = await sequelize.getQueryInterface().describeTable('Customers');
@@ -160,6 +179,38 @@ export const initDB = async () => {
         if (!tableInfo.mapsUrl) {
             console.log('[Database] Adding missing column mapsUrl to Customers...');
             await sequelize.getQueryInterface().addColumn('Customers', 'mapsUrl', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+        
+        if (!tableInfo.installationDate) {
+            console.log('[Database] Adding missing column installationDate to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'installationDate', {
+                type: DataTypes.DATEONLY,
+                allowNull: true
+            });
+        }
+
+        if (!tableInfo.ssidName) {
+            console.log('[Database] Adding missing column ssidName to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'ssidName', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
+        if (!tableInfo.ssidPassword) {
+            console.log('[Database] Adding missing column ssidPassword to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'ssidPassword', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
+        if (!tableInfo.signalLevel) {
+            console.log('[Database] Adding missing column signalLevel to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'signalLevel', {
                 type: DataTypes.STRING,
                 allowNull: true
             });

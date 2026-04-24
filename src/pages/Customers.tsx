@@ -134,7 +134,7 @@ export function Customers() {
             if (!server) throw new Error("Target server not found");
 
             if (saveMode === 'server') {
-                // SERVER SIDE: Mikrotik Update
+                // 1. Mikrotik Update
                 const mikrotikPayload = {
                     name: data.name,
                     password: data.password,
@@ -149,38 +149,47 @@ export function Customers() {
                     await MikrotikApi.addPPPSecret(server, mikrotikPayload);
                 }
 
-                // Sync cache immediately to reflect changes
+                // Sync cache immediately to reflect changes in the list
                 await MikrotikApi.syncSecrets(server);
                 setSyncStatus({ type: 'success', message: editingCustomer ? "Mikrotik Secret updated successfully." : "Mikrotik Secret created successfully." });
+            }
 
-            } else {
-                // APP SIDE: Local Data Update Only (No Mikrotik Connection)
-                if (!editingCustomer) throw new Error("Cannot create new customer in App mode. Please create in Server mode first.");
-
-                // Use the new endpoint to update SQL and JSON metadata directly
-                await axios.put(`/api/customers/${editingCustomer.id}`, {
-                    serverId: targetServerId, // Required for backend lookup
-                    name: data.name, // Keep consistency if needed, but mainly realName below
+            // [NEW] Always update CRM / Local Data if we are editing an existing customer
+            // or if we just created one (though for new ones, the sync above creates the SQL record).
+            // To be safe, we always call the PUT endpoint if we have basic CRM info.
+            if (editingCustomer || saveMode === 'app') {
+                // Use CRM ID (SQL UUID) if available, otherwise fallback to name/Mikrotik ID
+                const customerId = editingCustomer?.crmId || (editingCustomer ? (editingCustomer.id || editingCustomer.name) : data.name);
+                
+                await axios.put(`/api/customers/${customerId}`, {
+                    serverId: targetServerId,
+                    name: data.name,
                     realName: data.realName,
                     whatsapp: data.whatsapp,
-                    address: data.address, // mapping needed if used
+                    address: data.address,
                     sub_area_id: data.sub_area_id,
-                    coordinates: `${data.lat},${data.long}`,
+                    coordinates: `${data.lat || ''},${data.long || ''}`,
                     ktp: data.ktp,
                     activationDate: data.activationDate,
-                    photos: data.photos
+                    installationDate: data.installationDate,
+                    photos: data.photos,
+                    ssidName: data.ssidName,
+                    ssidPassword: data.ssidPassword,
+                    signalLevel: data.signalLevel
                 });
 
-                // Also Handle Registration Real Name Update if needed (Legacy Support)
-                if (data.realName && editingCustomer.registrationId) {
-                    try {
-                        await axios.put(`/api/registrations/${editingCustomer.registrationId}`, {
-                            fullName: data.realName
-                        });
-                    } catch (e) { console.error("Failed to update registration name", e); }
+                if (saveMode === 'app') {
+                    setSyncStatus({ type: 'success', message: "App Data updated successfully (Saved to DB)." });
                 }
+            }
 
-                setSyncStatus({ type: 'success', message: "App Data updated successfully (Saved to DB)." });
+            // Also Handle Registration Real Name Update if needed (Legacy Support)
+            if (data.realName && editingCustomer?.registrationId) {
+                try {
+                    await axios.put(`/api/registrations/${editingCustomer.registrationId}`, {
+                        fullName: data.realName
+                    });
+                } catch (e) { console.error("Failed to update registration name", e); }
             }
 
             setIsModalOpen(false);
@@ -638,7 +647,11 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         ktp: '',
         activationDate: '',
         photos: [] as string[],
-        sub_area_id: ''
+        sub_area_id: '',
+        installationDate: '',
+        ssidName: '',
+        ssidPassword: '',
+        signalLevel: ''
     });
 
     const [uploading, setUploading] = useState(false);
@@ -704,7 +717,11 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 ktp: initialData.ktp || '',
                 activationDate: initialData.activationDate || '',
                 photos: initialData.photos || [],
-                sub_area_id: initialData.sub_area_id || ''
+                sub_area_id: initialData.sub_area_id || '',
+                installationDate: initialData.installationDate || '',
+                ssidName: initialData.ssidName || '',
+                ssidPassword: initialData.ssidPassword || '',
+                signalLevel: initialData.signalLevel || ''
             });
         } else {
             setFormData({
@@ -721,7 +738,11 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 ktp: '',
                 activationDate: '',
                 photos: [],
-                sub_area_id: ''
+                sub_area_id: '',
+                installationDate: '',
+                ssidName: '',
+                ssidPassword: '',
+                signalLevel: ''
             });
         }
     }, [initialData, isOpen, servers]);
@@ -758,7 +779,11 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
             ktp: formData.ktp || undefined,
             activationDate: formData.activationDate || undefined,
             photos: formData.photos,
-            sub_area_id: formData.sub_area_id || undefined
+            sub_area_id: formData.sub_area_id || undefined,
+            installationDate: formData.installationDate || undefined,
+            ssidName: formData.ssidName || undefined,
+            ssidPassword: formData.ssidPassword || undefined,
+            signalLevel: formData.signalLevel || undefined
         }, formData.serverId, activeTab);
     };
 
@@ -920,10 +945,30 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                             </div>
                                         </div>
                                         <div className="space-y-2">
-                                            <label className="text-sm font-medium text-slate-700">Activation Date</label>
+                                            <label className="text-sm font-medium text-slate-700">Activation / Installation Date</label>
                                             <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                                value={formData.activationDate} onChange={e => setFormData({ ...formData, activationDate: e.target.value })} />
+                                                value={formData.installationDate || formData.activationDate} 
+                                                onChange={e => setFormData({ ...formData, installationDate: e.target.value, activationDate: e.target.value })} 
+                                            />
                                         </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-700">SSID Name</label>
+                                        <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                            value={formData.ssidName} onChange={e => setFormData({ ...formData, ssidName: e.target.value })} placeholder="Wifi Name" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-700">SSID Password</label>
+                                        <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                            value={formData.ssidPassword} onChange={e => setFormData({ ...formData, ssidPassword: e.target.value })} placeholder="Wifi Password" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-700">Signal (Redaman)</label>
+                                        <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                            value={formData.signalLevel} onChange={e => setFormData({ ...formData, signalLevel: e.target.value })} placeholder="-19 dBm" />
                                     </div>
                                 </div>
 

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { Trash2, UserPlus, X, Search, UserMinus, ChevronLeft, ChevronRight, Filter, Eye } from 'lucide-react';
+import { Trash2, UserPlus, X, Search, UserMinus, ChevronLeft, ChevronRight, Filter, Eye, Edit, Users, MapPin, Hash, User } from 'lucide-react';
 import type { NetworkNode } from '@/pages/Monitoring';
 import { useData } from '@/context/DataContext';
 import { useServers } from '@/context/ServerContext';
@@ -12,6 +12,7 @@ interface TopologyListViewProps {
     filterType?: string;
     customers?: any[];
     networkStatus: Record<string, any>;
+    onEdit?: (node: NetworkNode) => void;
     onDelete?: (ids: string[]) => void;
     onUnassignOnt?: (ontNode: NetworkNode) => void;
     onViewOnMap?: (lat: number, lng: number) => void;
@@ -25,7 +26,7 @@ const TABS = [
     { id: 'ONT', label: 'ONT' },
 ];
 
-export function TopologyListView({ nodes, searchQuery: externalSearch, networkStatus, onDelete, onUnassignOnt, onViewOnMap }: TopologyListViewProps) {
+export function TopologyListView({ nodes, searchQuery: externalSearch, networkStatus, onEdit, onDelete, onUnassignOnt, onViewOnMap }: TopologyListViewProps) {
     const { customers, refreshCustomers } = useData();
     const { servers } = useServers();
     const [subAreas, setSubAreas] = useState<any[]>([]);
@@ -41,6 +42,9 @@ export function TopologyListView({ nodes, searchQuery: externalSearch, networkSt
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage] = useState(10);
+
+    // Members Viewing
+    const [viewingMembersNode, setViewingMembersNode] = useState<NetworkNode | null>(null);
 
     // Assigning State
     const [assigningOdp, setAssigningOdp] = useState<NetworkNode | null>(null);
@@ -222,6 +226,35 @@ export function TopologyListView({ nodes, searchQuery: externalSearch, networkSt
         }
     };
 
+    const handleDisconnectNode = async (node: NetworkNode) => {
+        if (!confirm(`Disconnect "${node.name}" from its parent?`)) return;
+        try {
+            await axios.put(`/api/network/nodes/${node.id}`, { ...node, parentId: '' });
+            if (onUnassignOnt) onUnassignOnt(node); // Reuse refresh logic
+        } catch (e) {
+            alert('Failed to disconnect node');
+        }
+    };
+
+    const handleDisconnectCustomer = async (custName: string) => {
+        if (!confirm(`Unassign customer "${custName}" from this ODP?`)) return;
+        try {
+            if (!viewingMembersNode) return;
+            const rootServer = getRootServer(viewingMembersNode);
+            if (!rootServer) return;
+
+            await axios.post('/api/network/link-customer', {
+                serverId: rootServer.refId,
+                customerId: custName,
+                odpId: null
+            });
+            await refreshCustomers(true);
+            if (onUnassignOnt) onUnassignOnt(viewingMembersNode); // Refresh parent view if needed
+        } catch (e) {
+            alert('Failed to disconnect customer');
+        }
+    };
+
     return (
         <div className="flex-1 bg-white flex flex-col overflow-hidden w-full">
             {/* Tab Bar */}
@@ -300,6 +333,7 @@ export function TopologyListView({ nodes, searchQuery: externalSearch, networkSt
                                 />
                             </th>
                             <th className="px-6 py-4">Node Name</th>
+                            {activeTab === 'ONT' && <th className="px-6 py-4">Customer Name</th>}
                             <th className="px-6 py-4">Location</th>
                             <th className="px-6 py-4">Capacity / Usage</th>
                             <th className="px-6 py-4">Health Status</th>
@@ -327,6 +361,13 @@ export function TopologyListView({ nodes, searchQuery: externalSearch, networkSt
                                             <span className="text-[10px] text-slate-400 mt-0.5">{node.notes || 'No description'}</span>
                                         </div>
                                     </td>
+                                    {activeTab === 'ONT' && (
+                                        <td className="px-6 py-3">
+                                            <span className="text-sm font-medium text-slate-700">
+                                                {customers.find(c => c.name === node.refId)?.comment || '-'}
+                                            </span>
+                                        </td>
+                                    )}
                                     <td className="px-6 py-3">
                                         <div className="flex flex-col">
                                             <span className="text-[11px] text-slate-600 font-medium">{node.lat.toFixed(6)}, {node.lng.toFixed(6)}</span>
@@ -368,9 +409,20 @@ export function TopologyListView({ nodes, searchQuery: externalSearch, networkSt
                                             <button 
                                                 onClick={() => onViewOnMap && onViewOnMap(node.lat, node.lng)}
                                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-[10px] font-bold uppercase transition-colors"
+                                                title="View on Map"
                                             >
                                                 <Eye className="w-3.5 h-3.5" /> View
                                             </button>
+
+                                            {node.type !== 'ONT' && (
+                                                <button 
+                                                    onClick={() => setViewingMembersNode(node)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg text-[10px] font-bold uppercase transition-colors"
+                                                    title="View Members / Children"
+                                                >
+                                                    <Users className="w-3.5 h-3.5" /> Members
+                                                </button>
+                                            )}
 
                                             {node.type === 'ODP' && (
                                                 <button 
@@ -381,6 +433,13 @@ export function TopologyListView({ nodes, searchQuery: externalSearch, networkSt
                                                     <UserPlus className="w-4 h-4" />
                                                 </button>
                                             )}
+                                            <button 
+                                                onClick={() => onEdit && onEdit(node)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg text-[10px] font-bold uppercase transition-colors"
+                                            >
+                                                <Edit className="w-3.5 h-3.5" /> Edit
+                                            </button>
+
                                             {node.type === 'ONT' && (
                                                 <button 
                                                     onClick={() => handleUnassignFromList(node)} 
@@ -532,6 +591,123 @@ export function TopologyListView({ nodes, searchQuery: externalSearch, networkSt
                                     className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-200 transition-all"
                                 >
                                     Confirm Assign
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* VIEW MEMBERS MODAL */}
+            {viewingMembersNode && (() => {
+                const members = nodes.filter(n => n.parentId === viewingMembersNode.id);
+                const assignedCustomers = viewingMembersNode.type === 'ODP' 
+                    ? customers.filter(c => c.odpId === viewingMembersNode.id)
+                    : [];
+
+                return (
+                    <div className="fixed inset-0 z-[1000] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+                            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
+                                <div>
+                                    <h3 className="font-bold text-lg">{viewingMembersNode.name} - Members</h3>
+                                    <p className="text-[10px] text-white/70 uppercase font-bold tracking-widest mt-0.5">
+                                        Type: {viewingMembersNode.type} • {viewingMembersNode.type === 'ODP' ? 'Assigned Customers' : 'Connected Devices'}
+                                    </p>
+                                </div>
+                                <button onClick={() => setViewingMembersNode(null)} className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors">
+                                    <X className="w-6 h-6"/>
+                                </button>
+                            </div>
+
+                            <div className="p-0 overflow-y-auto flex-1 bg-slate-50/50">
+                                {viewingMembersNode.type === 'ODP' ? (
+                                    assignedCustomers.length === 0 ? (
+                                        <div className="py-20 text-center text-slate-400">
+                                            <Users className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                                            <p className="text-sm font-medium">No customers assigned to this ODP</p>
+                                        </div>
+                                    ) : (
+                                        <div className="divide-y divide-slate-100 bg-white">
+                                            {assignedCustomers.map(c => (
+                                                <div key={c.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-600 border border-green-100">
+                                                            <User className="w-5 h-5" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-slate-800 text-sm">{c.comment || c.name}</p>
+                                                            <p className="text-[11px] text-slate-400 font-medium">PPPoE: {c.name} • {c['remote-address'] || 'No IP'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={cn(
+                                                            "text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider",
+                                                            c.disabled ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600"
+                                                        )}>
+                                                            {c.disabled ? 'Inactive' : 'Active'}
+                                                        </span>
+                                                        <button 
+                                                            onClick={() => handleDisconnectCustomer(c.name)}
+                                                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
+                                                            title="Disconnect from ODP"
+                                                        >
+                                                            <UserMinus className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )
+                                ) : (
+                                    members.length === 0 ? (
+                                        <div className="py-20 text-center text-slate-400">
+                                            <MapPin className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                                            <p className="text-sm font-medium">No connected child devices found</p>
+                                        </div>
+                                    ) : (
+                                        <div className="divide-y divide-slate-100 bg-white">
+                                            {members.map(m => (
+                                                <div key={m.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={cn(
+                                                            "w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm",
+                                                            m.type === 'OLT' ? 'bg-purple-600' :
+                                                            m.type === 'ODC' ? 'bg-blue-600' :
+                                                            m.type === 'ODP' ? 'bg-cyan-500' : 'bg-green-500'
+                                                        )}>
+                                                            <Hash className="w-5 h-5" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-slate-800 text-sm">{m.name}</p>
+                                                            <p className="text-[11px] text-slate-400 font-medium uppercase tracking-tighter">{m.type} • {m.lat.toFixed(6)}, {m.lng.toFixed(6)}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button 
+                                                            onClick={() => { setViewingMembersNode(null); onViewOnMap && onViewOnMap(m.lat, m.lng); }}
+                                                            className="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-[10px] font-bold uppercase transition-colors border border-blue-100"
+                                                        >
+                                                            Track on Map
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleDisconnectNode(m)}
+                                                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100 shadow-sm"
+                                                            title="Disconnect Connection"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )
+                                )}
+                            </div>
+                            
+                            <div className="px-6 py-4 border-t border-slate-100 bg-white flex justify-end">
+                                <button onClick={() => setViewingMembersNode(null)} className="px-6 py-2 bg-slate-800 text-white text-xs font-bold rounded-lg hover:bg-slate-900 transition-all">
+                                    Close
                                 </button>
                             </div>
                         </div>

@@ -18,6 +18,10 @@ class Customer {
   final bool disabled;
   final String? lastLoggedOut;
   final String? address;
+  final String? installationDate;
+  final String? ssidName;
+  final String? ssidPassword;
+  final String? signalLevel;
 
   Customer({
     required this.id,
@@ -39,29 +43,37 @@ class Customer {
     required this.disabled,
     this.lastLoggedOut,
     this.address,
+    this.installationDate,
+    this.ssidName,
+    this.ssidPassword,
+    this.signalLevel,
   });
 
   factory Customer.fromJson(Map<String, dynamic> json) {
     return Customer(
-      id: json['id'] ?? '',
-      serverId: json['serverId'] ?? '',
-      serverName: json['serverName'] ?? '',
-      name: json['name'] ?? '',
-      realName: json['realName'],
-      password: json['password'],
-      comment: json['comment'],
-      profile: json['profile'] ?? '',
-      remoteAddress: json['remote-address'],
-      whatsapp: json['whatsapp'],
-      lat: json['lat'],
-      long: json['long'],
-      ktp: json['ktp'],
-      activationDate: json['activationDate'],
+      id: json['id']?.toString() ?? '',
+      serverId: json['serverId']?.toString() ?? '',
+      serverName: json['serverName']?.toString() ?? 'Unknown',
+      name: json['name']?.toString() ?? '',
+      realName: json['realName']?.toString() ?? '',
+      password: json['password']?.toString(),
+      comment: json['comment']?.toString() ?? '',
+      profile: json['profile']?.toString() ?? 'default',
+      remoteAddress: json['remote-address']?.toString() ?? '-',
+      whatsapp: json['whatsapp']?.toString() ?? '',
+      lat: json['lat']?.toString() ?? '',
+      long: json['long']?.toString() ?? '',
+      ktp: json['ktp']?.toString() ?? '',
+      activationDate: json['activationDate']?.toString(),
       photos: (json['photos'] as List?)?.map((e) => e.toString()).toList() ?? [],
-      subAreaId: json['sub_area_id'],
-      disabled: json['disabled'] ?? false,
-      lastLoggedOut: json['last-logged-out'],
-      address: json['address'],
+      subAreaId: json['sub_area_id']?.toString(),
+      disabled: json['disabled'] == true || json['disabled'] == 'true',
+      lastLoggedOut: json['last-logged-out']?.toString() ?? '-',
+      address: json['address']?.toString() ?? '-',
+      installationDate: json['installationDate']?.toString(),
+      ssidName: json['ssidName']?.toString(),
+      ssidPassword: json['ssidPassword']?.toString(),
+      signalLevel: json['signalLevel']?.toString(),
     );
   }
 }

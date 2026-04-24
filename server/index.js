@@ -12,12 +12,13 @@ import archiver from 'archiver';
 import AdmZip from 'adm-zip';
 import PDFDocument from 'pdfkit';
 
+const { RouterOSAPI } = routeros;
+const APP_VERSION = '1.0.1-CRM-FIX-FINAL-V4';
+
 const { Op } = Sequelize;
 
 // Initialize Database
 initDB();
-
-const { RouterOSAPI } = routeros;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +26,88 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const HOST = '0.0.0.0';
+
+// --- Helper Functions & Database Setup ---
+
+const DB_LOGS_FILE = path.join(__dirname, 'data', 'logs.json');
+const getLogsDB = () => CACHE.logs;
+const saveLogsDB = (data) => {
+    CACHE.logs = data;
+    queueWrite('logs', data);
+};
+
+
+const getSessionsDB = () => CACHE.sessions;
+const saveSessionsDB = (data) => {
+    CACHE.sessions = data;
+    queueWrite('sessions', data);
+};
+
+
+
+const logActivity = async (req, action, details, level = 'info') => {
+    try {
+        let username = 'system';
+        let role = 'system';
+
+        const authHeader = req.headers.authorization;
+        if (authHeader) {
+            const token = authHeader.split(' ')[1];
+            const sessions = getSessionsDB();
+            if (sessions[token]) {
+                username = sessions[token].username;
+                role = sessions[token].role;
+            }
+        }
+
+        if (action === 'LOGIN' && details.username) {
+            username = details.username;
+            role = details.role || 'unknown';
+        }
+
+        const logEntry = {
+            id: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            level,
+            username,
+            role,
+            action,
+            details: typeof details === 'string' ? details : JSON.stringify(details),
+            ip: req.ip || req.connection?.remoteAddress || 'unknown'
+        };
+
+        // [CONFIG] Check if this action should be logged
+        if (CACHE.loggingConfig && CACHE.loggingConfig[action] === false) {
+            return;
+        }
+
+        // [OPTIMIZED] Use Cache instead of reading from disk on every log!
+        const logs = CACHE.logs || [];
+        logs.unshift(logEntry);
+        if (logs.length > 5000) logs.length = 5000;
+        
+        CACHE.logs = logs;
+        queueWrite('logs', logs);
+
+        console.log(`[LOG] ${action}: ${username} - ${logEntry.details}`);
+
+    } catch (e) {
+        console.error('Failed to write log:', e.message);
+    }
+};
+
+
+// --- Global Error Handlers (Stability) ---
+process.on('uncaughtException', (err) => {
+    console.error('[CRITICAL] Uncaught Exception:', err.message);
+    console.error(err.stack);
+    // In production, you might want to log this to a persistent file
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 
 
 
@@ -34,38 +117,231 @@ if (!fs.existsSync(path.join(__dirname, 'uploads'))) fs.mkdirSync(path.join(__di
 
 app.use(cors());
 app.use(express.json());
+
+// --- Debugging Middleware ---
+app.use((req, res, next) => {
+    console.log(`[REQ] ${req.method} ${req.url}`);
+    next();
+});
+
+// [DEBUG] Simple Connectivity Check
+app.get('/api/ping', (req, res) => {
+    console.log('[DEBUG] HIT /api/ping');
+    res.send('PONG');
+});
+
+
+// --- In-Memory Cache for JSON DBs (Performance & 502 prevention) ---
+const CACHE = {
+    logs: [],
+    sessions: {},
+    customers: {},
+    profiles: {},
+    registrations: [],
+    jobTitles: [],
+    employees: [],
+    damageTypes: [],
+    subAreas: [],
+    tickets: [],
+    paymentMethods: [],
+    networkNodes: [],
+    users: [],
+    status: {},
+    loggingConfig: {}
+};
+
+// Initial Load Function
+const loadJsonToCache = (file, cacheKey, isArray = true) => {
+    try {
+        if (fs.existsSync(file)) {
+            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+            CACHE[cacheKey] = data;
+        }
+    } catch (e) {
+        console.error(`[Cache] Failed to load ${cacheKey} from ${file}:`, e.message);
+        CACHE[cacheKey] = isArray ? [] : {};
+    }
+};
+
+const DB_FILES = {
+    logs: path.join(__dirname, 'data', 'logs.json'),
+    sessions: path.join(__dirname, 'data', 'sessions.json'),
+    customers: path.join(__dirname, 'data', 'customers.json'),
+    profiles: path.join(__dirname, 'data', 'profiles.json'),
+    registrations: path.join(__dirname, 'data', 'registrations.json'),
+    jobTitles: path.join(__dirname, 'data', 'job_titles.json'),
+    employees: path.join(__dirname, 'data', 'employees.json'),
+    damageTypes: path.join(__dirname, 'data', 'damage_types.json'),
+    subAreas: path.join(__dirname, 'data', 'sub_areas.json'),
+    tickets: path.join(__dirname, 'data', 'tickets.json'),
+    paymentMethods: path.join(__dirname, 'data', 'payment_methods.json'),
+    networkNodes: path.join(__dirname, 'data', 'network_nodes.json'),
+    users: path.join(__dirname, 'data', 'users.json'),
+    status: path.join(__dirname, 'data', 'network_status.json'),
+    loggingConfig: path.join(__dirname, 'data', 'logging_config.json')
+};
+
+// Ensure data directory exists before loading
+if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
+
+// Load all to cache on startup
+Object.keys(DB_FILES).forEach(key => {
+    const isArray = ['logs', 'registrations', 'jobTitles', 'employees', 'damageTypes', 'subAreas', 'tickets', 'paymentMethods', 'networkNodes', 'users'].includes(key);
+    loadJsonToCache(DB_FILES[key], key, isArray);
+});
+
+// [NEW] Serialized Write Queue for DB Stability (Prevents 502s from file contention)
+const writeQueues = {};
+
+const queueWrite = async (key, data, customPath = null) => {
+    const queueKey = customPath || key;
+    if (!writeQueues[queueKey]) {
+        writeQueues[queueKey] = Promise.resolve();
+    }
+    
+    // Chain the write operations to ensure serial execution per file
+    writeQueues[queueKey] = writeQueues[queueKey].then(async () => {
+        try {
+            const filePath = customPath || DB_FILES[key];
+            if (!filePath) return;
+
+            // Optimization: Remove pretty-printing for large data files to save CPU/Disk IO
+            const isLarge = ['logs', 'registrations', 'customers', 'tickets'].includes(key) || (customPath && customPath.includes('cache_'));
+            const json = isLarge ? JSON.stringify(data) : JSON.stringify(data, null, 2);
+            
+            await fs.promises.writeFile(filePath, json);
+        } catch (e) {
+            console.error(`[QueueWrite] Async write failed for ${queueKey}:`, e.message);
+        }
+    });
+
+    return writeQueues[queueKey];
+};
+
+
+// [NEW] Migration: Standardize Customer Meta Keys from _ to -
+if (CACHE.customers && typeof CACHE.customers === 'object') {
+    let migrated = false;
+    Object.keys(CACHE.customers).forEach(key => {
+        // Find keys using underscore as separator (UUID_NAME)
+        if (key.includes('_')) {
+            const newKey = key.replace('_', '-').toLowerCase().trim();
+            if (newKey !== key) {
+                CACHE.customers[newKey] = { ...CACHE.customers[key] };
+                delete CACHE.customers[key];
+                migrated = true;
+            }
+        } else if (key !== key.toLowerCase().trim()) {
+            const newKey = key.toLowerCase().trim();
+            CACHE.customers[newKey] = { ...CACHE.customers[key] };
+            delete CACHE.customers[key];
+            migrated = true;
+        }
+    });
+    if (migrated) {
+        console.log('[Migration] Standardized customer keys (Lowercase + Hyphen) in CACHE.customers');
+        queueWrite('customers', CACHE.customers);
+    }
+}
+
+// Health Check & Version
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        version: APP_VERSION, 
+        time: new Date().toISOString(),
+        db: 'connected'
+    });
+});
+
+
+// [DEBUG] Explicit Customers Route (Priority)
+app.get('/api/customers', async (req, res) => {
+
+    console.log('[DEBUG] HIT /api/customers');
+    try {
+        // Use models imported at line 9
+        const servers = await Server.findAll();
+        const sqlCustomers = await Customer.findAll();
+        
+        const sqlMap = new Map();
+        sqlCustomers.forEach(c => {
+            const key = `${String(c.server_id).toLowerCase()}-${String(c.mikrotik_name).toLowerCase().trim()}`;
+            sqlMap.set(key, c.toJSON());
+        });
+
+        const mergedList = [];
+        const processedKeys = new Set();
+
+        for (const server of servers) {
+            const cachePath = getCachePath(server.id, 'secrets');
+            let cacheData = [];
+            if (fs.existsSync(cachePath)) {
+
+                try {
+                    const rawData = await fs.promises.readFile(cachePath, 'utf8');
+                    const cache = JSON.parse(rawData);
+                    if (Array.isArray(cache.data)) cacheData = cache.data;
+                } catch (e) { }
+            }
+
+
+            for (const secret of cacheData) {
+                const key = `${String(server.id).toLowerCase()}-${String(secret.name).toLowerCase().trim()}`;
+                const sqlC = sqlMap.get(key);
+                processedKeys.add(key);
+                
+                let lat = null, long = null;
+                if (sqlC?.coordinates?.includes(',')) {
+                    const parts = sqlC.coordinates.split(',');
+                    lat = parts[0].trim();
+                    long = parts[1].trim();
+                }
+
+                mergedList.push({
+                    id: sqlC ? sqlC.id : (secret['.id'] || secret.name),
+                    serverId: server.id,
+                    serverName: server.name,
+                    name: secret.name, // username
+                    realName: sqlC ? (sqlC.name || '') : '',
+                    comment: secret.comment || (sqlC ? sqlC.comment : ''),
+                    profile: secret.profile || (sqlC ? sqlC.profile : 'default'),
+                    'remote-address': secret['remote-address'] || '-',
+                    'last-logged-out': secret['last-logged-out'] || '-',
+                    whatsapp: sqlC ? (sqlC.phone_number || '') : '',
+                    address: sqlC ? (sqlC.address || '-') : '-',
+                    lat: lat || '',
+                    long: long || '',
+                    ktp: sqlC ? (sqlC.ktp || '') : '',
+                    activationDate: sqlC ? (sqlC.activationDate || '') : '',
+                    installationDate: sqlC ? (sqlC.installationDate || '') : '',
+                    ssidName: sqlC ? (sqlC.ssidName || '') : '',
+                    ssidPassword: sqlC ? (sqlC.ssidPassword || '') : '',
+                    signalLevel: sqlC ? (sqlC.signalLevel || '') : '',
+                    sub_area_id: sqlC ? (sqlC.sub_area_id || '') : '',
+                    photos: sqlC ? (sqlC.photos || []) : [],
+                    disabled: secret.disabled === 'true' || secret.disabled === 'yes' || secret.disabled === true
+                });
+            }
+        }
+        res.json(mergedList);
+    } catch (e) {
+        console.error('Error fetching customers:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Serve Frontend Static Files
-// Serve Frontend Static Files
-// Try multiple paths for robustness
-let DIST_PATH = path.join(__dirname, '../dist'); // Standard Dev
-if (!fs.existsSync(DIST_PATH)) {
-    DIST_PATH = path.join(__dirname, 'dist'); // If dist is inside server folder
-}
-if (!fs.existsSync(DIST_PATH)) {
-    DIST_PATH = path.join(__dirname, '../public_html'); // Fallback
-}
-
-if (fs.existsSync(DIST_PATH)) {
-    console.log(`[Frontend] Serving static files from: ${DIST_PATH}`);
-    app.use(express.static(DIST_PATH));
-} else {
-    console.warn('[Frontend] Could not locate "dist" folder. Frontend may not load.');
-}
 
 // DB Helper
-const DB_FILE = path.join(__dirname, 'data', 'customers.json');
-const getDB = () => {
-    if (!fs.existsSync(DB_FILE)) return {};
-    try {
-        return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    } catch (e) { return {}; }
-};
+const getDB = () => CACHE.customers;
 const saveDB = (data) => {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    CACHE.customers = data;
+    queueWrite('customers', data);
 };
+
 
 // Multer Config
 const storage = multer.diskStorage({
@@ -167,18 +443,20 @@ app.post('/api/mikrotik/sync', async (req, res) => {
         console.error(`[Sync] Client Error for ${server.ip}:`, err.message);
     });
 
+    const cachePath = getCachePath(server.id, resource);
+
     try {
         await client.connect();
         const data = await client.write(command);
         await client.close();
 
         // Save to cache
-        const cachePath = getCachePath(server.id, resource);
         const cacheData = {
             timestamp: new Date().toISOString(),
             data: Array.isArray(data) ? data : []
         };
-        fs.writeFileSync(cachePath, JSON.stringify(cacheData, null, 2));
+        queueWrite('sync_cache', cacheData, cachePath);
+
 
         // [NEW] Sync Secrets to SQL Database
         if (resource === 'secrets' && Array.isArray(data)) {
@@ -245,36 +523,44 @@ app.post('/api/mikrotik/sync', async (req, res) => {
             // 1. Fetch all SQL customers for this server
             const sqlCustomers = await Customer.findAll({ where: { server_id: server.id } });
             const sqlMap = new Map();
-            sqlCustomers.forEach(c => sqlMap.set(c.mikrotik_name, c));
+            sqlCustomers.forEach(c => {
+                // Key lowercase to ensure case-insensitive matching with Mikrotik
+                sqlMap.set(String(c.mikrotik_name).toLowerCase().trim(), c.toJSON());
+            });
 
             // 2. Enrich Mikrotik Data
             data = data.map(item => {
-                const sqlC = sqlMap.get(item.name);
+                // Match by lowercase name
+                const key = String(item.name).toLowerCase().trim();
+                const sqlC = sqlMap.get(key);
+                
                 if (sqlC) {
                     return {
                         ...item,
-                        // Override or Append fields
-                        realName: sqlC.name, // 'name' in SQL is Real Name
+                        // Override or Append fields from SQL
+                        realName: sqlC.real_name, // Use the new real_name column
                         whatsapp: sqlC.phone_number,
                         address: sqlC.address,
                         sub_area_id: sqlC.sub_area_id,
-                        ktp: sqlC.ktp || '', // If we add this column later
+                        odpId: sqlC.odp_id, // Map snake_case to camelCase for frontend
+                        ktp: sqlC.ktp || '', 
                         coordinates: sqlC.coordinates,
-                        // Keep Mikrotik original name as 'name' usually, but frontend might want real name?
-                        // Frontend likely expects 'name' = Mikrotik Username.
-                        // Add 'crm' object or flat fields? Frontend expects flat fields based on `Customer` type.
+                        installationDate: sqlC.installationDate,
+                        ssidName: sqlC.ssidName,
+                        ssidPassword: sqlC.ssidPassword,
+                        signalLevel: sqlC.signalLevel,
                     };
                 }
                 return item;
             });
 
             // Update cache with Enriched Data
-            const cachePath = getCachePath(server.id, resource);
-            const cacheData = {
+            const cacheDataFinal = {
                 timestamp: new Date().toISOString(),
                 data: Array.isArray(data) ? data : []
             };
-            fs.writeFileSync(cachePath, JSON.stringify(cacheData, null, 2));
+            queueWrite('sync_cache', cacheDataFinal, cachePath);
+
 
         }
 
@@ -288,7 +574,7 @@ app.post('/api/mikrotik/sync', async (req, res) => {
 });
 
 // Read Cached Data
-app.get('/api/mikrotik/data', (req, res) => {
+app.get('/api/mikrotik/data', async (req, res) => {
     const { serverId, resource } = req.query;
 
     if (!serverId || !resource) {
@@ -302,12 +588,13 @@ app.get('/api/mikrotik/data', (req, res) => {
     }
 
     try {
-        const fileContent = fs.readFileSync(cachePath, 'utf8');
+        const fileContent = await fs.promises.readFile(cachePath, 'utf8');
         const cacheData = JSON.parse(fileContent);
         res.json(cacheData);
     } catch (error) {
         res.json({ timestamp: null, data: [] });
     }
+
 });
 
 // --- CRM Endpoints ---
@@ -317,13 +604,20 @@ app.put('/api/customers/:id', async (req, res) => {
     const { id } = req.params;
     console.log(`[DEBUG] PUT /api/customers/${id} called`);
     console.log('[DEBUG] Body:', JSON.stringify(req.body));
-    const { name, realName, whatsapp, address, photos, sub_area_id, ktp, activationDate, coordinates } = req.body;
+    const { 
+        name, realName, whatsapp, address, photos, sub_area_id, ktp, activationDate, coordinates,
+        installationDate, ssidName, ssidPassword, signalLevel
+    } = req.body;
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    
     try {
         let customer;
         // 1. Try finding by UUID (if id is a valid UUID)
         try {
-            customer = await Customer.findByPk(id);
+            if (id && id.length > 20) { // Simple UUID check
+                customer = await Customer.findByPk(id);
+            }
         } catch (e) { }
 
         // 2. Fallback: Find by Mikrotik Name + Server ID (if passed in body)
@@ -335,7 +629,7 @@ app.put('/api/customers/:id', async (req, res) => {
             customer = await Customer.findOne({
                 where: {
                     server_id: serverId,
-                    mikrotik_name: mikrotikName
+                    mikrotik_name: String(mikrotikName).toLowerCase().trim()
                 }
             });
 
@@ -348,7 +642,7 @@ app.put('/api/customers/:id', async (req, res) => {
                 customer = await Customer.create({
                     mikrotik_name: mikrotikName,
                     server_id: serverId,
-                    name: realName || mikrotikName,
+                    real_name: realName || mikrotikName,
                     status: 'active'
                 });
             }
@@ -361,46 +655,43 @@ app.put('/api/customers/:id', async (req, res) => {
 
         // Update SQL fields
         await customer.update({
-            name: realName || name, // Real Name takes precedence for 'name' column in SQL if passed
-            phone_number: whatsapp,
-            address: address,
-            sub_area_id: sub_area_id,
-            coordinates: coordinates,
-            // Add other fields to meta if needed, currently Customer model has limited fields
-            // We might need to store extra meta in a JSON column if we want full flexibility,
-            // but for now sub_area_id was the main blocker.
+            // Explicitly separate Mikrotik account and Real Name
+            real_name: realName ?? customer.real_name, 
+            phone_number: whatsapp ?? customer.phone_number,
+            address: address ?? customer.address,
+            sub_area_id: sub_area_id ?? customer.sub_area_id,
+            ktp: ktp ?? customer.ktp,
+            coordinates: coordinates ?? customer.coordinates,
+            activationDate: (activationDate || installationDate) ?? customer.activationDate,
+            installationDate: (installationDate || activationDate) ?? customer.installationDate,
+            photos: photos ?? customer.photos,
+            ssidName: ssidName ?? customer.ssidName,
+            ssidPassword: ssidPassword ?? customer.ssidPassword,
+            signalLevel: signalLevel ?? customer.signalLevel
         });
 
-        // Also update JSON metadata (customers.json) for compatibility with existing frontend logic
-        // The frontend uses MikrotikApi.updateExtendedData which updates customers.json
-        // We can replicate that logic here or let FE call this AND that.
-        // User request: "jangan lagi berhubungan dengan server mikrotik"
-        // This likely means "don't call Mikrotik API".
-        // Updating local JSON file is fine.
-
+        // Also update JSON metadata (customers.json) for immediate frontend consistency
         const db = getDB();
-        // Key in customers.json is "ServerID-MikrotikName" usually, or just mapped by name?
-        // MikrotikApi.updateExtendedData uses `server_${serverId}.json`? No, `data/customers.json`
-        // Let's look at `MikrotikApi.updateExtendedData` in frontend -> it calls `app.post('/api/customers/meta'...)` likely?
-        // Wait, `server/index.js` usually has a meta endpoint.
-
-        // Let's just update the SQL for now as requested for the error fix.
-        // If the user wants to update `customers.json` too, we should do it.
-
-        if (customer.mikrotik_name && customer.server_id) {
-            const key = `${customer.server_id}-${customer.mikrotik_name}`;
-            db[key] = {
-                ...db[key],
-                whatsapp,
-                ktp,
-                activationDate,
-                photos,
-                lat: coordinates ? coordinates.split(',')[0] : '',
-                long: coordinates ? coordinates.split(',')[1] : '',
-                sub_area_id
-            };
-            saveDB(db);
-        }
+        const key = `${String(customer.server_id).toLowerCase()}-${String(customer.mikrotik_name).toLowerCase().trim()}`;
+        
+        db[key] = {
+            ...(db[key] || {}),
+            whatsapp,
+            realName: realName || name,
+            address,
+            sub_area_id,
+            coordinates,
+            lat: coordinates?.includes(',') ? coordinates.split(',')[0].trim() : (db[key]?.lat || ''),
+            long: coordinates?.includes(',') ? coordinates.split(',')[1].trim() : (db[key]?.long || ''),
+            ktp,
+            activationDate,
+            installationDate,
+            photos,
+            ssidName,
+            ssidPassword,
+            signalLevel
+        };
+        saveDB(db);
 
         res.json({ message: 'Customer updated successfully', customer });
     } catch (error) {
@@ -411,17 +702,53 @@ app.put('/api/customers/:id', async (req, res) => {
 
 // --- CRM Endpoints (SQL) ---
 
+
 // Get All Meta Data (Formatted as Map for Frontend Compatibility)
 app.get('/api/customers/meta', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
-        const customers = await Customer.findAll();
-        const metaMap = {};
-        customers.forEach(c => {
-            const key = `${c.server_id}_${c.mikrotik_name}`;
-            metaMap[key] = c.toJSON();
+        const sqlCustomers = await Customer.findAll();
+        const jsonMetadata = CACHE.customers || {};
+        
+        // Start with JSON data as base
+        const metaMap = { ...jsonMetadata };
+        
+        // Overwrite/Merge with SQL data
+        sqlCustomers.forEach(c => {
+            const key = `${String(c.server_id).toLowerCase()}-${String(c.mikrotik_name).toLowerCase().trim()}`;
+            const sqlData = c.toJSON();
+            
+            // 3. Map SQL field names to CRM field names (Avoid overlap with account 'name' or 'id')
+            const { name: sqlRealName, id: sqlId, ...otherSqlFields } = sqlData;
+            
+            metaMap[key] = {
+                ...(metaMap[key] || {}), // Base data from JSON if any
+                ...otherSqlFields,       // Overwrite with other SQL fields (address, ktp, etc.)
+                crmId: sqlId,            // Save SQL ID separately as crmId
+                // Explicit Mapping to prevent confusion
+                realName: sqlData.real_name || metaMap[key]?.realName || '',
+                whatsapp: sqlData.phone_number || metaMap[key]?.whatsapp || '',
+                lat: sqlData.coordinates?.split(',')[0]?.trim() || metaMap[key]?.lat || '',
+                long: sqlData.coordinates?.split(',')[1]?.trim() || metaMap[key]?.long || '',
+                address: sqlData.address || metaMap[key]?.address || '',
+                ktp: sqlData.ktp || metaMap[key]?.ktp || '',
+                sub_area_id: sqlData.sub_area_id || metaMap[key]?.sub_area_id || '',
+                activationDate: sqlData.activationDate || metaMap[key]?.activationDate || '',
+                installationDate: sqlData.installationDate || metaMap[key]?.installationDate || '',
+                ssidName: sqlData.ssidName || metaMap[key]?.ssidName || '',
+                ssidPassword: sqlData.ssidPassword || metaMap[key]?.ssidPassword || '',
+                signalLevel: sqlData.signalLevel || metaMap[key]?.signalLevel || '',
+                photos: Array.isArray(sqlData.photos) ? sqlData.photos : (metaMap[key]?.photos || [])
+            };
+            // Clean up the 'name' field if it accidentally came from JSON but it's empty in SQL
+            if (metaMap[key].name === metaMap[key].realName) {
+                 // name should represent Username, realName should be the actual name.
+            }
         });
+        
         res.json(metaMap);
     } catch (e) {
+        console.error('[Meta] Failed to fetch metadata:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -430,26 +757,40 @@ app.get('/api/customers/meta', async (req, res) => {
 app.post('/api/customers/meta', async (req, res) => {
     const { serverId, customerId, ...metaData } = req.body;
 
-    // customerId is the mikrotik_name (username) from frontend context usually
     if (!serverId || !customerId) {
         return res.status(400).json({ error: 'Missing Identity' });
     }
 
     try {
+        // Map frontend 'whatsapp' to SQL 'phone_number'
+        const sqlPayload = {
+            ...metaData,
+            phone_number: metaData.whatsapp || metaData.phone_number,
+            name: metaData.realName || metaData.name
+        };
+
         let customer = await Customer.findOne({
-            where: { server_id: serverId, mikrotik_name: customerId }
+            where: { server_id: serverId, mikrotik_name: String(customerId).toLowerCase().trim() }
         });
 
         if (customer) {
-            await customer.update(metaData);
+            await customer.update(sqlPayload);
         } else {
-            // Create new
             customer = await Customer.create({
                 server_id: serverId,
-                mikrotik_name: customerId,
-                ...metaData
+                mikrotik_name: String(customerId).toLowerCase().trim(),
+                ...sqlPayload,
+                status: 'active'
             });
         }
+
+        // Also update JSON Cache for immediate consistency
+        const key = `${String(serverId).toLowerCase()}-${String(customerId).toLowerCase().trim()}`;
+        CACHE.customers[key] = {
+            ...(CACHE.customers[key] || {}),
+            ...metaData,
+        };
+        queueWrite('customers', CACHE.customers);
 
         logActivity(req, 'UPDATE_CUSTOMER_META', `Updated meta for ${customerId}`);
         res.json({ success: true, data: customer });
@@ -559,6 +900,7 @@ app.post('/api/billing/bulk-delete', async (req, res) => {
         await InvoiceHistory.destroy({ where: { invoice_id: invoiceIds } });
 
         await Invoice.destroy({ where: { id: invoiceIds } });
+        logActivity(req, 'BULK_DELETE_INVOICES', `Deleted ${invoiceIds.length} invoices: ${invoiceIds.join(', ')}`);
         console.log(`[Billing] Bulk delete of ${invoiceIds.length} invoices by ${user.username}`);
         res.json({ success: true, message: `Deleted ${invoiceIds.length} invoices` });
     } catch (e) {
@@ -583,6 +925,18 @@ app.post('/api/billing/bulk-update', async (req, res) => {
             { status: status },
             { where: { id: invoiceIds } }
         );
+
+        // Individual Log History per invoice
+        for (const id of invoiceIds) {
+            await InvoiceHistory.create({
+                invoice_id: id,
+                user_name: req.body.user?.username || 'System',
+                action: 'STATUS_UPDATE',
+                details: `Status bulk updated to ${status}`
+            });
+        }
+
+        logActivity(req, 'BULK_UPDATE_INVOICES', `Updated ${invoiceIds.length} invoices to ${status}`);
         res.json({ success: true, message: `Updated ${invoiceIds.length} invoices to ${status}` });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -620,6 +974,8 @@ app.post('/api/billing/pay', upload.single('proof'), async (req, res) => {
             action: 'PAYMENT',
             details: `Payment of ${amount} via ${method}.`
         });
+
+        logActivity(req, 'PAY_INVOICE', `Paid invoice ${invoiceId} - Amount: ${amount}`);
 
         res.json({ success: true, payment });
     } catch (e) {
@@ -735,6 +1091,7 @@ app.post('/api/billing/generate', async (req, res) => {
                 }
             }
         }
+        logActivity(req, 'GENERATE_INVOICES', `Generated ${count} invoices for period ${period}`);
         res.json({ message: `Generated ${count} invoices.` });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -775,7 +1132,7 @@ app.post('/api/billing/check-overdue', async (req, res) => {
                 try {
                     await client.connect();
                     // Disable Secret by name
-                    const secrets = await client.write('/ppp/secret/print', { '?name': customer.mikrotik_name });
+                    const secrets = await client.write('/ppp/secret/print', { '?name': customer.mikrotik_name.toLowerCase() });
                     if (secrets.length > 0) {
                         const secretId = secrets[0]['.id'];
                         await client.write('/ppp/secret/disable', { '.id': secretId });
@@ -792,6 +1149,7 @@ app.post('/api/billing/check-overdue', async (req, res) => {
             }
         }
 
+        logActivity(req, 'CHECK_OVERDUE', `Checked overdue invoices. Blocked ${blockedCount} customers.`);
         res.json({ message: `Checked overdue invoices. Blocked ${blockedCount} customers.` });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -800,15 +1158,12 @@ app.post('/api/billing/check-overdue', async (req, res) => {
 
 // --- Profiles Metadata ---
 const DB_PROFILES_FILE = path.join(__dirname, 'data', 'profiles.json');
-const getProfilesDB = () => {
-    if (!fs.existsSync(DB_PROFILES_FILE)) return {};
-    try {
-        return JSON.parse(fs.readFileSync(DB_PROFILES_FILE, 'utf8'));
-    } catch (e) { return {}; }
-};
+const getProfilesDB = () => CACHE.profiles;
 const saveProfilesDB = (data) => {
-    fs.writeFileSync(DB_PROFILES_FILE, JSON.stringify(data, null, 2));
+    CACHE.profiles = data;
+    queueWrite('profiles', data);
 };
+
 
 app.get('/api/profiles/meta', (req, res) => {
     const db = getProfilesDB();
@@ -1133,16 +1488,12 @@ app.post('/api/upload', upload.array('photos', 5), (req, res) => {
 
 // --- Registration & Working Order ---
 const DB_REGISTRATIONS_FILE = path.join(__dirname, 'data', 'registrations.json');
-const getRegistrationsDB = () => {
-    if (!fs.existsSync(DB_REGISTRATIONS_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_REGISTRATIONS_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getRegistrationsDB = () => CACHE.registrations;
 const saveRegistrationsDB = (data) => {
-    fs.writeFileSync(DB_REGISTRATIONS_FILE, JSON.stringify(data, null, 2));
+    CACHE.registrations = data;
+    queueWrite('registrations', data);
 };
+
 
 // Get Registrations
 app.get('/api/registrations', (req, res) => {
@@ -1218,7 +1569,7 @@ app.put('/api/registrations/:id', async (req, res) => {
                 if (server) {
                     // Upsert Customer
                     const [customer, created] = await Customer.findOrCreate({
-                        where: { mikrotik_name: secretName, server_id: server.id },
+                        where: { mikrotik_name: secretName.toLowerCase(), server_id: server.id },
                         defaults: {
                             name: db[index].fullName,
                             phone_number: db[index].phoneNumber,
@@ -1270,7 +1621,7 @@ app.delete('/api/registrations/:id', (req, res) => {
 // Complete Registration (Installation) with Photos
 app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, res) => {
     const { id } = req.params;
-    const { secretId, note, sub_area_id, secretName, coordinates } = req.body;
+    const { secretId, note, sub_area_id, secretName, coordinates, ssidName, ssidPassword, signalLevel, installationDate } = req.body;
     const files = req.files;
 
     const db = getRegistrationsDB();
@@ -1311,7 +1662,11 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
             finishDate: new Date().toISOString(),
             photos: finalPhotos, // Use the combined list
             secretId: secretId,
-            coordinates: coordinates || db[index].installation?.coordinates
+            coordinates: coordinates || db[index].installation?.coordinates,
+            ssidName: ssidName,
+            ssidPassword: ssidPassword,
+            signalLevel: signalLevel,
+            installationDate: installationDate
         }
     };
 
@@ -1321,13 +1676,13 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
     try {
         if (secretName) {
             // Find Server ID
-            const servers = getServersDB();
-            const server = servers.find(s => s.name === db[index].locationId); // locationId in reg is Server Name
+            const server = await Server.findOne({ where: { name: db[index].locationId } }); 
+
 
             if (server) {
                 // Upsert Customer
                 const [customer, created] = await Customer.findOrCreate({
-                    where: { mikrotik_name: secretName, server_id: server.id },
+                    where: { mikrotik_name: secretName.toLowerCase(), server_id: server.id },
                     defaults: {
                         name: db[index].fullName,
                         phone_number: db[index].phoneNumber,
@@ -1339,7 +1694,11 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
                         photos: finalPhotos || [],
                         ktp: db[index].ktpNumber || null,
                         activationDate: new Date().toISOString().split('T')[0],
-                        mapsUrl: db[index].mapsUrl || null
+                        mapsUrl: db[index].mapsUrl || null,
+                        installationDate: installationDate || new Date().toISOString().split('T')[0],
+                        ssidName: ssidName || null,
+                        ssidPassword: ssidPassword || null,
+                        signalLevel: signalLevel || null
                     }
                 });
 
@@ -1356,7 +1715,11 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
                         photos: finalPhotos || customer.photos,
                         ktp: db[index].ktpNumber || customer.ktp,
                         activationDate: customer.activationDate || new Date().toISOString().split('T')[0],
-                        mapsUrl: db[index].mapsUrl || customer.mapsUrl
+                        mapsUrl: db[index].mapsUrl || customer.mapsUrl,
+                        installationDate: installationDate || customer.installationDate,
+                        ssidName: ssidName || customer.ssidName,
+                        ssidPassword: ssidPassword || customer.ssidPassword,
+                        signalLevel: signalLevel || customer.signalLevel
                     });
                 }
                 console.log(`[Sync] Customer ${secretName} synced successfully.`);
@@ -1376,16 +1739,12 @@ app.post('/api/registrations/:id/complete', upload.array('photos'), async (req, 
 
 // --- Job Titles ---
 const DB_JOB_TITLES_FILE = path.join(__dirname, 'data', 'job_titles.json');
-const getJobTitlesDB = () => {
-    if (!fs.existsSync(DB_JOB_TITLES_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_JOB_TITLES_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getJobTitlesDB = () => CACHE.jobTitles;
 const saveJobTitlesDB = (data) => {
-    fs.writeFileSync(DB_JOB_TITLES_FILE, JSON.stringify(data, null, 2));
+    CACHE.jobTitles = data;
+    queueWrite('jobTitles', data);
 };
+
 
 app.get('/api/job-titles', (req, res) => {
     res.json(getJobTitlesDB());
@@ -1426,16 +1785,12 @@ app.delete('/api/job-titles/:id', (req, res) => {
 
 // --- Employees ---
 const DB_EMPLOYEES_FILE = path.join(__dirname, 'data', 'employees.json');
-const getEmployeesDB = () => {
-    if (!fs.existsSync(DB_EMPLOYEES_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_EMPLOYEES_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getEmployeesDB = () => CACHE.employees;
 const saveEmployeesDB = (data) => {
-    fs.writeFileSync(DB_EMPLOYEES_FILE, JSON.stringify(data, null, 2));
+    CACHE.employees = data;
+    queueWrite('employees', data);
 };
+
 
 app.get('/api/employees', (req, res) => {
     res.json(getEmployeesDB());
@@ -1478,16 +1833,12 @@ app.delete('/api/employees/:id', (req, res) => {
 
 // --- Damage Types ---
 const DB_DAMAGE_TYPES_FILE = path.join(__dirname, 'data', 'damage_types.json');
-const getDamageTypesDB = () => {
-    if (!fs.existsSync(DB_DAMAGE_TYPES_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_DAMAGE_TYPES_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getDamageTypesDB = () => CACHE.damageTypes;
 const saveDamageTypesDB = (data) => {
-    fs.writeFileSync(DB_DAMAGE_TYPES_FILE, JSON.stringify(data, null, 2));
+    CACHE.damageTypes = data;
+    queueWrite('damageTypes', data);
 };
+
 
 app.get('/api/damage-types', (req, res) => {
     res.json(getDamageTypesDB());
@@ -1520,6 +1871,7 @@ app.put('/api/damage-types/:id', (req, res) => {
 
 app.delete('/api/damage-types/:id', (req, res) => {
     const { id } = req.params;
+    let db = getDamageTypesDB();
     db = db.filter(i => i.id !== id);
     saveDamageTypesDB(db);
     res.json({ success: true });
@@ -1527,16 +1879,12 @@ app.delete('/api/damage-types/:id', (req, res) => {
 
 // --- Sub Areas ---
 const DB_SUB_AREAS_FILE = path.join(__dirname, 'data', 'sub_areas.json');
-const getSubAreasDB = () => {
-    if (!fs.existsSync(DB_SUB_AREAS_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_SUB_AREAS_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getSubAreasDB = () => CACHE.subAreas;
 const saveSubAreasDB = (data) => {
-    fs.writeFileSync(DB_SUB_AREAS_FILE, JSON.stringify(data, null, 2));
+    CACHE.subAreas = data;
+    queueWrite('subAreas', data);
 };
+
 
 app.get('/api/sub-areas', (req, res) => {
     res.json(getSubAreasDB());
@@ -1578,16 +1926,12 @@ app.delete('/api/sub-areas/:id', (req, res) => {
 
 // --- Support Tickets ---
 const DB_TICKETS_FILE = path.join(__dirname, 'data', 'tickets.json');
-const getTicketsDB = () => {
-    if (!fs.existsSync(DB_TICKETS_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_TICKETS_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getTicketsDB = () => CACHE.tickets;
 const saveTicketsDB = (data) => {
-    fs.writeFileSync(DB_TICKETS_FILE, JSON.stringify(data, null, 2));
+    CACHE.tickets = data;
+    queueWrite('tickets', data);
 };
+
 
 app.get('/api/tickets', (req, res) => {
     res.json(getTicketsDB());
@@ -1627,16 +1971,12 @@ app.delete('/api/tickets/:id', (req, res) => {
 
 // --- Payment Methods ---
 const DB_PAYMENT_METHODS_FILE = path.join(__dirname, 'data', 'payment_methods.json');
-const getPaymentMethodsDB = () => {
-    if (!fs.existsSync(DB_PAYMENT_METHODS_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_PAYMENT_METHODS_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getPaymentMethodsDB = () => CACHE.paymentMethods;
 const savePaymentMethodsDB = (data) => {
-    fs.writeFileSync(DB_PAYMENT_METHODS_FILE, JSON.stringify(data, null, 2));
+    CACHE.paymentMethods = data;
+    queueWrite('paymentMethods', data);
 };
+
 
 app.get('/api/payment-methods', (req, res) => {
     res.json(getPaymentMethodsDB());
@@ -1674,91 +2014,21 @@ app.delete('/api/payment-methods/:id', (req, res) => {
     res.json({ success: true });
 });
 
-// --- WhatsApp Templates ---
-const DB_TEMPLATES_FILE = path.join(__dirname, 'data', 'whatsapp_templates.json');
-const getTemplatesDB = () => {
-    if (!fs.existsSync(DB_TEMPLATES_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_TEMPLATES_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
-const saveTemplatesDB = (data) => {
-    fs.writeFileSync(DB_TEMPLATES_FILE, JSON.stringify(data, null, 2));
-};
-
-app.get('/api/whatsapp/templates', (req, res) => {
-    res.json(getTemplatesDB());
-});
-
-app.post('/api/whatsapp/templates', (req, res) => {
-    const newItem = req.body;
-    if (!newItem.id) newItem.id = crypto.randomUUID();
-    if (!newItem.createdAt) newItem.createdAt = new Date().toISOString();
-
-    if (!newItem.name || !newItem.content) {
-        return res.status(400).json({ error: 'Name and Content are required' });
-    }
-
-    const db = getTemplatesDB();
-    db.push(newItem);
-    saveTemplatesDB(db);
-    res.json(newItem);
-});
-
-app.put('/api/whatsapp/templates/:id', (req, res) => {
-    const { id } = req.params;
-    const updates = req.body;
-    const db = getTemplatesDB();
-    const index = db.findIndex(i => i.id === id);
-    if (index === -1) return res.status(404).json({ error: 'Not found' });
-
-    db[index] = { ...db[index], ...updates };
-    saveTemplatesDB(db);
-    res.json(db[index]);
-});
-
-app.delete('/api/whatsapp/templates/:id', (req, res) => {
-    const { id } = req.params;
-    let db = getTemplatesDB();
-    db = db.filter(i => i.id !== id);
-    saveTemplatesDB(db);
-    res.json({ success: true });
-});
 
 // --- Authentication ---
 const DB_USERS_FILE = path.join(__dirname, 'data', 'users.json');
-const getUsersDB = () => {
-    if (!fs.existsSync(DB_USERS_FILE)) {
-        // Initialize default users if file doesn't exist
-        const defaultUsers = [
-            { id: '1', username: 'superadmin', password: 'superadmin123', role: 'superadmin', name: 'Super Admin' },
-            { id: '2', username: 'admin', password: 'admin123', role: 'admin', name: 'Admin User' },
-            { id: '3', username: 'tech', password: 'tech123', role: 'technician', name: 'Field Technician' }
-        ];
-        saveUsersDB(defaultUsers);
-        return defaultUsers;
-    }
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_USERS_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getUsersDB = () => CACHE.users;
 const saveUsersDB = (data) => {
-    fs.writeFileSync(DB_USERS_FILE, JSON.stringify(data, null, 2));
+    CACHE.users = data;
+    queueWrite('users', data);
 };
 
 // --- Network Nodes (ODC/ODP) ---
 const DB_NODES_FILE = path.join(__dirname, 'data', 'network_nodes.json');
-const getNodesDB = () => {
-    if (!fs.existsSync(DB_NODES_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_NODES_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
+const getNodesDB = () => CACHE.networkNodes;
 const saveNodesDB = (data) => {
-    fs.writeFileSync(DB_NODES_FILE, JSON.stringify(data, null, 2));
+    CACHE.networkNodes = data;
+    queueWrite('networkNodes', data);
 };
 
 app.get('/api/network/nodes', (req, res) => {
@@ -1812,45 +2082,56 @@ app.post('/api/network/link-customer', async (req, res) => {
 
     try {
         // 1. Link customer → ODP in SQL
-        const customer = await Customer.findOne({ where: { server_id: serverId, mikrotik_name: customerId } });
+        const customer = await Customer.findOne({ where: { server_id: serverId, mikrotik_name: customerId.toLowerCase() } });
         if (customer) {
             await customer.update({ odp_id: odpId });
         } else {
             await Customer.create({
                 server_id: serverId,
-                mikrotik_name: customerId,
+                mikrotik_name: customerId.toLowerCase(),
                 odp_id: odpId,
                 status: 'active'
             });
         }
 
-        // 2. Auto-create ONT node if it doesn't already exist
         const nodesDb = getNodesDB();
-        const existingOnt = nodesDb.find(n => n.type === 'ONT' && n.refId === customerId && n.parentId === odpId);
-        if (!existingOnt) {
-            // Find ODP position to place ONT nearby (slight offset so they don't overlap)
-            const odpNode = nodesDb.find(n => n.id === odpId);
-            const baseLat = odpNode ? odpNode.lat + 0.00005 : -0.366535;
-            const baseLng = odpNode ? odpNode.lng + 0.00005 : 101.556898;
-            
-            const ontNode = {
-                id: crypto.randomUUID(),
-                type: 'ONT',
-                name: customerId,
-                lat: baseLat,
-                lng: baseLng,
-                capacity: 1,
-                parentId: odpId,
-                refId: customerId,
-                notes: `Auto-created for PPPoE: ${customerId}`,
-                createdAt: new Date().toISOString()
-            };
-            nodesDb.push(ontNode);
-            saveNodesDB(nodesDb);
-            logActivity(req, 'CREATE_NODE', `Auto-created ONT node for: ${customerId}`);
+
+        // 2. Handle ONT node (Cleanup or Auto-creation)
+        if (odpId === null) {
+            // Unlinking Case: Remove existing ONT node from map if it exists
+            const filteredNodes = nodesDb.filter(n => !(n.type === 'ONT' && n.refId === customerId));
+            if (filteredNodes.length !== nodesDb.length) {
+                saveNodesDB(filteredNodes);
+                logActivity(req, 'DELETE_NODE', `Removed ONT node for unlinked customer: ${customerId}`);
+            }
+        } else {
+            // Linking Case: Auto-create ONT node if it doesn't already exist
+            const existingOnt = nodesDb.find(n => n.type === 'ONT' && n.refId === customerId && n.parentId === odpId);
+            if (!existingOnt) {
+                // Find ODP position to place ONT nearby (slight offset so they don't overlap)
+                const odpNode = nodesDb.find(n => n.id === odpId);
+                const baseLat = odpNode ? odpNode.lat + 0.00005 : -0.366535;
+                const baseLng = odpNode ? odpNode.lng + 0.00005 : 101.556898;
+                
+                const ontNode = {
+                    id: crypto.randomUUID(),
+                    type: 'ONT',
+                    name: customerId,
+                    lat: baseLat,
+                    lng: baseLng,
+                    capacity: 1,
+                    parentId: odpId,
+                    refId: customerId,
+                    notes: `Auto-created for PPPoE: ${customerId}`,
+                    createdAt: new Date().toISOString()
+                };
+                nodesDb.push(ontNode);
+                saveNodesDB(nodesDb);
+                logActivity(req, 'CREATE_NODE', `Auto-created ONT node for: ${customerId}`);
+            }
         }
         
-        logActivity(req, 'LINK_CUSTOMER', `Linked ${customerId} to ODP ${odpId}`);
+        logActivity(req, 'LINK_CUSTOMER', odpId === null ? `Unlinked ${customerId} from ODP` : `Linked ${customerId} to ODP ${odpId}`);
         res.json({ success: true });
     } catch (e) {
         console.error("Failed to link customer", e);
@@ -1860,15 +2141,12 @@ app.post('/api/network/link-customer', async (req, res) => {
 
 // --- Monitoring Status ---
 const DB_STATUS_FILE = path.join(__dirname, 'data', 'network_status.json');
-const getStatusDB = () => {
-    if (!fs.existsSync(DB_STATUS_FILE)) return {};
-    try {
-        return JSON.parse(fs.readFileSync(DB_STATUS_FILE, 'utf8'));
-    } catch (e) { return {}; }
-};
+const getStatusDB = () => CACHE.status;
 const saveStatusDB = (data) => {
-    fs.writeFileSync(DB_STATUS_FILE, JSON.stringify(data, null, 2));
+    CACHE.status = data;
+    queueWrite('status', data);
 };
+
 
 app.get('/api/network/status', (req, res) => {
     res.json(getStatusDB());
@@ -1887,16 +2165,16 @@ const runNetworkMonitor = async () => {
             if (!server.username) continue;
 
             try {
-                // Get Active Customers (Caching logic reused or just fetch live for monitoring accuracy)
-                // Ideally we check live active sessions or configured secrets.
-                // Let's use cache for list but ping live.
                 const cachePath = getCachePath(server.id, 'secrets');
                 if (!fs.existsSync(cachePath)) continue;
 
-                const secrets = JSON.parse(fs.readFileSync(cachePath, 'utf8')).data;
+                // Async read secrets cache
+                const rawData = await fs.promises.readFile(cachePath, 'utf8');
+                const secrets = JSON.parse(rawData).data;
                 const targets = secrets.filter(s => s['remote-address'] && !s.disabled);
 
                 if (targets.length === 0) continue;
+
 
                 const client = new RouterOSAPI({
                     host: server.ip,
@@ -1930,7 +2208,7 @@ const runNetworkMonitor = async () => {
 
                         const online = result && result.time; // If 'time' exists, it answered.
 
-                        const key = `${server.id}_${target.name}`;
+                        const key = `${server.id}_${target.name.toLowerCase()}`;
                         statusDB[key] = {
                             isOnline: !!online,
                             lastCheck: new Date(),
@@ -1966,79 +2244,6 @@ if (process.env.ENABLE_MONITORING !== 'false') {
 }
 
 
-
-// --- Activity Logs ---
-const DB_LOGS_FILE = path.join(__dirname, 'data', 'logs.json');
-const getLogsDB = () => {
-    if (!fs.existsSync(DB_LOGS_FILE)) return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_LOGS_FILE, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
-};
-const saveLogsDB = (data) => {
-    fs.writeFileSync(DB_LOGS_FILE, JSON.stringify(data, null, 2));
-};
-
-// Helper: Log Activity
-const logActivity = (req, action, details, level = 'info') => {
-    try {
-        // Attempt to identify user from token
-        let username = 'system';
-        let role = 'system';
-
-        const authHeader = req.headers.authorization;
-        if (authHeader) {
-            const token = authHeader.split(' ')[1];
-            const sessions = getSessionsDB();
-            if (sessions[token]) {
-                username = sessions[token].username;
-                role = sessions[token].role;
-            }
-        }
-
-        // Special case for Login (user info comes from request body if successful, but handled inside active flow usually)
-        if (action === 'LOGIN' && details.username) {
-            username = details.username;
-            role = details.role || 'unknown';
-        }
-
-        const logEntry = {
-            id: crypto.randomUUID(),
-            timestamp: new Date().toISOString(),
-            level,
-            username,
-            role,
-            action,
-            details: typeof details === 'string' ? details : JSON.stringify(details),
-            ip: req.ip || req.connection.remoteAddress
-        };
-
-        const logs = getLogsDB();
-        // Prepend log (newest first)
-        logs.unshift(logEntry);
-        // Limit logs to keep file size manageable (e.g. 5000 entries)
-        if (logs.length > 5000) logs.length = 5000;
-
-        saveLogsDB(logs);
-
-        console.log(`[LOG] ${action}: ${username} - ${logEntry.details}`);
-    } catch (e) {
-        console.error('Failed to write log:', e);
-    }
-};
-
-const DB_SESSIONS_FILE = path.join(__dirname, 'data', 'sessions.json');
-const getSessionsDB = () => {
-    if (!fs.existsSync(DB_SESSIONS_FILE)) return {};
-    try {
-        const data = JSON.parse(fs.readFileSync(DB_SESSIONS_FILE, 'utf8'));
-        return data;
-    } catch (e) { return {}; }
-};
-const saveSessionsDB = (data) => {
-    fs.writeFileSync(DB_SESSIONS_FILE, JSON.stringify(data, null, 2));
-};
 
 // Login
 app.post('/api/auth/login', (req, res) => {
@@ -2107,6 +2312,19 @@ app.get('/api/auth/me', (req, res) => {
     } else {
         res.json({ user: { id: session.userId, username: session.username, role: session.role, name: session.name } });
     }
+});
+
+// Get Logging Config
+app.get('/api/logs/config', (req, res) => {
+    res.json(CACHE.loggingConfig || {});
+});
+
+// Update Logging Config
+app.post('/api/logs/config', (req, res) => {
+    const newConfig = req.body;
+    CACHE.loggingConfig = newConfig;
+    queueWrite('loggingConfig', newConfig);
+    res.json({ success: true, config: CACHE.loggingConfig });
 });
 
 // --- Activity Logs Endpoint ---
@@ -2244,9 +2462,22 @@ app.post('/api/reset', async (req, res) => {
         // 3. Reset SQLite Transaction Data (Invoices, Payments, InvoiceHistory)
         // Delete dependents first to avoid Foreign Key violations
         await InvoiceHistory.destroy({ where: {} });
-        await Payment.destroy({ where: {} });
+        await sequelize.sync({ alter: false });
+
+        // [MIGRATION-V3] Standardize all existing mikrotik_names to lowercase for consistency
+        // This is critical for Linux-based production servers like aaPanel.
+        console.log('[Database] Running mikrotik_name standardization (V3)...');
+        const customersToFix = await Customer.findAll();
+        for (const c of customersToFix) {
+            const currentName = c.mikrotik_name || '';
+            const lowerName = currentName.toLowerCase().trim();
+            if (currentName !== lowerName) {
+                await c.update({ mikrotik_name: lowerName });
+                console.log(`[Database] Migrated SQL: ${currentName} -> ${lowerName}`);
+            }
+        }
+        console.log('[Database] Standardization complete.');
         await Invoice.destroy({ where: {} });
-        // await Customer.destroy({ where: {}, truncate: true }); // Keeping customers for now as they might be linked to Mikrotik secrets
 
         logActivity(req, 'RESET_DATA', 'System data reset (Selective)');
         res.json({ success: true, message: 'App data cleared successfully.' });
@@ -2256,15 +2487,41 @@ app.post('/api/reset', async (req, res) => {
     }
 });
 
-// SPA Fallback: Serve index.html for any unknown non-API routes
-// SPA Fallback: Serve index.html for any unknown non-API routes
+// --- Static Files & SPA Fallback ---
+
+const DIST_PATH = fs.existsSync(path.join(__dirname, '../dist')) 
+    ? path.join(__dirname, '../dist')
+    : fs.existsSync(path.join(__dirname, 'dist'))
+        ? path.join(__dirname, 'dist')
+        : path.join(__dirname, '../public_html');
+
+if (fs.existsSync(DIST_PATH)) {
+    console.log(`[Frontend] Serving static files from: ${path.resolve(DIST_PATH)}`);
+    // Static files first
+    app.use(express.static(DIST_PATH, {
+        maxAge: '1d',
+        setHeaders: (res, path) => {
+            if (path.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
+        }
+    }));
+}
+
+// SPA Fallback: Serve index.html for any unknown non-API routes 
+// (excluding files that might have extension but weren't found in static)
 app.get(/.*/, (req, res) => {
-    if (fs.existsSync(path.join(DIST_PATH, 'index.html'))) {
-        res.sendFile(path.join(DIST_PATH, 'index.html'));
+    // Only fallback for non-API routes
+    if (req.url.startsWith('/api')) {
+        return res.status(404).json({ error: 'API route not found' });
+    }
+
+    const indexPath = path.join(DIST_PATH, 'index.html');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
     } else {
-        res.status(404).send('Frontend build not found. Please ensure "dist" folder exists at ' + DIST_PATH);
+        res.status(404).send('Frontend build not found. Path searched: ' + DIST_PATH);
     }
 });
+
 
 
 app.listen(PORT, HOST, () => {

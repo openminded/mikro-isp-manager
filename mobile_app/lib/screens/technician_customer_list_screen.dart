@@ -16,12 +16,19 @@ class _TechnicianCustomerListScreenState extends State<TechnicianCustomerListScr
   String _searchQuery = '';
   String? _selectedServerId;
   String? _selectedSubAreaId;
+  bool _hasSearched = false;
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(() =>
-        Provider.of<CustomerProvider>(context, listen: false).fetchCustomers());
+    // Removed automatic fetch to follow user request "jangan tampilkan data di awal"
+  }
+
+  void _onSearchPressed() {
+    setState(() {
+      _hasSearched = true;
+    });
+    Provider.of<CustomerProvider>(context, listen: false).fetchCustomers();
   }
 
   @override
@@ -51,135 +58,151 @@ class _TechnicianCustomerListScreenState extends State<TechnicianCustomerListScr
       return true;
     }).toList();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Customer List', style: TextStyle(fontWeight: FontWeight.bold)),
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF3949AB), Color(0xFF283593)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+    return Column(
+      children: [
+        // Filter Bar
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: Column(
+            children: [
+              // Search Input
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Search name, username, phone...',
+                  prefixIcon: const Icon(Icons.search),
+                  filled: true,
+                  fillColor: Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                ),
+                onChanged: (val) => setState(() => _searchQuery = val),
+              ),
+              const SizedBox(height: 12),
+              // Dropdowns
+              Row(
+                children: [
+                  // Server Dropdown
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedServerId,
+                          hint: const Text('All Servers', style: TextStyle(fontSize: 12)),
+                          isExpanded: true,
+                          items: [
+                            const DropdownMenuItem(value: null, child: Text('All Servers', style: TextStyle(fontSize: 12))),
+                            ...work.servers.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name, style: const TextStyle(fontSize: 12)))),
+                          ],
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedServerId = val;
+                              _selectedSubAreaId = null; // Reset sub-area on server change
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Sub Area Dropdown
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedSubAreaId,
+                          hint: const Text('All Areas', style: TextStyle(fontSize: 12)),
+                          isExpanded: true,
+                          items: [
+                            const DropdownMenuItem(value: null, child: Text('All Areas', style: TextStyle(fontSize: 12))),
+                            ...work.subAreas
+                                .where((s) => _selectedServerId == null || s.serverId == _selectedServerId)
+                                .map((s) => DropdownMenuItem(value: s.id, child: Text(s.name, style: const TextStyle(fontSize: 12)))),
+                          ],
+                          onChanged: (val) => setState(() => _selectedSubAreaId = val),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // VIEW DATA BUTTON
+              SizedBox(
+                width: double.infinity,
+                height: 45,
+                child: ElevatedButton.icon(
+                  onPressed: _onSearchPressed,
+                  icon: const Icon(Icons.person_search),
+                  label: const Text('VIEW CUSTOMERS', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
           ),
         ),
-      ),
-      body: Column(
-        children: [
-          // Filter Bar
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.white,
-            child: Column(
-              children: [
-                // Search Input
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search name, username, phone...',
-                    prefixIcon: const Icon(Icons.search),
-                    filled: true,
-                    fillColor: Colors.grey.shade100,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                  ),
-                  onChanged: (val) => setState(() => _searchQuery = val),
-                ),
-                const SizedBox(height: 12),
-                // Dropdowns
-                Row(
+        
+        // List or Placeholder
+        Expanded(
+          child: !_hasSearched
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Server Dropdown
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: _selectedServerId,
-                            hint: const Text('All Servers', style: TextStyle(fontSize: 12)),
-                            isExpanded: true,
-                            items: [
-                              const DropdownMenuItem(value: null, child: Text('All Servers', style: TextStyle(fontSize: 12))),
-                              ...work.servers.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name, style: const TextStyle(fontSize: 12)))),
-                            ],
-                            onChanged: (val) {
-                              setState(() {
-                                _selectedServerId = val;
-                                _selectedSubAreaId = null; // Reset sub-area on server change
-                              });
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Sub Area Dropdown
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: _selectedSubAreaId,
-                            hint: const Text('All Areas', style: TextStyle(fontSize: 12)),
-                            isExpanded: true,
-                            items: [
-                              const DropdownMenuItem(value: null, child: Text('All Areas', style: TextStyle(fontSize: 12))),
-                              ...work.subAreas
-                                  .where((s) => _selectedServerId == null || s.serverId == _selectedServerId)
-                                  .map((s) => DropdownMenuItem(value: s.id, child: Text(s.name, style: const TextStyle(fontSize: 12)))),
-                            ],
-                            onChanged: (val) => setState(() => _selectedSubAreaId = val),
-                          ),
-                        ),
-                      ),
+                    Icon(Icons.search_off, size: 64, color: Colors.grey.shade300),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Search to see customer list',
+                      style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          
-          // Results Count
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Text(
-                  'Showing ${filteredCustomers.length} customers',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-
-          // List
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: () => customerProvider.fetchCustomers(),
-              child: customerProvider.isLoading && filteredCustomers.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: filteredCustomers.length,
-                      itemBuilder: (context, index) {
-                        final c = filteredCustomers[index];
-                        return _CustomerCard(customer: c);
-                      },
-                    ),
-            ),
-          ),
-        ],
-      ),
+              )
+            : RefreshIndicator(
+                onRefresh: () => customerProvider.fetchCustomers(),
+                child: customerProvider.isLoading && filteredCustomers.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : Column(
+                        children: [
+                          // Results Count
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            child: Row(
+                              children: [
+                                Text(
+                                  'Showing ${filteredCustomers.length} customers',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: ListView.builder(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              itemCount: filteredCustomers.length,
+                              itemBuilder: (context, index) {
+                                final c = filteredCustomers[index];
+                                return _CustomerCard(customer: c);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+        ),
+      ],
     );
   }
 }
@@ -208,7 +231,7 @@ class _CustomerCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      customer.comment ?? customer.name,
+                      customer.realName ?? customer.comment ?? customer.name,
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -231,9 +254,10 @@ class _CustomerCard extends StatelessWidget {
                    Text(customer.profile, style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 ],
               ),
-              const Divider(height: 24),
+              const Divider(height: 16),
 
               // Details Grid
+              _DetailRow(label: 'Address', value: customer.address ?? '-', icon: Icons.location_on),
               _DetailRow(label: 'IP Address', value: customer.remoteAddress ?? '-', icon: Icons.network_check),
               _DetailRow(label: 'Phone/WA', value: customer.whatsapp ?? '-', icon: Icons.phone_android),
               _DetailRow(label: 'KTP Number', value: customer.ktp ?? '-', icon: Icons.badge),
@@ -284,7 +308,7 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, py: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: disabled ? Colors.red.shade50 : Colors.green.shade50,
         borderRadius: BorderRadius.circular(4),

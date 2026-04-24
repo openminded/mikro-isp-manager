@@ -72,32 +72,43 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (user?.role == 'admin' || user?.role == 'superadmin') {
         displayTabs = [
+            const DashboardTab(),
             const RegistrationsTab(),
             const InstallationsTab(),
             const CustomersTab(),
             const TicketsTab(),
-            const InvoiceScreen(),
         ];
         displayTitles = [
+            'Dashboard',
             'Registrations',
             'Working Order', 
             'Customers',
             'Support Tickets',
-            'Invoices',
         ];
         displayNavItems = const [
+            BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
             BottomNavigationBarItem(icon: Icon(Icons.app_registration), label: 'Registrations'),
             BottomNavigationBarItem(icon: Icon(Icons.work), label: 'Working Order'),
             BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Customers'),
             BottomNavigationBarItem(icon: Icon(Icons.confirmation_number), label: 'Tickets'),
-            BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: 'Invoices'),
         ];
     } else {
-        displayTabs = _tabs;
-        displayTitles = _titles;
+        displayTabs = [
+          const DashboardTab(),
+          const InstallationsTab(),
+          const TechnicianCustomerListScreen(),
+          const TicketsTab(),
+        ];
+        displayTitles = [
+          'Dashboard',
+          'Working Order',
+          'Customers',
+          'Support Tickets',
+        ];
         displayNavItems = const [
           BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.build), label: 'Installations'),
+          BottomNavigationBarItem(icon: Icon(Icons.build), label: 'Working Order'),
+          BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Customers'),
           BottomNavigationBarItem(icon: Icon(Icons.confirmation_number), label: 'Tickets'),
         ];
     }
@@ -203,19 +214,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                 ListTile(
-                  leading: const Icon(Icons.people),
-                  title: const Text('Customer List'),
-                  onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TechnicianCustomerListScreen()));
-                  },
-                ),
                 ListTile(
                   leading: const Icon(Icons.bar_chart),
                   title: const Text('Performance Report'),
                   onTap: () {
                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PerformanceReportScreen()));
                   },
+                ),
+                if (user?.role == 'admin' || user?.role == 'superadmin')
+                ListTile(
+                    leading: const Icon(Icons.receipt_long),
+                    title: const Text('Invoices'),
+                    onTap: () {
+                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InvoiceScreen()));
+                    },
                 ),
                  ListTile(
                     leading: const Icon(Icons.logout),

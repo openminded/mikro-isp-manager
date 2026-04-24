@@ -110,7 +110,19 @@ function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusMod
 interface CompletionModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: (secretId: string, files: File[], subAreaId: string, secretName: string, profileName: string) => void;
+    onConfirm: (
+        secretId: string, 
+        files: File[], 
+        subAreaId: string, 
+        secretName: string, 
+        profileName: string,
+        additionalData: {
+            ssidName?: string;
+            ssidPassword?: string;
+            signalLevel?: string;
+            installationDate?: string;
+        }
+    ) => void;
     serverName: string;
     fetchingSecrets: boolean;
     secrets: PppSecret[];
@@ -124,6 +136,11 @@ function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecre
     const [selectedSubAreaId, setSelectedSubAreaId] = useState('');
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
     const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+    
+    const [ssidName, setSsidName] = useState('');
+    const [ssidPassword, setSsidPassword] = useState('');
+    const [signalLevel, setSignalLevel] = useState('');
+    const [installationDate, setInstallationDate] = useState(new Date().toISOString().split('T')[0]);
 
     useEffect(() => {
         setSelectedSecretId('');
@@ -131,6 +148,10 @@ function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecre
         setSelectedSubAreaId('');
         setSelectedFiles([]);
         setPreviewUrls([]);
+        setSsidName('');
+        setSsidPassword('');
+        setSignalLevel('');
+        setInstallationDate(new Date().toISOString().split('T')[0]);
     }, [isOpen]);
 
     if (!isOpen) return null;
@@ -149,7 +170,12 @@ function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecre
     const handleSubmit = () => {
         const secret = secrets.find(s => s['.id'] === selectedSecretId);
         if (secret && selectedFiles.length > 0) {
-            onConfirm(secret['.id'], selectedFiles, selectedSubAreaId, secret.name, selectedProfile);
+            onConfirm(secret['.id'], selectedFiles, selectedSubAreaId, secret.name, selectedProfile, {
+                ssidName,
+                ssidPassword,
+                signalLevel,
+                installationDate
+            });
         }
     };
 
@@ -208,32 +234,71 @@ function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecre
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Sub Area</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Select Sub Area (Optional)</label>
                             <SearchableSelect
-                                options={subAreas
-                                    // Use filtered methods if serverName maps to ID, otherwise just show all?
-                                    // We need server ID. But we only have serverName here.
-                                    // However, in WorkingOrder we can find ID. In Modal props we receive serverName.
-                                    // Let's filter in the Modal? No, simpler to just show all for now?
-                                    // Or better, filter by finding the ID from subAreas (if we had server list here).
-                                    // For now, let's just show all or maybe pass serverId?
-                                    // WorkingOrder passes serverName.
-                                    // Let's filter purely by matching serverName if we can?
-                                    // No, SubArea has serverId.
-                                    // Let's pass filteredSubAreas to Modal?
-                                    // Yes, let's filter in WorkingOrder before passing.
-                                    // BUT, for now I will just map ALL subAreas and let user pick (with label showing server maybe?).
-                                    // Actually, let's update WorkingOrder to pass filteredSubAreas.
-                                    // REVERTING this thought: Let's just use subAreas prop (which should be filtered).
-                                    // But I passed raw subAreas.
-                                    // Modify SearchableSelect options below to match what I'll do in WorkingOrder.
-                                    .map(sa => ({ label: sa.name, value: sa.id }))
-                                }
+                                options={subAreas.map(s => ({
+                                    value: s.id,
+                                    label: s.name
+                                }))}
                                 value={selectedSubAreaId}
                                 onChange={setSelectedSubAreaId}
                                 placeholder="Select Sub Area..."
                             />
                         </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                    Installation Date
+                                </label>
+                                <input
+                                    type="date"
+                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    value={installationDate}
+                                    onChange={(e) => setInstallationDate(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                    Signal Level (dBm)
+                                </label>
+                                <input
+                                    type="text"
+                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    placeholder="Redaman..."
+                                    value={signalLevel}
+                                    onChange={(e) => setSignalLevel(e.target.value)}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                    SSID Name
+                                </label>
+                                <input
+                                    type="text"
+                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    placeholder="Wifi Name..."
+                                    value={ssidName}
+                                    onChange={(e) => setSsidName(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                    SSID Password
+                                </label>
+                                <input
+                                    type="text"
+                                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    placeholder="Wifi Password..."
+                                    value={ssidPassword}
+                                    onChange={(e) => setSsidPassword(e.target.value)}
+                                />
+                            </div>
+                        </div>
+
 
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -511,7 +576,19 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
         }
     };
 
-    const handleCompletionConfirm = async (secretId: string, files: File[], subAreaId: string, secretName: string, profileName: string) => {
+    const handleCompletionConfirm = async (
+        secretId: string, 
+        files: File[], 
+        subAreaId: string, 
+        secretName: string, 
+        profileName: string,
+        additionalData: {
+            ssidName?: string;
+            ssidPassword?: string;
+            signalLevel?: string;
+            installationDate?: string;
+        }
+    ) => {
         if (!completingOrder) return;
         const server = servers.find(s => s.name === completingOrder.locationId);
         if (!server) return;
@@ -521,6 +598,11 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
         formData.append('secretId', secretId);
         formData.append('secretName', secretName); // Pass name for SQL Customer creation
         if (subAreaId) formData.append('sub_area_id', subAreaId);
+        
+        if (additionalData.ssidName) formData.append('ssidName', additionalData.ssidName);
+        if (additionalData.ssidPassword) formData.append('ssidPassword', additionalData.ssidPassword);
+        if (additionalData.signalLevel) formData.append('signalLevel', additionalData.signalLevel);
+        if (additionalData.installationDate) formData.append('installationDate', additionalData.installationDate);
 
         files.forEach(file => {
             formData.append('photos', file);

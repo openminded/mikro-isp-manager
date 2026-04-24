@@ -23,6 +23,11 @@ export interface Customer {
     coordinates?: string; // lat,long
     mapsUrl?: string; // Registration Location
     odpId?: string; // Link to Topology ODP
+    installationDate?: string;
+    ssidName?: string;
+    ssidPassword?: string;
+    signalLevel?: string;
+    crmId?: string; // SQL UUID for CRM linking
 }
 
 export interface Profile {
@@ -100,6 +105,10 @@ export interface Registration {
         secretName?: string;
         photos?: string[];
         cost?: { name: string; price: number };
+        ssidName?: string;
+        ssidPassword?: string;
+        signalLevel?: string;
+        installationDate?: string;
     };
     workingOrderStatus?: 'pending' | 'done';
     workingOrderNote?: string;

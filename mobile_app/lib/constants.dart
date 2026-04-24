@@ -7,10 +7,12 @@ class AppConstants {
   // For Web: Use relative path or same-origin to avoid CORS
   static String get baseUrl {
     if (kIsWeb) {
-      // Web: Use relative API path (assumes API is on same domain or proxied)
-      return '';
+      // In production (PWA.telaju.com), it should point to the backend domain
+      // If we use relative paths, it assumes backend is on same domain. 
+      // User has app.telaju.com for backend.
+      return kReleaseMode ? 'https://app.telaju.com' : 'http://localhost:3001';
     }
-    return kReleaseMode ? 'https://werently.telaju.com' : 'http://10.0.2.2:3001';
+    return kReleaseMode ? 'https://app.telaju.com' : 'http://10.0.2.2:3001';
   }
   static String get defaultBaseUrl => '$baseUrl/api';
 }

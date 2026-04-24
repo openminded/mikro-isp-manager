@@ -213,6 +213,10 @@ export function Sidebar({ className, onClose }: SidebarProps) {
                     <LogOut className="w-5 h-5" />
                     Sign Out
                 </button>
+                <div className="mt-4 px-3 text-[10px] text-slate-400 font-medium flex justify-between items-center">
+                    <span>App Version</span>
+                    <span>v1.0.1+2</span>
+                </div>
             </div>
         </div>
     );

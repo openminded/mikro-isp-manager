@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2, Printer } from "lucide-react";
+import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2, Printer, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Mock Data for dev (replace with API calls later)
@@ -9,8 +9,10 @@ import { cn } from "@/lib/utils";
 
 export function Finance() {
     const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState<'unpaid' | 'history' | 'invalid'>('unpaid');
+    const [activeTab, setActiveTab] = useState<'unpaid' | 'history' | 'invalid' | 'recap' | 'analytics'>('analytics');
     const [invoices, setInvoices] = useState<any[]>([]);
+    const [analyticsData, setAnalyticsData] = useState<any>(null);
+    const [monthlyStatusFilters, setMonthlyStatusFilters] = useState({ PAID: true, UNPAID: true, CANCELLED: false, INVALID: false });
     const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
 
     const [isPayModalOpen, setIsPayModalOpen] = useState(false);
@@ -18,6 +20,7 @@ export function Finance() {
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [historyLogs, setHistoryLogs] = useState<any[]>([]);
     const [editFormData, setEditFormData] = useState({ amount: '', due_date: '', status: '' });
+    const [selectedAnalyticsGroup, setSelectedAnalyticsGroup] = useState<{title: string, invoices: any[]} | null>(null);
 
     // Grouping & Selection
     const [groupByServer, setGroupByServer] = useState(false);
@@ -89,6 +92,46 @@ export function Finance() {
     const fetchInvoices = async (currentPage = page) => {
         setIsLoading(true);
         try {
+            if (activeTab === 'analytics') {
+                const params = new URLSearchParams();
+                if (period) params.append('period', period);
+                if (filterServerId) params.append('serverId', filterServerId);
+                
+                const res = await fetch(`/api/billing/analytics?${params.toString()}`);
+                const data = await res.json();
+                
+                if (res.ok && !data.error && data.summary) {
+                    setAnalyticsData(data);
+                } else {
+                    console.error("Backend Error:", data.error);
+                    setAnalyticsData({ error: data.error || 'Failed to load analytics' });
+                }
+                setIsLoading(false);
+                return;
+            }
+
+            if (activeTab === 'recap') {
+                const params = new URLSearchParams();
+                params.append('page', currentPage.toString());
+                params.append('limit', limit.toString());
+                if (search) params.append('search', search);
+                if (period) params.append('period', period);
+                if (filterServerId) params.append('serverId', filterServerId);
+                if (sortConfig) {
+                    params.append('sortBy', sortConfig.key);
+                    params.append('order', sortConfig.direction.toUpperCase());
+                }
+                const res = await fetch(`/api/billing/payments?${params.toString()}`);
+                const result = await res.json();
+                if (result.data) {
+                    setInvoices(result.data);
+                    setTotalPages(result.meta.totalPages);
+                } else {
+                    setInvoices([]);
+                }
+                return;
+            }
+
             // Map table tabs to API status
             let status = 'UNPAID';
             if (activeTab === 'history') status = 'PAID';
@@ -306,35 +349,53 @@ export function Finance() {
         if (!groupByServer) return null;
         const groups: Record<string, any[]> = {};
         invoices.forEach(inv => {
-            // Customer might be null if deleted, handle gracefully
-            const serverName = inv.Customer?.Server?.name || 'Unknown Server';
+            let serverName = 'Unknown Server';
+            if (activeTab === 'recap') {
+                serverName = inv.Invoice?.Customer?.Server?.name || 'Unknown Server';
+            } else {
+                serverName = inv.Customer?.Server?.name || 'Unknown Server';
+            }
             if (!groups[serverName]) groups[serverName] = [];
             groups[serverName].push(inv);
         });
         return groups;
-    }, [invoices, groupByServer]);
+    }, [invoices, groupByServer, activeTab]);
 
 
     const handleBulkDelete = async () => {
         if (!user || user.role !== 'superadmin') return;
-        if (!confirm(`Are you sure you want to delete ${selectedIds.size} invoices? This cannot be undone.`)) return;
+        const itemName = activeTab === 'recap' ? 'payments' : 'invoices';
+        if (!confirm(`Are you sure you want to delete ${selectedIds.size} ${itemName}? This cannot be undone.`)) return;
 
         try {
-            const res = await fetch('/api/billing/bulk-delete', {
+            const isRecap = activeTab === 'recap';
+            const endpoint = isRecap ? '/api/billing/payments/bulk-delete' : '/api/billing/bulk-delete';
+            const payload = isRecap 
+                ? { paymentIds: Array.from(selectedIds), user }
+                : { invoiceIds: Array.from(selectedIds), user };
+
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ invoiceIds: Array.from(selectedIds), user })
+                body: JSON.stringify(payload)
             });
-            const result = await res.json();
-            if (result.success) {
-                alert(result.message);
-                setSelectedIds(new Set());
-                fetchInvoices();
+            
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                const result = await res.json();
+                if (result.success) {
+                    alert(result.message);
+                    setSelectedIds(new Set());
+                    fetchInvoices();
+                } else {
+                    alert('Bulk delete failed: ' + result.error);
+                }
             } else {
-                alert('Bulk delete failed: ' + result.error);
+                const text = await res.text();
+                alert(`Server Error (${res.status}): API endpoint not found or server crash. Response: ${text.substring(0, 100)}`);
             }
-        } catch (e) {
-            alert('Failed to execute bulk delete');
+        } catch (e: any) {
+            alert('Failed to execute bulk delete: ' + e.message);
         }
     };
 
@@ -438,7 +499,7 @@ export function Finance() {
 
             {/* Bulk Actions Bar */}
             {
-                selectedIds.size > 0 && (
+                selectedIds.size > 0 && user?.role === 'superadmin' && (
                     <div className="mb-6 p-4 bg-slate-900 text-white rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 fade-in duration-200">
                         <div className="flex items-center gap-3">
                             <div className="bg-white/10 px-3 py-1 rounded-md text-sm font-medium">
@@ -449,31 +510,44 @@ export function Finance() {
                             </span>
                         </div>
                         <div className="flex items-center gap-2">
-                            <button onClick={() => handleBulkAction('PAID')} className="px-3 py-1.5 bg-green-600 hover:bg-green-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                                <CheckCircle className="w-4 h-4" /> Paid
-                            </button>
-                            <button onClick={() => handleBulkAction('UNPAID')} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                                <X className="w-4 h-4" /> Unpaid
-                            </button>
-                            <button onClick={() => handleBulkAction('INVALID')} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                                <Ban className="w-4 h-4" /> Invalid
-                            </button>
-                            {user?.role === 'superadmin' && (
-                                <button onClick={handleBulkDelete} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-red-700">
-                                    <Trash2 className="w-4 h-4" /> Delete Selected
-                                </button>
+                            {activeTab !== 'recap' && (
+                                <>
+                                    <button onClick={() => handleBulkAction('PAID')} className="px-3 py-1.5 bg-green-600 hover:bg-green-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                        <CheckCircle className="w-4 h-4" /> Paid
+                                    </button>
+                                    <button onClick={() => handleBulkAction('UNPAID')} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                        <X className="w-4 h-4" /> Unpaid
+                                    </button>
+                                    <button onClick={() => handleBulkAction('INVALID')} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                        <Ban className="w-4 h-4" /> Invalid
+                                    </button>
+                                </>
                             )}
+                            <button onClick={handleBulkDelete} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-red-700">
+                                <Trash2 className="w-4 h-4" /> Delete Selected
+                            </button>
                         </div>
                     </div>
                 )
             }
 
             {/* Tabs */}
-            <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-700 mb-6">
+            <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-700 mb-6 overflow-x-auto pb-1">
+                <button
+                    onClick={() => setActiveTab('analytics')}
+                    className={cn(
+                        "px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
+                        activeTab === 'analytics'
+                            ? "border-primary text-primary"
+                            : "border-transparent text-slate-500 hover:text-slate-700"
+                    )}
+                >
+                    Overview & Analytics
+                </button>
                 <button
                     onClick={() => setActiveTab('unpaid')}
                     className={cn(
-                        "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                        "px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
                         activeTab === 'unpaid'
                             ? "border-primary text-primary"
                             : "border-transparent text-slate-500 hover:text-slate-700"
@@ -503,131 +577,578 @@ export function Finance() {
                 >
                     Invalid / Cancelled
                 </button>
+                <button
+                    onClick={() => setActiveTab('recap')}
+                    className={cn(
+                        "px-4 py-2 text-sm font-medium border-b-2 transition-colors ml-auto",
+                        activeTab === 'recap'
+                            ? "border-primary text-primary"
+                            : "border-transparent text-slate-500 hover:text-slate-700"
+                    )}
+                >
+                    Payment Recap
+                </button>
             </div>
 
-            {/* Table */}
+            {/* Content */}
+            {activeTab === 'analytics' ? (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                    {!analyticsData ? (
+                        <div className="p-12 text-center text-slate-500 flex flex-col items-center justify-center gap-3">
+                            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                            Loading analytics...
+                        </div>
+                    ) : analyticsData.error ? (
+                        <div className="p-12 text-center flex flex-col items-center justify-center gap-3">
+                            <div className="text-red-500 bg-red-100 p-4 rounded-full">
+                                <Ban className="w-8 h-8" />
+                            </div>
+                            <h3 className="font-semibold text-slate-900">Backend Not Updated</h3>
+                            <p className="text-slate-500 text-sm max-w-md">
+                                {analyticsData.error === 'API route not found' 
+                                    ? "Please restart the Node.js service on your server to apply the latest API routes." 
+                                    : analyticsData.error}
+                            </p>
+                        </div>
+                    ) : !analyticsData.summary ? (
+                        <div className="p-12 text-center text-red-500">Invalid analytics data received.</div>
+                    ) : (
+                        <>
+                            {/* Summary Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
+                                    <div className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">Total Revenue</div>
+                                    <div className="text-3xl font-bold text-slate-900 dark:text-white">Rp {(analyticsData.summary.totalPaid || 0).toLocaleString('id-ID')}</div>
+                                    <div className="text-xs text-green-600 font-medium mt-2">Received from {analyticsData.summary.paidCount || 0} payments</div>
+                                </div>
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
+                                    <div className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">Unpaid Amount</div>
+                                    <div className="text-3xl font-bold text-red-600 dark:text-red-400">Rp {(analyticsData.summary.totalUnpaid || 0).toLocaleString('id-ID')}</div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-2">From {analyticsData.summary.unpaidCount || 0} customer invoices</div>
+                                </div>
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between col-span-1 lg:col-span-2">
+                                    <div className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">Collection Rate</div>
+                                    <div className="flex items-end gap-3 mb-2">
+                                        <div className="text-3xl font-bold text-primary">
+                                            {analyticsData.summary.totalPaid + analyticsData.summary.totalUnpaid > 0 
+                                                ? Math.round((analyticsData.summary.totalPaid / (analyticsData.summary.totalPaid + analyticsData.summary.totalUnpaid)) * 100)
+                                                : 0}%
+                                        </div>
+                                    </div>
+                                    <div className="w-full bg-slate-100 dark:bg-slate-700 h-3 rounded-full overflow-hidden flex">
+                                        <div className="bg-primary h-full transition-all" style={{ width: `${analyticsData.summary.totalPaid + analyticsData.summary.totalUnpaid > 0 ? (analyticsData.summary.totalPaid / (analyticsData.summary.totalPaid + analyticsData.summary.totalUnpaid)) * 100 : 0}%` }}></div>
+                                        <div className="bg-red-500 h-full transition-all" style={{ width: `${analyticsData.summary.totalPaid + analyticsData.summary.totalUnpaid > 0 ? (analyticsData.summary.totalUnpaid / (analyticsData.summary.totalPaid + analyticsData.summary.totalUnpaid)) * 100 : 0}%` }}></div>
+                                    </div>
+                                    <div className="flex justify-between text-xs mt-2 font-medium">
+                                        <span className="text-primary">Paid: {analyticsData.summary.paidCount}</span>
+                                        <span className="text-red-500">Unpaid: {analyticsData.summary.unpaidCount}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Detailed Charts */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Revenue By Server */}
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                                    <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Revenue by Server</h3>
+                                    <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                                        {analyticsData.revenueByServer.length === 0 ? (
+                                            <div className="text-center text-slate-500 py-4 text-sm">No server data</div>
+                                        ) : (
+                                            analyticsData.revenueByServer.sort((a: any, b: any) => b.amount - a.amount).map((item: any, i: number) => {
+                                                const maxAmount = Math.max(...analyticsData.revenueByServer.map((x: any) => x.amount));
+                                                const percentage = maxAmount > 0 ? (item.amount / maxAmount) * 100 : 0;
+                                                return (
+                                                    <div 
+                                                        key={i} 
+                                                        className="space-y-1 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors"
+                                                        onClick={() => setSelectedAnalyticsGroup({ title: `Server: ${item.name}`, invoices: item.invoices || [] })}
+                                                    >
+                                                        <div className="flex justify-between text-sm">
+                                                            <span className="font-medium text-slate-700 dark:text-slate-300">{item.name}</span>
+                                                            <span className="font-semibold text-slate-900 dark:text-white">Rp {item.amount.toLocaleString('id-ID')}</span>
+                                                        </div>
+                                                        <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                                                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${percentage}%` }}></div>
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">{item.count} Payments</div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Revenue By Payment Method */}
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                                    <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Revenue by Payment Method</h3>
+                                    <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                                        {analyticsData.revenueByMethod.length === 0 ? (
+                                            <div className="text-center text-slate-500 py-4 text-sm">No payment data</div>
+                                        ) : (
+                                            analyticsData.revenueByMethod.sort((a: any, b: any) => b.amount - a.amount).map((item: any, i: number) => {
+                                                const maxAmount = Math.max(...analyticsData.revenueByMethod.map((x: any) => x.amount));
+                                                const percentage = maxAmount > 0 ? (item.amount / maxAmount) * 100 : 0;
+                                                const colors = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500'];
+                                                const color = colors[i % colors.length];
+                                                
+                                                return (
+                                                    <div 
+                                                        key={i} 
+                                                        className="space-y-1 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors"
+                                                        onClick={() => setSelectedAnalyticsGroup({ title: `Method: ${item.name ? (paymentMethodsList.find((m: any) => m.id.toLowerCase() === item.name.toLowerCase())?.name || item.name.replace('_', ' ')) : 'Unknown'}`, invoices: item.invoices || [] })}
+                                                    >
+                                                        <div className="flex justify-between text-sm">
+                                                            <span className="font-medium text-slate-700 dark:text-slate-300 capitalize">{item.name ? (paymentMethodsList.find((m: any) => m.id.toLowerCase() === item.name.toLowerCase())?.name || item.name.replace('_', ' ')) : '-'}</span>
+                                                            <span className="font-semibold text-slate-900 dark:text-white">Rp {item.amount.toLocaleString('id-ID')}</span>
+                                                        </div>
+                                                        <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                                                            <div className={`${color} h-full rounded-full`} style={{ width: `${percentage}%` }}></div>
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">{item.count} Transactions</div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                                
+                                {/* Anomaly Data */}
+                                {analyticsData.anomalies && analyticsData.anomalies.length > 0 && (
+                                    <div className="col-span-1 lg:col-span-2 mb-2 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-xl p-6 shadow-sm">
+                                        <h3 className="text-lg font-bold text-red-700 dark:text-red-400 mb-4 flex items-center gap-2">
+                                            <AlertTriangle className="w-5 h-5" /> Data Anomalies Detected ({analyticsData.anomalies.length})
+                                        </h3>
+                                        <div className="space-y-3">
+                                            {analyticsData.anomalies.map((anom: any, idx: number) => (
+                                                <div key={idx} className="bg-white dark:bg-slate-800 p-3 rounded border border-red-100 dark:border-red-900 flex justify-between items-center">
+                                                    <div>
+                                                        <div className="font-semibold text-slate-900 dark:text-white text-sm">
+                                                            {anom.invoice.Customer?.name || anom.invoice.Customer?.mikrotik_name || 'Unknown'} 
+                                                            <span className="ml-2 font-normal text-slate-500 text-xs">({anom.invoice.Customer?.mikrotik_name})</span>
+                                                            <span className="ml-2 text-xs bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded uppercase">{anom.type}</span>
+                                                        </div>
+                                                        <div className="text-[11px] text-slate-500 mt-0.5">
+                                                            {anom.invoice.Customer?.Server?.name || 'N/A'} • {anom.invoice.period} • By: <span className="text-blue-600 dark:text-blue-400">{anom.invoice.updatedBy || '-'}</span>
+                                                        </div>
+                                                        <div className="text-xs text-red-600 mt-1 font-medium">{anom.description}</div>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => handleEditClick(anom.invoice)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-xs font-medium text-slate-700 dark:text-slate-200 transition-colors">Edit</button>
+                                                        {user?.role === 'superadmin' && (
+                                                            <button onClick={() => handleDeleteInvoice(anom.invoice)} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors">Delete</button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Daily Revenue Trend */}
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm col-span-1 lg:col-span-2">
+                                    <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Daily Revenue Trend</h3>
+                                    <div className="h-[200px] flex items-end gap-2 w-full pt-4">
+                                        {analyticsData.dailyRevenue.length === 0 ? (
+                                            <div className="w-full text-center text-slate-500 self-center text-sm">No transactions in this period</div>
+                                        ) : (
+                                            (() => {
+                                                const maxDaily = Math.max(...analyticsData.dailyRevenue.map((d: any) => d.amount));
+                                                return analyticsData.dailyRevenue.map((day: any, i: number) => {
+                                                    const height = maxDaily > 0 ? (day.amount / maxDaily) * 100 : 0;
+                                                    const dateShort = new Date(day.date).getDate();
+                                                    return (
+                                                        <div key={i} className="flex-1 flex flex-col justify-end items-center group relative min-w-[10px]">
+                                                            {/* Tooltip on hover */}
+                                                            <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none">
+                                                                {day.date}: Rp {day.amount.toLocaleString('id-ID')}
+                                                            </div>
+                                                            <div 
+                                                                className="w-full bg-primary/80 hover:bg-primary transition-all rounded-t-sm" 
+                                                                style={{ height: `${height}%`, minHeight: '4px' }}
+                                                            ></div>
+                                                            <div className="text-[10px] text-slate-400 mt-1 truncate max-w-full">{dateShort}</div>
+                                                        </div>
+                                                    );
+                                                });
+                                            })()
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Monthly Revenue Trend */}
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm col-span-1 lg:col-span-2">
+                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                                        <h3 className="font-semibold text-slate-900 dark:text-white">Monthly Revenue Trend</h3>
+                                        <div className="flex flex-wrap items-center gap-4 text-sm">
+                                            <label className="flex items-center gap-1.5 cursor-pointer">
+                                                <input type="checkbox" className="rounded border-slate-300 text-blue-500 focus:ring-blue-500 w-4 h-4" checked={monthlyStatusFilters.PAID} onChange={(e) => setMonthlyStatusFilters(p => ({...p, PAID: e.target.checked}))}/>
+                                                <span className="text-slate-600 dark:text-slate-300 font-medium">Paid</span>
+                                            </label>
+                                            <label className="flex items-center gap-1.5 cursor-pointer">
+                                                <input type="checkbox" className="rounded border-slate-300 text-red-500 focus:ring-red-500 w-4 h-4" checked={monthlyStatusFilters.UNPAID} onChange={(e) => setMonthlyStatusFilters(p => ({...p, UNPAID: e.target.checked}))}/>
+                                                <span className="text-slate-600 dark:text-slate-300 font-medium">Unpaid</span>
+                                            </label>
+                                            <label className="flex items-center gap-1.5 cursor-pointer">
+                                                <input type="checkbox" className="rounded border-slate-300 text-slate-500 focus:ring-slate-500 w-4 h-4" checked={monthlyStatusFilters.CANCELLED} onChange={(e) => setMonthlyStatusFilters(p => ({...p, CANCELLED: e.target.checked}))}/>
+                                                <span className="text-slate-600 dark:text-slate-300 font-medium">Cancel</span>
+                                            </label>
+                                            <label className="flex items-center gap-1.5 cursor-pointer">
+                                                <input type="checkbox" className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4" checked={monthlyStatusFilters.INVALID} onChange={(e) => setMonthlyStatusFilters(p => ({...p, INVALID: e.target.checked}))}/>
+                                                <span className="text-slate-600 dark:text-slate-300 font-medium">Invalid</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="h-[250px] flex items-end gap-4 w-full pt-4 pb-2">
+                                        {!analyticsData.monthlyTrend || analyticsData.monthlyTrend.length === 0 ? (
+                                            <div className="w-full text-center text-slate-500 self-center text-sm">No monthly data available</div>
+                                        ) : (
+                                            (() => {
+                                                const maxTotal = Math.max(...analyticsData.monthlyTrend.map((m: any) => {
+                                                    let total = 0;
+                                                    if (monthlyStatusFilters.PAID) total += m.PAID;
+                                                    if (monthlyStatusFilters.UNPAID) total += m.UNPAID;
+                                                    if (monthlyStatusFilters.CANCELLED) total += m.CANCELLED;
+                                                    if (monthlyStatusFilters.INVALID) total += m.INVALID;
+                                                    return total;
+                                                }));
+
+                                                return analyticsData.monthlyTrend.map((month: any, i: number) => {
+                                                    const paidH = maxTotal > 0 ? (month.PAID / maxTotal) * 100 : 0;
+                                                    const unpaidH = maxTotal > 0 ? (month.UNPAID / maxTotal) * 100 : 0;
+                                                    const cancelledH = maxTotal > 0 ? (month.CANCELLED / maxTotal) * 100 : 0;
+                                                    const invalidH = maxTotal > 0 ? (month.INVALID / maxTotal) * 100 : 0;
+                                                    
+                                                    const totalH = paidH + unpaidH + cancelledH + invalidH;
+                                                    // Only render bar if totalH > 0 to prevent 0-height bars from rendering if no filters match
+                                                    
+                                                    return (
+                                                        <div key={i} className="flex-1 flex flex-col justify-end items-center group relative min-w-[20px] h-full">
+                                                            {/* Tooltip on hover */}
+                                                            <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-2 px-3 rounded whitespace-nowrap z-10 pointer-events-none flex flex-col gap-1 shadow-lg">
+                                                                <div className="font-bold border-b border-slate-600 pb-1 mb-1">{formatPeriod(month.period)}</div>
+                                                                {monthlyStatusFilters.PAID && month.PAID > 0 && <div className="flex justify-between gap-4"><span className="text-blue-300">Paid:</span> <span>Rp {month.PAID.toLocaleString('id-ID')}</span></div>}
+                                                                {monthlyStatusFilters.UNPAID && month.UNPAID > 0 && <div className="flex justify-between gap-4"><span className="text-red-300">Unpaid:</span> <span>Rp {month.UNPAID.toLocaleString('id-ID')}</span></div>}
+                                                                {monthlyStatusFilters.CANCELLED && month.CANCELLED > 0 && <div className="flex justify-between gap-4"><span className="text-slate-300">Cancel:</span> <span>Rp {month.CANCELLED.toLocaleString('id-ID')}</span></div>}
+                                                                {monthlyStatusFilters.INVALID && month.INVALID > 0 && <div className="flex justify-between gap-4"><span className="text-orange-300">Invalid:</span> <span>Rp {month.INVALID.toLocaleString('id-ID')}</span></div>}
+                                                            </div>
+                                                            <div className="w-full flex flex-col justify-end h-full">
+                                                                {totalH > 0 && (
+                                                                    <div className="w-full flex flex-col justify-end rounded-t-md overflow-hidden relative" style={{ height: `${totalH}%`, minHeight: '4px' }}>
+                                                                        {monthlyStatusFilters.INVALID && invalidH > 0 && <div className="w-full bg-orange-400 transition-all border-b border-white/20" style={{ height: `${(invalidH/totalH)*100}%` }}></div>}
+                                                                        {monthlyStatusFilters.CANCELLED && cancelledH > 0 && <div className="w-full bg-slate-400 transition-all border-b border-white/20" style={{ height: `${(cancelledH/totalH)*100}%` }}></div>}
+                                                                        {monthlyStatusFilters.UNPAID && unpaidH > 0 && <div className="w-full bg-red-500 transition-all border-b border-white/20" style={{ height: `${(unpaidH/totalH)*100}%` }}></div>}
+                                                                        {monthlyStatusFilters.PAID && paidH > 0 && <div className="w-full bg-blue-500 transition-all" style={{ height: `${(paidH/totalH)*100}%` }}></div>}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-xs font-medium text-slate-500 mt-3 truncate max-w-full">
+                                                                {month.period.slice(5,7)}/{month.period.slice(2,4)}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                });
+                                            })()
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            ) : (
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                            <tr>
-                                <th className="px-4 py-4 w-[40px]">
-                                    <input
-                                        type="checkbox"
-                                        className="rounded border-slate-300"
-                                        checked={invoices.length > 0 && selectedIds.size === invoices.length}
-                                        onChange={handleSelectAll}
-                                    />
-                                </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('username')}>
-                                    <div className="flex items-center gap-2">
-                                        Username
-                                        {sortConfig?.key === 'username' && (
-                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
-                                        )}
-                                    </div>
-                                </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('customer_name')}>
-                                    <div className="flex items-center gap-2">
-                                        Customer
-                                        {sortConfig?.key === 'customer_name' && (
-                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
-                                        )}
-                                    </div>
-                                </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('period')}>
-                                    <div className="flex items-center gap-2">
-                                        Period
-                                        {sortConfig?.key === 'period' && (
-                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
-                                        )}
-                                    </div>
-                                </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('due_date')}>
-                                    <div className="flex items-center gap-2">
-                                        Due Date
-                                        {sortConfig?.key === 'due_date' && (
-                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
-                                        )}
-                                    </div>
-                                </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('amount')}>
-                                    <div className="flex items-center gap-2">
-                                        Amount
-                                        {sortConfig?.key === 'amount' && (
-                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
-                                        )}
-                                    </div>
-                                </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('status')}>
-                                    <div className="flex items-center gap-2">
-                                        Status
-                                        {sortConfig?.key === 'status' && (
-                                            <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
-                                        )}
-                                    </div>
-                                </th>
-                                <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                            {invoices.length === 0 ? (
+                    {activeTab === 'recap' ? (
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
-                                        No invoices found for this category.
-                                    </td>
+                                    {user?.role === 'superadmin' && (
+                                        <th className="px-4 py-4 w-[40px]">
+                                            <input
+                                                type="checkbox"
+                                                className="rounded border-slate-300"
+                                                checked={invoices.length > 0 && selectedIds.size === invoices.length}
+                                                onChange={handleSelectAll}
+                                            />
+                                        </th>
+                                    )}
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('transaction_date')}>
+                                        <div className="flex items-center gap-2">
+                                            Payment Date
+                                            {sortConfig?.key === 'transaction_date' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('username')}>
+                                        <div className="flex items-center gap-2">
+                                            Username
+                                            {sortConfig?.key === 'username' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('customer_name')}>
+                                        <div className="flex items-center gap-2">
+                                            Customer
+                                            {sortConfig?.key === 'customer_name' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('period')}>
+                                        <div className="flex items-center gap-2">
+                                            Invoice Period
+                                            {sortConfig?.key === 'period' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('method')}>
+                                        <div className="flex items-center gap-2">
+                                            Method
+                                            {sortConfig?.key === 'method' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-right" onClick={() => requestSort('amount')}>
+                                        <div className="flex items-center justify-end gap-2">
+                                            Amount
+                                            {sortConfig?.key === 'amount' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
                                 </tr>
-                            ) : groupByServer && groupedInvoices ? (
-                                Object.entries(groupedInvoices).map(([serverName, groupInvoices]) => (
-                                    <>
-                                        <tr key={`group-${serverName}`} className="bg-slate-50/80 dark:bg-slate-900/30">
-                                            <td colSpan={8} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
-                                                <div className="flex items-center gap-2">
-                                                    <Layers className="w-3.5 h-3.5" />
-                                                    {serverName} <span className="text-slate-400 font-normal">({groupInvoices.length} invoices)</span>
-                                                </div>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                                {invoices.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
+                                            No payments found for this criteria.
+                                        </td>
+                                    </tr>
+                                ) : groupByServer && groupedInvoices ? (
+                                    Object.entries(groupedInvoices).map(([serverName, groupInvoices]) => (
+                                        <React.Fragment key={`group-${serverName}`}>
+                                            <tr className="bg-slate-50/80 dark:bg-slate-900/30">
+                                                <td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
+                                                    <div className="flex items-center gap-2">
+                                                        <Layers className="w-3.5 h-3.5" />
+                                                        {serverName} <span className="text-slate-400 font-normal">({groupInvoices.length} payments)</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {groupInvoices.map(payment => (
+                                                <tr key={payment.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                                    {user?.role === 'superadmin' && (
+                                                        <td className="px-4 py-4 w-[40px]">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="rounded border-slate-300"
+                                                                checked={selectedIds.has(payment.id)}
+                                                                onChange={(e) => handleSelectOne(payment.id, e.target.checked)}
+                                                            />
+                                                        </td>
+                                                    )}
+                                                    <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                        {new Date(payment.transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                    </td>
+                                                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
+                                                        {payment.Invoice?.Customer?.mikrotik_name || '-'}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                        {payment.Invoice?.Customer?.name || '-'}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                        {formatPeriod(payment.Invoice?.period)}
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 uppercase">
+                                                            {payment.method ? (paymentMethodsList.find((m: any) => m.id.toLowerCase() === payment.method.toLowerCase())?.name || payment.method) : '-'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white text-right">
+                                                        Rp {Number(payment.amount).toLocaleString('id-ID')}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </React.Fragment>
+                                    ))
+                                ) : (
+                                    invoices.map(payment => (
+                                        <tr key={payment.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                            {user?.role === 'superadmin' && (
+                                                <td className="px-4 py-4 w-[40px]">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="rounded border-slate-300"
+                                                        checked={selectedIds.has(payment.id)}
+                                                        onChange={(e) => handleSelectOne(payment.id, e.target.checked)}
+                                                    />
+                                                </td>
+                                            )}
+                                            <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                {new Date(payment.transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                            </td>
+                                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
+                                                {payment.Invoice?.Customer?.mikrotik_name || '-'}
+                                            </td>
+                                            <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                {payment.Invoice?.Customer?.name || '-'}
+                                            </td>
+                                            <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                {formatPeriod(payment.Invoice?.period)}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 uppercase">
+                                                    {payment.method ? (paymentMethodsList.find((m: any) => m.id.toLowerCase() === payment.method.toLowerCase())?.name || payment.method) : '-'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white text-right">
+                                                Rp {Number(payment.amount).toLocaleString('id-ID')}
                                             </td>
                                         </tr>
-                                        {groupInvoices.map(inv => (
-                                            <InvoiceRow
-                                                key={inv.id}
-                                                invoice={inv}
-                                                petugasName={user?.name || ''}
-                                                formattedPeriod={formatPeriod(inv.period)}
-                                                selected={selectedIds.has(inv.id)}
-                                                onSelect={(c) => handleSelectOne(inv.id, c)}
-                                                onPay={() => handlePayClick(inv)}
-                                                onEdit={() => handleEditClick(inv)}
-                                                onViewHistory={() => handleViewHistory(inv)}
-                                                onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    ) : (
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                                <tr>
+                                    {user?.role === 'superadmin' && (
+                                        <th className="px-4 py-4 w-[40px]">
+                                            <input
+                                                type="checkbox"
+                                                className="rounded border-slate-300"
+                                                checked={invoices.length > 0 && selectedIds.size === invoices.length}
+                                                onChange={handleSelectAll}
                                             />
-                                        ))}
-                                    </>
-                                ))
-                            ) : (
-                                invoices.map((inv) => (
-                                    <InvoiceRow
-                                        key={inv.id}
-                                        invoice={inv}
-                                        petugasName={user?.name || ''}
-                                        formattedPeriod={formatPeriod(inv.period)}
-                                        selected={selectedIds.has(inv.id)}
-                                        onSelect={(c) => handleSelectOne(inv.id, c)}
-                                        onPay={() => handlePayClick(inv)}
-                                        onEdit={() => handleEditClick(inv)}
-                                        onViewHistory={() => handleViewHistory(inv)}
-                                        onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
-                                    />
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                                        </th>
+                                    )}
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('username')}>
+                                        <div className="flex items-center gap-2">
+                                            Username
+                                            {sortConfig?.key === 'username' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('customer_name')}>
+                                        <div className="flex items-center gap-2">
+                                            Customer
+                                            {sortConfig?.key === 'customer_name' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('period')}>
+                                        <div className="flex items-center gap-2">
+                                            Period
+                                            {sortConfig?.key === 'period' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('due_date')}>
+                                        <div className="flex items-center gap-2">
+                                            Due Date
+                                            {sortConfig?.key === 'due_date' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                                        <div className="flex items-center gap-2">
+                                            Method
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('amount')}>
+                                        <div className="flex items-center gap-2">
+                                            Amount
+                                            {sortConfig?.key === 'amount' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('status')}>
+                                        <div className="flex items-center gap-2">
+                                            Status
+                                            {sortConfig?.key === 'status' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                                {invoices.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={user?.role === 'superadmin' ? 10 : 9} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
+                                            No invoices found for this category.
+                                        </td>
+                                    </tr>
+                                ) : groupByServer && groupedInvoices ? (
+                                    Object.entries(groupedInvoices).map(([serverName, groupInvoices]) => (
+                                        <React.Fragment key={`group-${serverName}`}>
+                                            <tr className="bg-slate-50/80 dark:bg-slate-900/30">
+                                                <td colSpan={user?.role === 'superadmin' ? 10 : 9} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
+                                                    <div className="flex items-center gap-2">
+                                                        <Layers className="w-3.5 h-3.5" />
+                                                        {serverName} <span className="text-slate-400 font-normal">({groupInvoices.length} invoices)</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {groupInvoices.map(inv => (
+                                                <InvoiceRow
+                                                    key={inv.id}
+                                                    invoice={inv}
+                                                    petugasName={user?.name || ''}
+                                                    formattedPeriod={formatPeriod(inv.period)}
+                                                    selected={selectedIds.has(inv.id)}
+                                                    onSelect={(c) => handleSelectOne(inv.id, c)}
+                                                    onPay={() => handlePayClick(inv)}
+                                                    onEdit={() => handleEditClick(inv)}
+                                                    onViewHistory={() => handleViewHistory(inv)}
+                                                    onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
+                                                    isSuperAdmin={user?.role === 'superadmin'}
+                                                    paymentMethodsList={paymentMethodsList}
+                                                />
+                                            ))}
+                                        </React.Fragment>
+                                    ))
+                                ) : (
+                                    invoices.map((inv) => (
+                                        <InvoiceRow
+                                            key={inv.id}
+                                            invoice={inv}
+                                            petugasName={user?.name || ''}
+                                            formattedPeriod={formatPeriod(inv.period)}
+                                            selected={selectedIds.has(inv.id)}
+                                            onSelect={(c) => handleSelectOne(inv.id, c)}
+                                            onPay={() => handlePayClick(inv)}
+                                            onEdit={() => handleEditClick(inv)}
+                                            onViewHistory={() => handleViewHistory(inv)}
+                                            onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
+                                            isSuperAdmin={user?.role === 'superadmin'}
+                                            paymentMethodsList={paymentMethodsList}
+                                        />
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    )}
                 </div>
             </div>
+            )}
 
-
-
-            {/* Pagination */}
+            {/* Pagination (Hide for Analytics) */}
+            {activeTab !== 'analytics' && (
             <div className="flex items-center justify-between mt-4">
                 <div className="flex items-center gap-4">
                     <div className="text-sm text-slate-500">
@@ -660,6 +1181,7 @@ export function Finance() {
                     </button>
                 </div>
             </div>
+            )}
 
             {/* Payment Modal */}
             {
@@ -925,21 +1447,83 @@ export function Finance() {
                     </div>
                 )
             }
+            {/* Analytics List Modal */}
+            {selectedAnalyticsGroup && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-4xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+                            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                                {selectedAnalyticsGroup.title} ({selectedAnalyticsGroup.invoices.length})
+                            </h3>
+                            <button onClick={() => setSelectedAnalyticsGroup(null)} className="text-slate-400 hover:text-slate-500 dark:hover:text-slate-300">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6">
+                            {selectedAnalyticsGroup.invoices.length === 0 ? (
+                                <p className="text-center text-slate-500">No invoices found.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {selectedAnalyticsGroup.invoices.map((inv: any) => (
+                                        <div key={inv.id} className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-white dark:bg-slate-800">
+                                            <div>
+                                                <div className="font-semibold text-slate-900 dark:text-white">
+                                                    {inv.Customer?.name || inv.Customer?.mikrotik_name || 'Unknown'} 
+                                                    <span className="ml-2 font-normal text-slate-500 text-xs">({inv.Customer?.mikrotik_name})</span>
+                                                </div>
+                                                <div className="text-xs text-slate-400 mt-0.5">
+                                                    {inv.Customer?.comment || '-'}
+                                                </div>
+                                                <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                                                    <span className="font-medium text-slate-700 dark:text-slate-300">Rp {Number(inv.amount).toLocaleString('id-ID')}</span>
+                                                    <span>Period: {inv.period}</span>
+                                                    <span>Due: {inv.due_date}</span>
+                                                    <span>By: <span className="text-blue-600 dark:text-blue-400 font-medium">{inv.updatedBy || '-'}</span></span>
+                                                    <span className={cn(
+                                                        "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                                                        inv.status === 'PAID' ? "bg-green-100 text-green-700" : inv.status === 'INVALID' ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
+                                                    )}>{inv.status}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => { setSelectedAnalyticsGroup(null); handleEditClick(inv); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-sm font-medium text-slate-700 dark:text-slate-200 transition-colors">Edit</button>
+                                                {user?.role === 'superadmin' && (
+                                                    <button onClick={() => { 
+                                                        handleDeleteInvoice(inv); 
+                                                        setSelectedAnalyticsGroup(prev => prev ? { ...prev, invoices: prev.invoices.filter(i => i.id !== inv.id) } : null);
+                                                    }} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded text-sm font-medium transition-colors flex items-center gap-1">
+                                                        <Trash2 className="w-4 h-4"/> Delete
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }
 
- function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void }) {
+ function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete, isSuperAdmin, paymentMethodsList }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void, isSuperAdmin?: boolean, paymentMethodsList?: any[] }) {
+    const methodId = invoice.Payments && invoice.Payments.length > 0 ? invoice.Payments[0].method : null;
+    const methodName = methodId && paymentMethodsList ? (paymentMethodsList.find((m: any) => m.id.toLowerCase() === methodId.toLowerCase())?.name || methodId) : '-';
+    
     return (
         <tr className={cn("hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors", selected && "bg-blue-50/50 dark:bg-blue-900/10")}>
-            <td className="px-4 py-4">
-                <input
-                    type="checkbox"
-                    className="rounded border-slate-300"
-                    checked={selected}
-                    onChange={(e) => onSelect(e.target.checked)}
-                />
-            </td>
+            {isSuperAdmin && (
+                <td className="px-4 py-4 w-[40px]">
+                    <input
+                        type="checkbox"
+                        className="rounded border-slate-300"
+                        checked={selected}
+                        onChange={(e) => onSelect(e.target.checked)}
+                    />
+                </td>
+            )}
             <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
                 {invoice.Customer?.mikrotik_name || 'N/A'}
                 {invoice.status === 'INVALID' && <span className="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">INVALID</span>}
@@ -954,6 +1538,11 @@ export function Finance() {
             </td>
             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
                 {invoice.due_date}
+            </td>
+            <td className="px-6 py-4">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 uppercase">
+                    {methodName}
+                </span>
             </td>
             <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
                 Rp {Number(invoice.amount).toLocaleString('id-ID')}

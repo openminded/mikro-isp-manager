@@ -13,7 +13,7 @@ import AdmZip from 'adm-zip';
 import PDFDocument from 'pdfkit';
 
 const { RouterOSAPI } = routeros;
-const APP_VERSION = '1.0.1-CRM-FIX-FINAL-V4';
+const APP_VERSION = '1.0.3-BULK-DELETE-PAYMENTS';
 
 const { Op } = Sequelize;
 
@@ -127,7 +127,7 @@ app.use((req, res, next) => {
 // [DEBUG] Simple Connectivity Check
 app.get('/api/ping', (req, res) => {
     console.log('[DEBUG] HIT /api/ping');
-    res.send('PONG');
+    res.json({ status: 'PONG', version: APP_VERSION });
 });
 
 
@@ -836,15 +836,13 @@ app.get('/api/billing/invoices', async (req, res) => {
         };
 
         if (search) {
-            includeCustomer.where = {
-                [Op.or]: [
-                    { name: { [Op.like]: `%${search}%` } },
-                    { mikrotik_name: { [Op.like]: `%${search}%` } }
-                ]
-            };
-        } else {
-            // If no search, left join is fine (or inner, usually invoices have customers)
-            includeCustomer.required = true;
+            whereInvoice[Op.or] = [
+                { '$Customer.name$': { [Op.like]: `%${search}%` } },
+                { '$Customer.mikrotik_name$': { [Op.like]: `%${search}%` } },
+                { period: { [Op.like]: `%${search}%` } },
+                { status: { [Op.like]: `%${search}%` } },
+                { amount: { [Op.like]: `%${search}%` } }
+            ];
         }
 
         // Sorting Logic
@@ -862,7 +860,7 @@ app.get('/api/billing/invoices', async (req, res) => {
 
         const { count, rows } = await Invoice.findAndCountAll({
             where: whereInvoice,
-            include: [includeCustomer],
+            include: [includeCustomer, { model: Payment, required: false }],
             order: orderClause,
             limit: Number(limit),
             offset: Number(offset)
@@ -878,6 +876,249 @@ app.get('/api/billing/invoices', async (req, res) => {
             }
         });
     } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get Billing Analytics
+app.get('/api/billing/analytics', async (req, res) => {
+    try {
+        const { period, serverId } = req.query;
+
+        const whereInvoice = {};
+        if (period) whereInvoice.period = period;
+        if (serverId) whereInvoice.server_id = serverId;
+
+        // Fetch all invoices for the period/server to calculate stats
+        const invoices = await Invoice.findAll({
+            where: whereInvoice,
+            include: [
+                {
+                    model: Customer,
+                    include: [Server]
+                },
+                {
+                    model: Payment
+                },
+                {
+                    model: InvoiceHistory
+                }
+            ]
+        });
+
+        // Calculate stats
+        let totalPaid = 0;
+        let totalUnpaid = 0;
+        let paidCount = 0;
+        let unpaidCount = 0;
+        
+        const serverStats = {};
+        const methodStats = {};
+        const dailyStats = {};
+        const anomalies = [];
+
+        for (const inv of invoices) {
+            const serverName = inv.Customer?.Server?.name || 'Unknown';
+            if (!serverStats[serverName]) serverStats[serverName] = { amount: 0, count: 0, invoices: [] };
+            
+            // Determine who recorded the payment or last status update
+            let updatedBy = '-';
+            if (inv.InvoiceHistories && inv.InvoiceHistories.length > 0) {
+                const sortedHistory = [...inv.InvoiceHistories].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                const lastAction = sortedHistory.find(h => ['PAYMENT', 'STATUS_UPDATE', 'EDIT'].includes(h.action));
+                if (lastAction) updatedBy = lastAction.user_name;
+            }
+            inv.setDataValue('updatedBy', updatedBy);
+            
+            const hasPayments = inv.Payments && inv.Payments.length > 0;
+            const isPaid = inv.status === 'PAID';
+
+            // --- Anomaly Detection ---
+            if (isPaid && !hasPayments) {
+                anomalies.push({
+                    invoice: inv,
+                    type: 'MISSING_PAYMENT',
+                    description: 'Status is PAID but no payment record exists. (Missing from Revenue by Method)'
+                });
+            } else if (!isPaid && hasPayments) {
+                anomalies.push({
+                    invoice: inv,
+                    type: 'PAID_BUT_UNMARKED',
+                    description: `Has ${inv.Payments.length} payment(s) but status is ${inv.status}. (Potential fraud or manipulation)`
+                });
+            } else if (isPaid && inv.Payments && inv.Payments.length > 1) {
+                anomalies.push({
+                    invoice: inv,
+                    type: 'MULTIPLE_PAYMENTS',
+                    description: `Invoice for [${serverName}] has ${inv.Payments.length} payment records. (Multiple entries on a single unique invoice ID)`
+                });
+            }
+
+            if (isPaid) {
+                paidCount++;
+                const amount = Number(inv.amount);
+                totalPaid += amount;
+                
+                serverStats[serverName].amount += amount;
+                serverStats[serverName].count++;
+                serverStats[serverName].invoices.push(inv);
+                
+                // Process payments for method and daily stats (Option B: One per Invoice)
+                let method = 'unknown';
+                let dateStr = 'Unknown';
+                
+                if (hasPayments) {
+                    const p = inv.Payments[0]; // Take first payment as source of truth
+                    method = p.method || 'unknown';
+                    dateStr = p.transaction_date ? new Date(p.transaction_date).toISOString().split('T')[0] : 'Unknown';
+                }
+
+                if (!methodStats[method]) methodStats[method] = { amount: 0, count: 0, invoices: [] };
+                methodStats[method].amount += amount; // Use Invoice amount
+                methodStats[method].count++;
+                methodStats[method].invoices.push(inv);
+
+                if (dateStr !== 'Unknown') {
+                    if (!dailyStats[dateStr]) dailyStats[dateStr] = 0;
+                    dailyStats[dateStr] += amount; // Use Invoice amount
+                }
+            } else if (inv.status === 'UNPAID') {
+                unpaidCount++;
+                totalUnpaid += Number(inv.amount);
+            }
+        }
+
+        const revenueByServer = Object.keys(serverStats).map(k => ({ name: k, ...serverStats[k] }));
+        const revenueByMethod = Object.keys(methodStats).map(k => ({ name: k, ...methodStats[k] }));
+        const dailyRevenue = Object.keys(dailyStats).sort().map(k => ({ date: k, amount: dailyStats[k] }));
+
+        // Monthly Trend Calculation (Ignores 'period' filter to get all months)
+        const whereAllMonths = {};
+        if (serverId) whereAllMonths.server_id = serverId;
+        const allInvoices = await Invoice.findAll({
+            where: whereAllMonths,
+            attributes: ['period', 'status', 'amount']
+        });
+
+        const monthlyStats = {};
+        for (const inv of allInvoices) {
+            const p = inv.period || 'Unknown';
+            if (!monthlyStats[p]) {
+                monthlyStats[p] = { PAID: 0, UNPAID: 0, CANCELLED: 0, INVALID: 0 };
+            }
+            const status = inv.status || 'UNPAID';
+            const amt = Number(inv.amount) || 0;
+            if (monthlyStats[p][status] !== undefined) {
+                monthlyStats[p][status] += amt;
+            }
+        }
+        const monthlyTrend = Object.keys(monthlyStats).sort().map(k => ({
+            period: k,
+            ...monthlyStats[k]
+        }));
+
+        res.json({
+            summary: {
+                totalPaid,
+                totalUnpaid,
+                paidCount,
+                unpaidCount,
+                totalRevenue: totalPaid
+            },
+            revenueByServer,
+            revenueByMethod,
+            dailyRevenue,
+            monthlyTrend,
+            anomalies
+        });
+
+    } catch (e) {
+        console.error('Analytics Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get Payment Recap (Filter by customer, period, server, search, pagination)
+app.get('/api/billing/payments', async (req, res) => {
+    try {
+        const {
+            search,
+            period,
+            serverId,
+            page = 1,
+            limit = 50,
+            sortBy,
+            order = 'DESC'
+        } = req.query;
+
+        const offset = (Number(page) - 1) * Number(limit);
+        
+        // Build Invoice Filters (to filter by period and server)
+        const whereInvoice = {};
+        if (period) whereInvoice.period = period;
+        if (serverId) whereInvoice.server_id = serverId;
+
+        // Build Customer Filters (to search by name)
+        const whereCustomer = {};
+
+        const wherePayment = {};
+        if (search) {
+            wherePayment[Op.or] = [
+                { method: { [Op.like]: `%${search}%` } },
+                { amount: { [Op.like]: `%${search}%` } },
+                { '$Invoice.period$': { [Op.like]: `%${search}%` } },
+                { '$Invoice.Customer.name$': { [Op.like]: `%${search}%` } },
+                { '$Invoice.Customer.mikrotik_name$': { [Op.like]: `%${search}%` } }
+            ];
+        }
+
+        let orderClause = [['transaction_date', 'DESC']];
+        if (sortBy) {
+            const dir = String(order).toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+            if (sortBy === 'customer_name') {
+                orderClause = [[Invoice, Customer, 'name', dir]];
+            } else if (sortBy === 'username') {
+                orderClause = [[Invoice, Customer, 'mikrotik_name', dir]];
+            } else if (sortBy === 'period') {
+                orderClause = [[Invoice, 'period', dir]];
+            } else if (['amount', 'method', 'transaction_date'].includes(sortBy)) {
+                orderClause = [[sortBy, dir]];
+            }
+        }
+
+        const { count, rows } = await Payment.findAndCountAll({
+            where: Object.keys(wherePayment).length > 0 ? wherePayment : undefined,
+            include: [
+                {
+                    model: Invoice,
+                    where: Object.keys(whereInvoice).length > 0 ? whereInvoice : undefined,
+                    required: true,
+                    include: [
+                        {
+                            model: Customer,
+                            where: Object.keys(whereCustomer).length > 0 ? whereCustomer : undefined,
+                            required: true,
+                            include: [Server]
+                        }
+                    ]
+                }
+            ],
+            order: orderClause,
+            limit: Number(limit) > 0 ? Number(limit) : undefined,
+            offset: Number(offset) > 0 ? Number(offset) : 0
+        });
+
+        res.json({
+            data: rows,
+            meta: {
+                total: count,
+                page: Number(page),
+                totalPages: limit > 0 ? Math.ceil(count / Number(limit)) : 1,
+                limit: Number(limit)
+            }
+        });
+    } catch (e) {
+        console.error('Failed to fetch payments:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -903,6 +1144,29 @@ app.post('/api/billing/bulk-delete', async (req, res) => {
         logActivity(req, 'BULK_DELETE_INVOICES', `Deleted ${invoiceIds.length} invoices: ${invoiceIds.join(', ')}`);
         console.log(`[Billing] Bulk delete of ${invoiceIds.length} invoices by ${user.username}`);
         res.json({ success: true, message: `Deleted ${invoiceIds.length} invoices` });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+
+// Bulk Delete Payments (Superadmin only)
+app.post('/api/billing/payments/bulk-delete', async (req, res) => {
+    const { paymentIds, user } = req.body;
+
+    if (!user || user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Access denied. Superadmin only.' });
+    }
+
+    if (!Array.isArray(paymentIds) || paymentIds.length === 0) {
+        return res.status(400).json({ error: 'No payments selected' });
+    }
+
+    try {
+        await Payment.destroy({ where: { id: paymentIds } });
+        logActivity(req, 'BULK_DELETE_PAYMENTS', `Deleted ${paymentIds.length} payments: ${paymentIds.join(', ')}`);
+        console.log(`[Billing] Bulk delete of ${paymentIds.length} payments by ${user.username}`);
+        res.json({ success: true, message: `Deleted ${paymentIds.length} payments` });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -988,7 +1252,7 @@ app.post('/api/billing/generate', async (req, res) => {
     const { serverId, month: customMonth, year: customYear } = req.body || {};
     // This would typically be a cron job
     try {
-        const whereClause = { status: 'active' };
+        const whereClause = { status: { [Op.in]: ['active', 'isolated'] } };
         if (serverId) whereClause.server_id = serverId;
 
         const activeCustomers = await Customer.findAll({ where: whereClause });
@@ -1053,8 +1317,7 @@ app.post('/api/billing/generate', async (req, res) => {
             const exists = await Invoice.findOne({
                 where: {
                     customer_id: customer.id,
-                    period,
-                    status: { [Op.notIn]: ['INVALID', 'CANCELLED'] }
+                    period
                 }
             });
 
@@ -1434,6 +1697,10 @@ app.delete('/api/billing/invoices/:id', async (req, res) => {
     try {
         const invoice = await Invoice.findByPk(id);
         if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+        // Safe Delete: Remove related records first to prevent Foreign Key constraints
+        await Payment.destroy({ where: { invoice_id: id } });
+        await InvoiceHistory.destroy({ where: { invoice_id: id } });
 
         await invoice.destroy();
 
@@ -2430,15 +2697,32 @@ app.post('/api/restore', upload.single('backup'), async (req, res) => {
     try {
         const zip = new AdmZip(req.file.path);
 
+        // Before extracting, close the SQLite database connection to release file locks.
+        // This is critical on Windows to prevent EBUSY/EPERM errors during extraction.
+        try {
+            await sequelize.close();
+            console.log('[Restore] SQLite connection closed.');
+        } catch (dbError) {
+            console.warn('[Restore] Warning: Failed to close SQLite connection:', dbError.message);
+        }
+
         // Extract to server directory (overwriting data/ and uploads/)
         zip.extractAllTo(__dirname, true);
 
         // Clean up uploaded zip
         fs.unlinkSync(req.file.path);
 
+        // Log using file-based cache which is still in memory (though it will be wiped on restart)
         logActivity(req, 'RESTORE_DATA', 'System data restored from backup');
 
-        res.json({ success: true, message: 'Data restored successfully' });
+        res.json({ success: true, message: 'Data restored successfully. System will restart.' });
+
+        // Exit process so PM2 or nodemon can restart the app with new data and re-initialize DB
+        setTimeout(() => {
+            console.log('[Restore] Restarting process to apply restored data...');
+            process.exit(0);
+        }, 1500);
+
     } catch (error) {
         console.error('Restore failed:', error);
         res.status(500).json({ error: 'Restore failed: ' + error.message });
@@ -2452,16 +2736,13 @@ app.post('/api/reset', async (req, res) => {
     try {
         // 1. Clear Registrations and Tickets
         saveRegistrationsDB([]);
-
-        // Clear Tickets
-        const ticketsPath = path.join(__dirname, 'data', 'tickets.json');
-        if (fs.existsSync(ticketsPath)) {
-            fs.writeFileSync(ticketsPath, JSON.stringify([], null, 2));
-        }
+        saveTicketsDB([]);
 
         // 3. Reset SQLite Transaction Data (Invoices, Payments, InvoiceHistory)
         // Delete dependents first to avoid Foreign Key violations
+        await Payment.destroy({ where: {} });
         await InvoiceHistory.destroy({ where: {} });
+        
         await sequelize.sync({ alter: false });
 
         // [MIGRATION-V3] Standardize all existing mikrotik_names to lowercase for consistency
@@ -2477,6 +2758,7 @@ app.post('/api/reset', async (req, res) => {
             }
         }
         console.log('[Database] Standardization complete.');
+        
         await Invoice.destroy({ where: {} });
 
         logActivity(req, 'RESET_DATA', 'System data reset (Selective)');

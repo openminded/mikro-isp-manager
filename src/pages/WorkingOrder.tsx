@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, MapPin, Smartphone, User, Calendar, Wrench, Search, XCircle, Loader2, AlertTriangle, ClipboardList, Upload, Eye } from 'lucide-react';
+import { CheckCircle, MapPin, Smartphone, User, Calendar, Wrench, Search, XCircle, Loader2, AlertTriangle, ClipboardList, Upload, Eye, Trash2 } from 'lucide-react';
 import axios from 'axios';
 import { cn } from '@/lib/utils';
 import type { Ticket, Registration } from '@/types';
+import { useAuth } from '@/context/AuthContext';
 
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
@@ -349,7 +350,7 @@ interface WorkingOrderProps {
 }
 
 export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
-    // const { user } = useAuth();
+    const { user } = useAuth();
     const [workItems, setWorkItems] = useState<WorkItem[]>([]);
     const [servers, setServers] = useState<Server[]>([]);
     const [subAreas, setSubAreas] = useState<any[]>([]);
@@ -376,8 +377,12 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState<number>(10);
 
+    // Bulk Actions
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
     useEffect(() => {
         fetchData();
+        setSelectedIds([]);
     }, [view]); // Refetch when view changes to ensure fresh data
 
     const fetchData = async () => {
@@ -659,6 +664,29 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
         }
     };
 
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!confirm(`Are you sure you want to DELETE ${selectedIds.length} job(s) PERMANENTLY? This cannot be undone.`)) return;
+        
+        setLoading(true);
+        try {
+            const itemsToDelete = workItems.filter(i => selectedIds.includes(i.id));
+            await Promise.all(itemsToDelete.map(item => {
+                if (item.type === 'installation') {
+                    return axios.delete(`/api/registrations/${item.id}`);
+                } else {
+                    return axios.delete(`/api/tickets/${item.id}`);
+                }
+            }));
+            setSelectedIds([]);
+            fetchData();
+        } catch (error) {
+            console.error('Bulk delete error:', error);
+            alert('Failed to delete some or all jobs');
+            fetchData();
+        }
+    };
+
     // Filter & Sort Logic
     const filteredAndSortedItems = workItems
         .filter(item => {
@@ -840,9 +868,9 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                 </p>
             </div>
 
-            {/* Filters */}
-            <div className="flex gap-4">
-                <div className="relative flex-1 max-w-md">
+            {/* Filters & Actions */}
+            <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                <div className="relative flex-1 max-w-md w-full">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                         className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -851,6 +879,15 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                         onChange={e => setFilter(e.target.value)}
                     />
                 </div>
+                {user?.role === 'superadmin' && selectedIds.length > 0 && (
+                    <button
+                        onClick={handleBulkDelete}
+                        className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shrink-0"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                        Delete Selected ({selectedIds.length})
+                    </button>
+                )}
             </div>
 
             {/* Table */}
@@ -859,6 +896,22 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
+                                {user?.role === 'superadmin' && (
+                                    <th className="px-6 py-3 w-12 text-center">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
+                                            checked={paginatedItems.length > 0 && selectedIds.length === paginatedItems.length}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedIds(paginatedItems.map(r => r.id));
+                                                } else {
+                                                    setSelectedIds([]);
+                                                }
+                                            }}
+                                        />
+                                    </th>
+                                )}
                                 <th className="px-6 py-3 font-medium text-slate-500">Type</th>
                                 <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('customerName')}>Customer</th>
                                 <th className="px-6 py-3 font-medium text-slate-500 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('server')}>Server</th>
@@ -868,11 +921,27 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
-                                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
+                                <tr><td colSpan={user?.role === 'superadmin' ? 6 : 5} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
                             ) : paginatedItems.length === 0 ? (
-                                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No jobs found</td></tr>
+                                <tr><td colSpan={user?.role === 'superadmin' ? 6 : 5} className="px-6 py-8 text-center text-slate-400">No jobs found</td></tr>
                             ) : paginatedItems.map((item) => (
-                                <tr key={`${item.type}-${item.id}`} className="hover:bg-slate-50/50 group transition-colors">
+                                <tr key={`${item.type}-${item.id}`} className={`hover:bg-slate-50/50 group transition-colors ${selectedIds.includes(item.id) ? 'bg-blue-50/50' : ''}`}>
+                                    {user?.role === 'superadmin' && (
+                                        <td className="px-6 py-4 text-center">
+                                            <input 
+                                                type="checkbox" 
+                                                className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
+                                                checked={selectedIds.includes(item.id)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedIds(prev => [...prev, item.id]);
+                                                    } else {
+                                                        setSelectedIds(prev => prev.filter(id => id !== item.id));
+                                                    }
+                                                }}
+                                            />
+                                        </td>
+                                    )}
                                     <td className="px-6 py-4">
                                         <div className="flex flex-col gap-1">
                                             {item.type === 'installation' ? (

@@ -194,7 +194,7 @@ class WorkProvider with ChangeNotifier {
      // Only set secret on router if not already set or if explicitly updating? 
      // For update, we might re-set it, which is fine (overwrite).
      
-     final newComment = '${server.name} - ${reg.fullName} - $dateStr';
+     final newComment = reg.fullName;
 
      List<String> command = ['/ppp/secret/set', '=.id=$secretId', '=comment=$newComment'];
      if(profileName != null && profileName.isNotEmpty) {

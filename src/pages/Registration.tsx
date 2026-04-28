@@ -41,6 +41,9 @@ export function Registration({ view = 'active' }: RegistrationProps) {
     const [isDetailOpen, setIsDetailOpen] = useState(false);
     const [detailReg, setDetailReg] = useState<Registration | null>(null);
 
+    // Bulk Actions
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
     // Form Data
     const [formData, setFormData] = useState({
         phoneNumber: '',
@@ -62,6 +65,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         fetchRegistrations();
         fetchServers();
         fetchEmployeesAndTitles();
+        setSelectedIds([]); // Reset selection on view change
     }, [view]); // Refetch/Re-filter when view changes
 
     const fetchEmployeesAndTitles = async () => {
@@ -152,8 +156,25 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         try {
             await axios.delete(`/api/registrations/${id}`);
             fetchRegistrations();
+            setSelectedIds(prev => prev.filter(selId => selId !== id));
         } catch (error) {
             alert('Failed to delete registration');
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!confirm(`Are you sure you want to DELETE ${selectedIds.length} registration(s) PERMANENTLY? This cannot be undone.`)) return;
+        
+        setLoading(true);
+        try {
+            await Promise.all(selectedIds.map(id => axios.delete(`/api/registrations/${id}`)));
+            setSelectedIds([]);
+            fetchRegistrations();
+        } catch (error) {
+            console.error('Bulk delete error:', error);
+            alert('Failed to delete some or all registrations');
+            fetchRegistrations(); // Refresh to get current state
         }
     };
 
@@ -297,13 +318,24 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                         {view === 'completed' ? 'History of completed registrations' : 'Manage new WiFi registrations'}
                     </p>
                 </div>
-                <button
-                    onClick={() => { setEditingReg(null); setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', mapsUrl: '' }); setIsFormOpen(true); }}
-                    className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
-                >
-                    <Plus className="w-4 h-4" />
-                    New Registration
-                </button>
+                <div className="flex items-center gap-3">
+                    {user?.role === 'superadmin' && selectedIds.length > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Delete Selected ({selectedIds.length})
+                        </button>
+                    )}
+                    <button
+                        onClick={() => { setEditingReg(null); setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', mapsUrl: '' }); setIsFormOpen(true); }}
+                        className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                    >
+                        <Plus className="w-4 h-4" />
+                        New Registration
+                    </button>
+                </div>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -378,6 +410,22 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                     <table className="w-full text-left text-sm text-slate-600">
                         <thead className="bg-slate-50 text-slate-900 font-semibold border-b border-slate-200">
                             <tr>
+                                {user?.role === 'superadmin' && (
+                                    <th className="px-6 py-4 w-12 text-center">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
+                                            checked={paginatedRegs.length > 0 && selectedIds.length === paginatedRegs.length}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedIds(paginatedRegs.map(r => r.id));
+                                                } else {
+                                                    setSelectedIds([]);
+                                                }
+                                            }}
+                                        />
+                                    </th>
+                                )}
                                 <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('status')}>Status</th>
                                 <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('createdAt')}>Reg. Date</th>
                                 <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('fullName')}>Customer</th>
@@ -388,11 +436,27 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                         </thead>
                         <tbody className="divide-y divide-slate-200">
                             {loading ? (
-                                <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
+                                <tr><td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
                             ) : paginatedRegs.length === 0 ? (
-                                <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">No registrations found</td></tr>
+                                <tr><td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-6 py-8 text-center text-slate-400">No registrations found</td></tr>
                             ) : paginatedRegs.map(reg => (
-                                <tr key={reg.id} className="hover:bg-slate-50 transition-colors">
+                                <tr key={reg.id} className={`hover:bg-slate-50 transition-colors ${selectedIds.includes(reg.id) ? 'bg-blue-50/50' : ''}`}>
+                                    {user?.role === 'superadmin' && (
+                                        <td className="px-6 py-4 text-center">
+                                            <input 
+                                                type="checkbox" 
+                                                className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
+                                                checked={selectedIds.includes(reg.id)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedIds(prev => [...prev, reg.id]);
+                                                    } else {
+                                                        setSelectedIds(prev => prev.filter(id => id !== reg.id));
+                                                    }
+                                                }}
+                                            />
+                                        </td>
+                                    )}
                                     <td className="px-6 py-4">
                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${reg.status === 'queue' ? 'bg-amber-50 text-amber-700 border-amber-200' :
                                             reg.status === 'installation_process' ? 'bg-blue-50 text-blue-700 border-blue-200' :

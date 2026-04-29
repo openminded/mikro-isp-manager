@@ -299,5 +299,51 @@ export const MikrotikApi = {
 
     async removePPPProfile(server: MikrotikServer, id: string): Promise<any> {
         return await runCommand(server, ['/ppp/profile/remove', `=.id=${id}`]);
+    },
+
+    // --- NAT (Remote Devices) ---
+    async getNatRules(serverId: string): Promise<any[]> {
+        const res = await fetch(`${META_API_URL}/mikrotik/nat?serverId=${serverId}`);
+        if (!res.ok) throw new Error('Failed to fetch NAT rules');
+        return await res.json();
+    },
+
+    async syncNatRules(serverId: string): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/nat/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to sync NAT rules');
+        }
+        return await res.json();
+    },
+
+    async updateNatRule(data: { serverId: string, id: string, toAddress?: string, toPorts?: string, comment?: string, dstPort?: string }): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/nat`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to update NAT rule');
+        }
+        return await res.json();
+    },
+
+    async deleteNatRule(serverId: string, id: string): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/nat`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, id })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to delete NAT rule');
+        }
+        return await res.json();
     }
 };

@@ -1062,20 +1062,20 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                 <div className="px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                         <span>Show</span>
-                        <div className="w-[80px]">
-                            <SearchableSelect
+                        <div className="w-[70px]">
+                            <select
+                                className="w-full px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-sm cursor-pointer"
                                 value={itemsPerPage}
-                                onChange={(val) => {
-                                    setItemsPerPage(Number(val));
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
                                     setCurrentPage(1);
                                 }}
-                                options={[
-                                    { label: '10', value: 10 },
-                                    { label: '20', value: 20 },
-                                    { label: '50', value: 50 },
-                                    { label: 'All', value: -1 }
-                                ]}
-                            />
+                            >
+                                <option value={10}>10</option>
+                                <option value={20}>20</option>
+                                <option value={50}>50</option>
+                                <option value={-1}>All</option>
+                            </select>
                         </div>
                         <span>entries</span>
                         <span className="text-slate-400 mx-2">|</span>

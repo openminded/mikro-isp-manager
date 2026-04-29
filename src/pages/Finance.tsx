@@ -344,6 +344,48 @@ export function Finance() {
         }
     };
 
+    const handleBulkBlock = async () => {
+        if (selectedIds.size === 0) return;
+        if (!confirm(`Are you sure you want to block/disable ${selectedIds.size} customers on their respective routers? This will also terminate their active sessions.`)) return;
+
+        setIsLoading(true);
+        try {
+            const res = await fetch('/api/billing/bulk-block', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    invoiceIds: Array.from(selectedIds),
+                    user: user || { username: 'Unknown' }
+                })
+            });
+            const result = await res.json();
+            if (result.success) {
+                alert(result.message + (result.errors ? `\n\nSome errors occurred:\n${result.errors.join('\n')}` : ''));
+                fetchInvoices();
+            } else {
+                alert('Bulk block failed: ' + result.error);
+            }
+        } catch (e) {
+            alert('Failed to execute bulk block');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const SkeletonRow = () => (
+        <tr className="animate-pulse">
+            {user?.role === 'superadmin' && <td className="px-4 py-4 w-[40px]"><div className="h-4 w-4 bg-slate-200 dark:bg-slate-700 rounded mx-auto"></div></td>}
+            <td className="px-6 py-4"><div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
+            <td className="px-6 py-4"><div className="h-4 w-40 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
+            <td className="px-6 py-4"><div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
+            <td className="px-6 py-4"><div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
+            <td className="px-6 py-4"><div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
+            <td className="px-6 py-4"><div className="h-4 w-28 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
+            <td className="px-6 py-4"><div className="h-6 w-20 bg-slate-200 dark:bg-slate-700 rounded-full"></div></td>
+            <td className="px-6 py-4"><div className="h-8 w-32 bg-slate-200 dark:bg-slate-700 rounded ml-auto"></div></td>
+        </tr>
+    );
+
     // Grouping Logic
     const groupedInvoices = useMemo(() => {
         if (!groupByServer) return null;
@@ -521,6 +563,20 @@ export function Finance() {
                                     <button onClick={() => handleBulkAction('INVALID')} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                                         <Ban className="w-4 h-4" /> Invalid
                                     </button>
+                                    {activeTab === 'unpaid' && (
+                                        <button 
+                                            onClick={handleBulkBlock} 
+                                            disabled={isLoading}
+                                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-slate-600 disabled:opacity-50 disabled:cursor-wait"
+                                        >
+                                            {isLoading ? (
+                                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                            ) : (
+                                                <Ban className="w-4 h-4" />
+                                            )}
+                                            {isLoading ? 'Processing...' : 'Block Customers'}
+                                        </button>
+                                    )}
                                 </>
                             )}
                             <button onClick={handleBulkDelete} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-red-700">
@@ -1087,7 +1143,11 @@ export function Finance() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                {invoices.length === 0 ? (
+                                {isLoading ? (
+                                    <>
+                                        {[...Array(5)].map((_, i) => <SkeletonRow key={i} />)}
+                                    </>
+                                ) : invoices.length === 0 ? (
                                     <tr>
                                         <td colSpan={user?.role === 'superadmin' ? 10 : 9} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
                                             No invoices found for this category.

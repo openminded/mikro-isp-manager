@@ -17,6 +17,7 @@ import 'performance_screen.dart';
 import 'technician_customer_list_screen.dart';
 import 'dart:async';
 import '../services/notification_service.dart';
+import 'remote_device_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -220,6 +221,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: () {
                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PerformanceReportScreen()));
                   },
+                ),
+                ListTile(
+                    leading: const Icon(Icons.router),
+                    title: const Text('Remote ONU'),
+                    onTap: () {
+                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RemoteDeviceScreen()));
+                    },
                 ),
                 if (user?.role == 'admin' || user?.role == 'superadmin')
                 ListTile(

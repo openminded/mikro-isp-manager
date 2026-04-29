@@ -6,8 +6,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory } from './models/index.js';
-import { Sequelize } from 'sequelize';
+import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory, RemoteDevice } from './models/index.js';
+import { Sequelize, Op } from 'sequelize';
 import archiver from 'archiver';
 import AdmZip from 'adm-zip';
 import PDFDocument from 'pdfkit';
@@ -15,7 +15,7 @@ import PDFDocument from 'pdfkit';
 const { RouterOSAPI } = routeros;
 const APP_VERSION = '1.0.3-BULK-DELETE-PAYMENTS';
 
-const { Op } = Sequelize;
+
 
 // Initialize Database
 initDB();
@@ -595,6 +595,209 @@ app.get('/api/mikrotik/data', async (req, res) => {
         res.json({ timestamp: null, data: [] });
     }
 
+});
+
+// --- Mikrotik Firewall NAT (Remote Devices) ---
+
+// Get NAT Rules (from Database)
+app.get('/api/mikrotik/nat', async (req, res) => {
+    const { serverId } = req.query;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const rules = await RemoteDevice.findAll({ 
+            where: { server_id: serverId },
+            order: [['comment', 'ASC']]
+        });
+        res.json(rules);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Check NAT Rule Status on Mikrotik
+app.get('/api/mikrotik/nat/check', async (req, res) => {
+    const { serverId, id } = req.query;
+    if (!serverId || !id) return res.status(400).json({ error: 'Missing params' });
+
+    try {
+        const rule = await RemoteDevice.findByPk(id);
+        if (!rule) return res.status(404).json({ error: 'Rule not found in DB' });
+
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const client = new RouterOSAPI({
+            host: server.ip,
+            port: server.port || 8728,
+            user: server.username,
+            password: server.password,
+            keepalive: false,
+            timeout: 15
+        });
+
+        await client.connect();
+        // Look for rule by comment
+        const mikrotikRules = await client.write(['/ip/firewall/nat/print', `?comment=${rule.comment}`]);
+        await client.close();
+
+        const exists = mikrotikRules.length > 0;
+        const status = exists ? 'online' : 'offline';
+        
+        await rule.update({ last_check_status: status });
+        res.json({ status, mikrotikData: mikrotikRules[0] || null });
+    } catch (e) {
+        console.error('[NAT Check] Failed:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Sync NAT Rules from Mikrotik (Discovery)
+app.post('/api/mikrotik/nat/sync', async (req, res) => {
+    const { serverId } = req.body;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const client = new RouterOSAPI({
+            host: server.ip, port: server.port || 8728,
+            user: server.username, password: server.password,
+            keepalive: false, timeout: 30 // High timeout for bulk read
+        });
+
+        await client.connect();
+        // Fetch ALL NAT rules to ensure we don't miss any due to API query quirks
+        const mikrotikRules = await client.write(['/ip/firewall/nat/print']);
+        await client.close();
+
+        // Filter rules in JS: contain both "remote" and "online" anywhere in comment
+        const remoteRules = mikrotikRules.filter(r => {
+            if (!r.comment) return false;
+            const comment = r.comment.toLowerCase();
+            return comment.includes('remote') && comment.includes('online');
+        });
+        
+        console.log(`[NAT Sync] Found ${mikrotikRules.length} total rules, ${remoteRules.length} matching "remote"`);
+
+        const syncedIds = [];
+        for (const nat of remoteRules) {
+            // Find or Create in DB
+            const [rule, created] = await RemoteDevice.findOrCreate({
+                where: { server_id: serverId, comment: nat.comment },
+                defaults: {
+                    dst_port: String(nat['dst-port'] || ''),
+                    to_address: nat['to-addresses'] || '',
+                    to_ports: String(nat['to-ports'] || ''),
+                    protocol: nat.protocol || 'tcp',
+                    last_check_status: 'online'
+                }
+            });
+
+            if (!created) {
+                // Update existing if settings changed on Mikrotik
+                await rule.update({
+                    dst_port: String(nat['dst-port'] || ''),
+                    to_address: nat['to-addresses'] || '',
+                    to_ports: String(nat['to-ports'] || ''),
+                    protocol: nat.protocol || 'tcp',
+                    last_check_status: 'online'
+                });
+            }
+            syncedIds.push(rule.id);
+        }
+
+        // Remove rules from DB that are no longer on Mikrotik or no longer have "remote" in comment
+        if (syncedIds.length > 0) {
+            await RemoteDevice.destroy({
+                where: {
+                    server_id: serverId,
+                    id: { [Op.notIn]: syncedIds }
+                }
+            });
+        } else {
+            // If no remote rules found, clear all remote devices for this server
+            await RemoteDevice.destroy({ where: { server_id: serverId } });
+        }
+
+        res.json({ success: true, count: syncedIds.length });
+    } catch (e) {
+        console.error('[NAT Sync] Failed:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update/Sync NAT Rule
+app.put('/api/mikrotik/nat', async (req, res) => {
+    const { serverId, id, toAddress, toPorts, comment, dstPort } = req.body;
+    if (!serverId || !id) return res.status(400).json({ error: 'Missing serverId or rule id' });
+
+    try {
+        const rule = await RemoteDevice.findByPk(id);
+        if (!rule) return res.status(404).json({ error: 'Rule not found' });
+
+        const comment = rule.comment; // Comment is read-only for identification
+
+        // 1. Update DB
+        await rule.update({
+            dst_port: dstPort ? String(dstPort) : rule.dst_port,
+            to_address: toAddress || rule.to_address,
+            to_ports: toPorts ? String(toPorts) : rule.to_ports
+        });
+
+        // 2. Push to Mikrotik
+        const server = await Server.findByPk(serverId);
+        if (server) {
+            const client = new RouterOSAPI({
+                host: server.ip, port: server.port || 8728,
+                user: server.username, password: server.password,
+                keepalive: false, timeout: 20
+            });
+
+            try {
+                await client.connect();
+                const existing = await client.write(['/ip/firewall/nat/print', `?comment=${comment}`]);
+                if (existing.length > 0) {
+                    const cmd = ['/ip/firewall/nat/set', `=.id=${existing[0]['.id']}`];
+                    // Comment not updated per user request
+                    if (dstPort) cmd.push(`=dst-port=${dstPort}`);
+                    if (toAddress) cmd.push(`=to-addresses=${toAddress}`);
+                    if (toPorts) cmd.push(`=to-ports=${toPorts}`);
+                    await client.write(cmd);
+                    await rule.update({ last_check_status: 'online' });
+                }
+                await client.close();
+            } catch (err) {
+                console.error('[NAT Update Push] Failed:', err.message);
+                await rule.update({ last_check_status: 'offline' });
+            }
+        }
+
+        res.json({ success: true, rule });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete NAT Rule (FROM APP ONLY)
+app.delete('/api/mikrotik/nat', async (req, res) => {
+    const { serverId, id } = req.body;
+    if (!serverId || !id) return res.status(400).json({ error: 'Missing serverId or rule id' });
+
+    try {
+        const rule = await RemoteDevice.findByPk(id);
+        if (!rule) return res.status(404).json({ error: 'Rule not found' });
+
+        // 1. Delete from DB only
+        await rule.destroy();
+
+        // No logic here to delete from Mikrotik per user request
+
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // --- CRM Endpoints ---
@@ -1203,6 +1406,136 @@ app.post('/api/billing/bulk-update', async (req, res) => {
         logActivity(req, 'BULK_UPDATE_INVOICES', `Updated ${invoiceIds.length} invoices to ${status}`);
         res.json({ success: true, message: `Updated ${invoiceIds.length} invoices to ${status}` });
     } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Bulk Block Customers from Invoices
+app.post('/api/billing/bulk-block', async (req, res) => {
+    const { invoiceIds, user } = req.body;
+
+    if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+        return res.status(400).json({ error: 'No invoices selected' });
+    }
+
+    try {
+        const invoices = await Invoice.findAll({
+            where: { id: invoiceIds },
+            include: [{ 
+                model: Customer, 
+                include: [Server] 
+            }]
+        });
+
+        // Group by Server to minimize connections
+        const serverGroups = {};
+        for (const inv of invoices) {
+            const customer = inv.Customer;
+            if (!customer || !customer.Server) continue;
+            
+            const serverId = customer.server_id;
+            if (!serverGroups[serverId]) {
+                serverGroups[serverId] = {
+                    server: customer.Server,
+                    customers: new Map() // Use Map to ensure unique customers per server
+                };
+            }
+            serverGroups[serverId].customers.set(customer.id, customer);
+        }
+
+        let blockedCount = 0;
+        let errors = [];
+
+        for (const serverId in serverGroups) {
+            const { server, customers } = serverGroups[serverId];
+            const client = new RouterOSAPI({
+                host: server.ip,
+                port: server.port || 8728,
+                user: server.username,
+                password: server.password,
+                keepalive: false,
+                timeout: 20
+            });
+
+            client.on('error', (err) => {
+                console.error(`[Bulk-Block] Mikrotik Error (${server.ip}):`, err.message);
+            });
+
+            try {
+                await client.connect();
+                
+                for (const customer of customers.values()) {
+                    try {
+                        console.log(`[Bulk-Block] Blocking ${customer.mikrotik_name} on ${server.name}`);
+                        
+                        // 1. Disable PPP Secret
+                        const secrets = await client.write('/ppp/secret/print', { 
+                            '?name': customer.mikrotik_name.toLowerCase().trim() 
+                        });
+                        
+                        if (secrets.length > 0) {
+                            const secretId = secrets[0]['.id'];
+                            await client.write('/ppp/secret/set', { 
+                                '.id': secretId, 
+                                'disabled': 'yes' 
+                            });
+                        } else {
+                            console.warn(`[Bulk-Block] Secret not found for ${customer.mikrotik_name}`);
+                        }
+
+                        // 2. Remove Active Session (Kick user)
+                        const activeSessions = await client.write('/ppp/active/print', { 
+                            '?name': customer.mikrotik_name.toLowerCase().trim() 
+                        });
+                        
+                        if (activeSessions.length > 0) {
+                            for (const session of activeSessions) {
+                                if (session['.id']) {
+                                    await client.write('/ppp/active/remove', { 
+                                        '.id': session['.id'] 
+                                    });
+                                }
+                            }
+                        }
+
+                        // 3. Update SQL Status
+                        await customer.update({ status: 'isolated' });
+                        blockedCount++;
+
+                        // 4. Log to Invoice History for all selected invoices of THIS customer
+                        const relevantInvoices = invoices.filter(inv => inv.customer_id === customer.id);
+                        for (const inv of relevantInvoices) {
+                            await InvoiceHistory.create({
+                                invoice_id: inv.id,
+                                user_name: user?.username || 'System',
+                                action: 'STATUS_UPDATE',
+                                details: `Customer automatically blocked due to unpaid invoice (Bulk Action).`
+                            });
+                        }
+
+                    } catch (custErr) {
+                        console.error(`[Bulk-Block] Error for customer ${customer.mikrotik_name}:`, custErr.message);
+                        errors.push(`${customer.mikrotik_name}: ${custErr.message}`);
+                    }
+                }
+                
+                await client.close();
+            } catch (connErr) {
+                console.error(`[Bulk-Block] Connection failed for server ${server.name}:`, connErr.message);
+                errors.push(`Server ${server.name}: Connection failed`);
+            }
+        }
+
+        logActivity(req, 'BULK_BLOCK_BILLING', `Blocked ${blockedCount} users via bulk billing action.`);
+        
+        res.json({ 
+            success: true, 
+            message: `Successfully blocked ${blockedCount} customers.`,
+            errors: errors.length > 0 ? errors : undefined
+        });
+
+    } catch (e) {
+        console.error('[Bulk-Block] Fatal Error:', e);
         res.status(500).json({ error: e.message });
     }
 });

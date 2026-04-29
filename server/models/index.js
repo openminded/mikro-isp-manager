@@ -77,6 +77,17 @@ export const InvoiceHistory = sequelize.define('InvoiceHistory', {
     tableName: 'invoice_audit_logs' // New table to avoid schema conflict with previous broken version
 });
 
+export const RemoteDevice = sequelize.define('RemoteDevice', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    server_id: { type: DataTypes.UUID, allowNull: false },
+    comment: { type: DataTypes.STRING, allowNull: false },
+    dst_port: { type: DataTypes.STRING, allowNull: false },
+    to_address: { type: DataTypes.STRING, allowNull: false },
+    to_ports: { type: DataTypes.STRING, allowNull: false },
+    protocol: { type: DataTypes.STRING, defaultValue: 'tcp' },
+    last_check_status: { type: DataTypes.STRING, defaultValue: 'unknown' } // online, offline, unknown
+});
+
 // --- Associations ---
 
 Server.hasMany(Customer, { foreignKey: 'server_id' });
@@ -90,6 +101,9 @@ Payment.belongsTo(Invoice, { foreignKey: 'invoice_id' });
 
 Invoice.hasMany(InvoiceHistory, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
 InvoiceHistory.belongsTo(Invoice, { foreignKey: 'invoice_id' });
+
+Server.hasMany(RemoteDevice, { foreignKey: 'server_id', onDelete: 'CASCADE' });
+RemoteDevice.belongsTo(Server, { foreignKey: 'server_id' });
 
 // Function to sync database
 export const initDB = async () => {
@@ -235,6 +249,9 @@ export const initDB = async () => {
         }
 
         console.log('[Database] Models synchronized.');
+        
+        // Ensure RemoteDevices table exists
+        await RemoteDevice.sync();
     } catch (error) {
         console.error('[Database] Unable to connect or sync:', error);
     }

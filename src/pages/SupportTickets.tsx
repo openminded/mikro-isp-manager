@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Plus, Search, Clock, AlertTriangle, Wrench, X, FileText } from 'lucide-react';
+import { Plus, Search, Clock, AlertTriangle, Wrench, X, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { useData } from '@/context/DataContext';
 import { useAuth } from '@/context/AuthContext';
@@ -22,6 +22,10 @@ export function SupportTickets() {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [isAppearing, setIsAppearing] = useState(false);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState<number>(10);
 
     // Filter Logic
     // const [filterDateStart, setFilterDateStart] = useState(''); // Unused for now
@@ -177,6 +181,13 @@ export function SupportTickets() {
         return matchesSearch && matchesStatus;
     }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+    // Pagination Logic
+    const totalPages = itemsPerPage === -1 ? 1 : Math.ceil(filteredTickets.length / itemsPerPage);
+    const startIndex = (currentPage - 1) * (itemsPerPage === -1 ? filteredTickets.length : itemsPerPage);
+    const paginatedTickets = itemsPerPage === -1 ? filteredTickets : filteredTickets.slice(startIndex, startIndex + itemsPerPage);
+
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, statusFilter, itemsPerPage]);
+
     return (
         <div className={`p-6 max-w-7xl mx-auto transition-opacity duration-500 ${isAppearing ? 'opacity-100' : 'opacity-0'}`}>
             <div className="flex justify-between items-center mb-6">
@@ -243,7 +254,7 @@ export function SupportTickets() {
                         <tbody className="divide-y divide-slate-200">
                             {loading ? (
                                 <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
-                            ) : filteredTickets.length === 0 ? (
+                            ) : paginatedTickets.length === 0 ? (
                                 <tr>
                                     <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
                                         <div className="flex flex-col items-center gap-2">
@@ -253,7 +264,7 @@ export function SupportTickets() {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredTickets.map(ticket => (
+                                paginatedTickets.map(ticket => (
                                     <tr key={ticket.id} className="hover:bg-slate-50 transition-colors group">
                                         <td className="px-6 py-4">
                                             <span className={cn(
@@ -311,6 +322,58 @@ export function SupportTickets() {
                             )}
                         </tbody>
                     </table>
+                </div>
+
+                {/* Pagination Controls */}
+                <div className="px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50">
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <span>Show</span>
+                        <div className="w-[70px]">
+                            <select
+                                className="w-full px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white text-sm cursor-pointer"
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                            >
+                                <option value={10}>10</option>
+                                <option value={50}>50</option>
+                                <option value={100}>100</option>
+                                <option value={-1}>All</option>
+                            </select>
+                        </div>
+                        <span>entries</span>
+                        <span className="text-slate-400 mx-2">|</span>
+                        <span>
+                            Showing {filteredTickets.length === 0 ? 0 : startIndex + 1} to{' '}
+                            {itemsPerPage === -1 ? filteredTickets.length : Math.min(startIndex + itemsPerPage, filteredTickets.length)} of {filteredTickets.length} entries
+                        </span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                            disabled={currentPage === 1}
+                            className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600"
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex items-center gap-1">
+                            <span className="px-3 py-1 bg-white border border-slate-200 rounded-md text-sm font-medium text-slate-700">
+                                Page {currentPage} of {totalPages === 0 ? 1 : totalPages}
+                            </span>
+                        </div>
+
+                        <button
+                            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                            disabled={currentPage === totalPages || totalPages === 0}
+                            className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600"
+                        >
+                            <ChevronRight className="w-5 h-5" />
+                        </button>
+                    </div>
                 </div>
             </div>
 

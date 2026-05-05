@@ -18,6 +18,7 @@ import 'technician_customer_list_screen.dart';
 import 'dart:async';
 import '../services/notification_service.dart';
 import 'remote_device_screen.dart';
+import 'change_onu_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -222,12 +223,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PerformanceReportScreen()));
                   },
                 ),
-                ListTile(
-                    leading: const Icon(Icons.router),
-                    title: const Text('Remote ONU'),
-                    onTap: () {
-                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RemoteDeviceScreen()));
-                    },
+                ExpansionTile(
+                    leading: const Icon(Icons.devices),
+                    title: const Text('Device'),
+                    children: [
+                        ListTile(
+                            leading: const Icon(Icons.router),
+                            title: const Text('Remote'),
+                            onTap: () {
+                                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RemoteDeviceScreen()));
+                            },
+                        ),
+                        ListTile(
+                            leading: const Icon(Icons.refresh),
+                            title: const Text('Change ONU'),
+                            onTap: () {
+                                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChangeOnuScreen()));
+                            },
+                        ),
+                    ],
                 ),
                 if (user?.role == 'admin' || user?.role == 'superadmin')
                 ListTile(

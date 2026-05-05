@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory, RemoteDevice } from './models/index.js';
+import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory, RemoteDevice, OnuChangeLog } from './models/index.js';
 import { Sequelize, Op } from 'sequelize';
 import archiver from 'archiver';
 import AdmZip from 'adm-zip';
@@ -22,6 +22,17 @@ initDB();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Global Uncaught Exception Handler to prevent process crash
+process.on('uncaughtException', (err) => {
+    console.error('[CRITICAL] Uncaught Exception:', err.message);
+    console.error(err.stack);
+    // Don't exit, just log it. The next request will try again.
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -800,6 +811,202 @@ app.delete('/api/mikrotik/nat', async (req, res) => {
     }
 });
 
+// --- ONU Change Endpoints ---
+
+// List PPP Secrets for a server
+app.get('/api/mikrotik/secrets/:serverId', async (req, res) => {
+    const { serverId } = req.params;
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const client = new RouterOSAPI({
+            host: server.ip, port: server.port || 8728,
+            user: server.username, password: server.password,
+            keepalive: false, timeout: 20
+        });
+
+        await client.connect();
+        const secrets = await client.write('/ppp/secret/print');
+        await client.close();
+
+        res.json(secrets);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update PPP Secret
+app.put('/api/mikrotik/secrets', async (req, res) => {
+    const { serverId, name, password, comment, profile } = req.body;
+    if (!serverId || !name) return res.status(400).json({ error: 'Missing serverId or name' });
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const client = new RouterOSAPI({
+            host: server.ip, port: server.port || 8728,
+            user: server.username, password: server.password,
+            keepalive: false, timeout: 20
+        });
+
+        await client.connect();
+        
+        // Find ID by name
+        const existing = await client.write(['/ppp/secret/print', `?name=${name}`]);
+        if (existing.length === 0) {
+            await client.close();
+            return res.status(404).json({ error: `Secret ${name} not found` });
+        }
+
+        const cmd = ['/ppp/secret/set', `=.id=${existing[0]['.id']}`];
+        if (password !== undefined) cmd.push(`=password=${password}`);
+        if (comment !== undefined) cmd.push(`=comment=${comment}`);
+        if (profile !== undefined) cmd.push(`=profile=${profile}`);
+
+        await client.write(cmd);
+        await client.close();
+
+        res.json({ success: true, message: 'Secret updated successfully' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Change ONU Logic
+app.post('/api/mikrotik/change-onu', async (req, res) => {
+    const { serverId, oldUsername, newUsername, user } = req.body;
+    if (!serverId || !oldUsername || !newUsername) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const client = new RouterOSAPI({
+            host: server.ip, port: server.port || 8728,
+            user: server.username, password: server.password,
+            keepalive: false, timeout: 60
+        });
+
+        // Prevention for "Uncaught Exception" crash
+        client.on('error', (err) => {
+            console.error(`[Change ONU] Mikrotik Error (${server.ip}):`, err.message);
+        });
+
+        let oldComment = '';
+        try {
+            await client.connect();
+
+            const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+            // 1. Fetch old ppp secret
+            const oldSecrets = await client.write(['/ppp/secret/print', `?name=${oldUsername}`]);
+            if (oldSecrets.length === 0) {
+                await client.close();
+                return res.status(404).json({ error: `PPP secret ${oldUsername} not found on router` });
+            }
+            const oldSecret = oldSecrets[0];
+            const oldProfile = oldSecret.profile;
+            oldComment = oldSecret.comment || '';
+
+            await delay(200);
+
+            // 2. Fetch new ppp secret
+            const newSecrets = await client.write(['/ppp/secret/print', `?name=${newUsername}`]);
+            if (newSecrets.length === 0) {
+                await client.close();
+                return res.status(404).json({ error: `PPP secret ${newUsername} not found on router` });
+            }
+            const newSecret = newSecrets[0];
+
+            await delay(200);
+
+            // 3. Update NEW secret
+            await client.write([
+                '/ppp/secret/set',
+                `=.id=${newSecret['.id']}`,
+                `=profile=${oldProfile}`,
+                `=comment=${oldComment}`
+            ]);
+
+            await delay(200);
+
+            // 4. Update OLD secret
+            await client.write([
+                '/ppp/secret/set',
+                `=.id=${oldSecret['.id']}`,
+                `=profile=BELUM AKTIF`,
+                `=comment=${oldUsername}`
+            ]);
+
+            await delay(200);
+
+            // 5. Kick old session
+            const activeSessions = await client.write(['/ppp/active/print', `?name=${oldUsername}`]);
+            if (activeSessions.length > 0) {
+                for (const session of activeSessions) {
+                    try {
+                        await client.write(['/ppp/active/remove', `=.id=${session['.id']}`]);
+                        await delay(100);
+                    } catch (err) {
+                        console.warn(`[Change ONU] Failed to remove session ${session['.id']}:`, err.message);
+                    }
+                }
+            }
+
+            await delay(200);
+            await client.close();
+        } catch (mErr) {
+            // Attempt to close if still connected
+            try { await client.close(); } catch(ce) {}
+            throw mErr; // Re-throw to be caught by outer try-catch
+        }
+
+        // 6. Record in DB Log
+        await OnuChangeLog.create({
+            server_id: serverId,
+            old_username: oldUsername,
+            new_username: newUsername,
+            old_comment: oldComment,
+            user_name: user?.username || 'Unknown'
+        });
+
+        // 7. Update SQL Customer table if exists (Sync the mikrotik_name)
+        const customer = await Customer.findOne({ 
+            where: { 
+                server_id: serverId, 
+                mikrotik_name: String(oldUsername).toLowerCase().trim() 
+            } 
+        });
+        if (customer) {
+            await customer.update({ mikrotik_name: String(newUsername).toLowerCase().trim() });
+        }
+
+        logActivity(req, 'CHANGE_ONU', `Changed ONU for ${oldUsername} to ${newUsername} on server ${server.name}`);
+
+        res.json({ success: true, message: 'ONU Changed successfully' });
+    } catch (e) {
+        console.error('[Change ONU] Final Error:', e);
+        res.status(500).json({ error: e.message || 'Unknown error occurred during ONU change' });
+    }
+});
+
+// Get ONU Change Logs
+app.get('/api/mikrotik/onu-logs', async (req, res) => {
+    try {
+        const logs = await OnuChangeLog.findAll({
+            include: [Server],
+            order: [['timestamp', 'DESC']]
+        });
+        res.json(logs);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- CRM Endpoints ---
 
 // [NEW] Update Customer CRM Data directly (Bypass Mikrotik Sync)
@@ -1056,6 +1263,8 @@ app.get('/api/billing/invoices', async (req, res) => {
                 orderClause = [[Customer, 'name', dir]];
             } else if (sortBy === 'username') {
                 orderClause = [[Customer, 'mikrotik_name', dir]];
+            } else if (sortBy === 'profile') {
+                orderClause = [[Customer, 'profile', dir]];
             } else if (['period', 'due_date', 'amount', 'status'].includes(sortBy)) {
                 orderClause = [[sortBy, dir]];
             }
@@ -1284,6 +1493,8 @@ app.get('/api/billing/payments', async (req, res) => {
                 orderClause = [[Invoice, Customer, 'mikrotik_name', dir]];
             } else if (sortBy === 'period') {
                 orderClause = [[Invoice, 'period', dir]];
+            } else if (sortBy === 'profile') {
+                orderClause = [[Invoice, Customer, 'profile', dir]];
             } else if (['amount', 'method', 'transaction_date'].includes(sortBy)) {
                 orderClause = [[sortBy, dir]];
             }
@@ -1330,8 +1541,8 @@ app.get('/api/billing/payments', async (req, res) => {
 app.post('/api/billing/bulk-delete', async (req, res) => {
     const { invoiceIds, user } = req.body;
 
-    if (!user || user.role !== 'superadmin') {
-        return res.status(403).json({ error: 'Access denied. Superadmin only.' });
+    if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return res.status(403).json({ error: 'Access denied. Authorized users only.' });
     }
 
     if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
@@ -1357,8 +1568,8 @@ app.post('/api/billing/bulk-delete', async (req, res) => {
 app.post('/api/billing/payments/bulk-delete', async (req, res) => {
     const { paymentIds, user } = req.body;
 
-    if (!user || user.role !== 'superadmin') {
-        return res.status(403).json({ error: 'Access denied. Superadmin only.' });
+    if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return res.status(403).json({ error: 'Access denied. Authorized users only.' });
     }
 
     if (!Array.isArray(paymentIds) || paymentIds.length === 0) {
@@ -1377,7 +1588,11 @@ app.post('/api/billing/payments/bulk-delete', async (req, res) => {
 
 // Bulk Update Invoices
 app.post('/api/billing/bulk-update', async (req, res) => {
-    const { invoiceIds, status } = req.body;
+    const { invoiceIds, status, user } = req.body;
+
+    if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return res.status(403).json({ error: 'Access denied. Authorized users only.' });
+    }
 
     if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
         return res.status(400).json({ error: 'No invoices selected' });
@@ -1412,36 +1627,31 @@ app.post('/api/billing/bulk-update', async (req, res) => {
 
 // Bulk Block Customers from Invoices
 app.post('/api/billing/bulk-block', async (req, res) => {
-    const { invoiceIds, user } = req.body;
+    const { invoiceIds, user, actionType } = req.body;
 
-    if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
-        return res.status(400).json({ error: 'No invoices selected' });
+    if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return res.status(403).json({ error: 'Access denied. Authorized users only.' });
     }
+
+    if (!invoiceIds || !Array.isArray(invoiceIds)) return res.status(400).json({ error: 'Invalid invoiceIds' });
 
     try {
         const invoices = await Invoice.findAll({
             where: { id: invoiceIds },
-            include: [{ 
-                model: Customer, 
-                include: [Server] 
-            }]
+            include: [{ model: Customer, include: [{ model: Server }] }]
         });
 
-        // Group by Server to minimize connections
         const serverGroups = {};
-        for (const inv of invoices) {
+        invoices.forEach(inv => {
             const customer = inv.Customer;
-            if (!customer || !customer.Server) continue;
-            
-            const serverId = customer.server_id;
-            if (!serverGroups[serverId]) {
-                serverGroups[serverId] = {
-                    server: customer.Server,
-                    customers: new Map() // Use Map to ensure unique customers per server
-                };
+            if (customer && customer.Server) {
+                const serverId = customer.Server.id;
+                if (!serverGroups[serverId]) {
+                    serverGroups[serverId] = { server: customer.Server, customers: new Map() };
+                }
+                serverGroups[serverId].customers.set(customer.id, customer);
             }
-            serverGroups[serverId].customers.set(customer.id, customer);
-        }
+        });
 
         let blockedCount = 0;
         let errors = [];
@@ -1453,8 +1663,7 @@ app.post('/api/billing/bulk-block', async (req, res) => {
                 port: server.port || 8728,
                 user: server.username,
                 password: server.password,
-                keepalive: false,
-                timeout: 20
+                timeout: 30
             });
 
             client.on('error', (err) => {
@@ -1463,38 +1672,63 @@ app.post('/api/billing/bulk-block', async (req, res) => {
 
             try {
                 await client.connect();
+
+                // Optimization: Fetch all active sessions once per server to allow case-insensitive lookup
+                let allActiveSessions = [];
+                if (!actionType || actionType === 'kick') {
+                    try {
+                        allActiveSessions = await client.write(['/ppp/active/print']);
+                    } catch (err) {
+                        console.error(`[Bulk-Block] Failed to fetch active sessions for ${server.name}:`, err.message);
+                    }
+                }
                 
                 for (const customer of customers.values()) {
                     try {
-                        console.log(`[Bulk-Block] Blocking ${customer.mikrotik_name} on ${server.name}`);
-                        
+                        const username = customer.mikrotik_name.trim();
+                        const isKickOnly = actionType === 'kick';
+                        const isDisableOnly = actionType === 'disable';
+                        const isBoth = !actionType;
+
                         // 1. Disable PPP Secret
-                        const secrets = await client.write('/ppp/secret/print', { 
-                            '?name': customer.mikrotik_name.toLowerCase().trim() 
-                        });
-                        
-                        if (secrets.length > 0) {
-                            const secretId = secrets[0]['.id'];
-                            await client.write('/ppp/secret/set', { 
-                                '.id': secretId, 
-                                'disabled': 'yes' 
-                            });
-                        } else {
-                            console.warn(`[Bulk-Block] Secret not found for ${customer.mikrotik_name}`);
+                        if (isBoth || isDisableOnly) {
+                            try {
+                                const secrets = await client.write(['/ppp/secret/print', `?name=${username}`]);
+                                if (secrets.length > 0) {
+                                    if (secrets[0].disabled !== 'true' && secrets[0].disabled !== 'yes') {
+                                        await client.write(['/ppp/secret/set', `=.id=${secrets[0]['.id']}`, '=disabled=yes']);
+                                        console.log(`[Bulk-Block] Disabled secret for ${username}`);
+                                    }
+                                } else {
+                                    // Try case-insensitive search if direct search fails
+                                    const allSecrets = await client.write(['/ppp/secret/print']);
+                                    const matchingSecret = allSecrets.find(s => s.name?.toLowerCase() === username.toLowerCase());
+                                    if (matchingSecret) {
+                                        await client.write(['/ppp/secret/set', `=.id=${matchingSecret['.id']}`, '=disabled=yes']);
+                                        console.log(`[Bulk-Block] Disabled secret (case-insensitive) for ${username}`);
+                                    } else {
+                                        console.warn(`[Bulk-Block] Secret not found for ${username}.`);
+                                    }
+                                }
+                            } catch (err) {
+                                console.error(`[Bulk-Block] Disable error for ${username}:`, err.message);
+                            }
                         }
 
-                        // 2. Remove Active Session (Kick user)
-                        const activeSessions = await client.write('/ppp/active/print', { 
-                            '?name': customer.mikrotik_name.toLowerCase().trim() 
-                        });
-                        
-                        if (activeSessions.length > 0) {
-                            for (const session of activeSessions) {
-                                if (session['.id']) {
-                                    await client.write('/ppp/active/remove', { 
-                                        '.id': session['.id'] 
-                                    });
+                        // 2. Kill Active Sessions (Case-Insensitive)
+                        if (isBoth || isKickOnly) {
+                            try {
+                                const matchingSessions = allActiveSessions.filter(s => s.name?.toLowerCase() === username.toLowerCase());
+                                if (matchingSessions.length > 0) {
+                                    for (const session of matchingSessions) {
+                                        if (session['.id']) {
+                                            await client.write(['/ppp/active/remove', `=.id=${session['.id']}`]);
+                                            console.log(`[Bulk-Block] Killed active session for ${username}`);
+                                        }
+                                    }
                                 }
+                            } catch (err) {
+                                console.error(`[Bulk-Block] Kill error for ${username}:`, err.message);
                             }
                         }
 
@@ -1502,38 +1736,32 @@ app.post('/api/billing/bulk-block', async (req, res) => {
                         await customer.update({ status: 'isolated' });
                         blockedCount++;
 
-                        // 4. Log to Invoice History for all selected invoices of THIS customer
+                        // 4. Log History
                         const relevantInvoices = invoices.filter(inv => inv.customer_id === customer.id);
                         for (const inv of relevantInvoices) {
                             await InvoiceHistory.create({
                                 invoice_id: inv.id,
                                 user_name: user?.username || 'System',
                                 action: 'STATUS_UPDATE',
-                                details: `Customer automatically blocked due to unpaid invoice (Bulk Action).`
+                                details: `Bulk ${actionType || 'Block'} action performed on Mikrotik (Case-insensitive check).`
                             });
                         }
 
                     } catch (custErr) {
-                        console.error(`[Bulk-Block] Error for customer ${customer.mikrotik_name}:`, custErr.message);
+                        console.error(`[Bulk-Block] Error for ${customer.mikrotik_name}:`, custErr.message);
                         errors.push(`${customer.mikrotik_name}: ${custErr.message}`);
                     }
                 }
                 
                 await client.close();
             } catch (connErr) {
-                console.error(`[Bulk-Block] Connection failed for server ${server.name}:`, connErr.message);
+                console.error(`[Bulk-Block] Connection failed for ${server.name}:`, connErr.message);
                 errors.push(`Server ${server.name}: Connection failed`);
             }
         }
 
-        logActivity(req, 'BULK_BLOCK_BILLING', `Blocked ${blockedCount} users via bulk billing action.`);
-        
-        res.json({ 
-            success: true, 
-            message: `Successfully blocked ${blockedCount} customers.`,
-            errors: errors.length > 0 ? errors : undefined
-        });
-
+        logActivity(req, 'BULK_BLOCK_BILLING', `Performed bulk ${actionType || 'Block'} on ${blockedCount} users.`);
+        res.json({ success: true, message: `Successfully processed ${blockedCount} customers.`, errors: errors.length > 0 ? errors : null });
     } catch (e) {
         console.error('[Bulk-Block] Fatal Error:', e);
         res.status(500).json({ error: e.message });
@@ -1727,12 +1955,21 @@ app.post('/api/billing/check-overdue', async (req, res) => {
 
                 try {
                     await client.connect();
-                    // Disable Secret by name
-                    const secrets = await client.write('/ppp/secret/print', { '?name': customer.mikrotik_name.toLowerCase() });
-                    if (secrets.length > 0) {
-                        const secretId = secrets[0]['.id'];
-                        await client.write('/ppp/secret/disable', { '.id': secretId });
-                        console.log(`[Auto-Block] Disabled secret for ${customer.mikrotik_name}`);
+                    const username = customer.mikrotik_name.trim();
+                    try {
+                        const secrets = await client.write(['/ppp/secret/print', `?name=${username}`]);
+                        if (secrets.length > 0 && secrets[0].disabled !== 'true' && secrets[0].disabled !== 'yes') {
+                            await client.write(['/ppp/secret/set', `=.id=${secrets[0]['.id']}`, '=disabled=yes']);
+                            console.log(`[Auto-Block] Disabled secret for ${username}`);
+                            
+                            // Check and kill active session if we just disabled it
+                            const activeSessions = await client.write(['/ppp/active/print', `?name=${username}`]);
+                            for (const session of activeSessions) {
+                                if (session['.id']) await client.write(['/ppp/active/remove', `=.id=${session['.id']}`]);
+                            }
+                        }
+                    } catch (err) {
+                        console.warn(`[Auto-Block] Failed to process secret for ${username}:`, err.message);
                     }
                     await client.close();
 
@@ -2023,8 +2260,8 @@ app.delete('/api/billing/invoices/:id', async (req, res) => {
     const { id } = req.params;
     const { user } = req.body; // Expect user object (containing role)
 
-    if (!user || user.role !== 'superadmin') {
-        return res.status(403).json({ error: 'Access denied. Superadmin only.' });
+    if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return res.status(403).json({ error: 'Access denied. Authorized users only.' });
     }
 
     try {
@@ -2068,6 +2305,20 @@ app.delete('/api/servers/:id', async (req, res) => {
         const server = await Server.findByPk(id);
         if (server) {
             await server.destroy();
+            
+            // Cleanup cache files
+            const resources = ['secrets', 'profiles', 'pools', 'interfaces', 'active_ppp'];
+            for (const resType of resources) {
+                const cachePath = getCachePath(id, resType);
+                if (fs.existsSync(cachePath)) {
+                    try {
+                        fs.unlinkSync(cachePath);
+                    } catch (err) {
+                        console.error(`Failed to delete cache file ${cachePath}:`, err.message);
+                    }
+                }
+            }
+
             logActivity(req, 'DELETE_SERVER', `Deleted server ID ${id}`);
         }
         res.json({ success: true });

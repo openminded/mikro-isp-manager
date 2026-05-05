@@ -69,13 +69,83 @@ class _RemoteDeviceScreenState extends State<RemoteDeviceScreen> {
     }
   }
 
+  Future<void> _showEditDialog(RemoteDevice device) async {
+    final dstPortController = TextEditingController(text: device.dstPort);
+    final toAddressController = TextEditingController(text: device.toAddress);
+    final toPortsController = TextEditingController(text: device.toPorts);
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Remote ONU', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: dstPortController,
+                decoration: const InputDecoration(labelText: 'Public Port (dst-port)', hintText: 'e.g. 8081'),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: toAddressController,
+                decoration: const InputDecoration(labelText: 'Internal IP (to-address)', hintText: 'e.g. 192.168.1.1'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: toPortsController,
+                decoration: const InputDecoration(labelText: 'Internal Port (to-ports)', hintText: 'e.g. 80'),
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      await _updateDevice(device, {
+        'dstPort': dstPortController.text,
+        'toAddress': toAddressController.text,
+        'toPorts': toPortsController.text,
+      });
+    }
+  }
+
+  Future<void> _updateDevice(RemoteDevice device, Map<String, dynamic> data) async {
+    setState(() => _isLoading = true);
+    try {
+      final api = ApiService();
+      await api.put('/mikrotik/nat', {
+        'serverId': device.serverId,
+        'id': device.id,
+        ...data,
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Device updated successfully')));
+      _fetchDevices();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update device: $e')));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final work = Provider.of<WorkProvider>(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Remote ONU', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Remote', style: TextStyle(fontWeight: FontWeight.bold)),
         elevation: 0,
         flexibleSpace: Container(
           decoration: const BoxDecoration(
@@ -212,6 +282,13 @@ class _RemoteDeviceScreenState extends State<RemoteDeviceScreen> {
                                             ),
                                           ),
                                           _StatusChip(status: device.lastCheckStatus),
+                                          const SizedBox(width: 8),
+                                          IconButton(
+                                            onPressed: () => _showEditDialog(device),
+                                            icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                          ),
                                         ],
                                       ),
                                       const Divider(height: 24),

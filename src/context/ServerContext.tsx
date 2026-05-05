@@ -97,6 +97,9 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     };
 
     const removeServer = async (id: string) => {
+        if (!window.confirm('Apakah Anda yakin ingin menghapus server ini? Semua data pelanggan dan invoice terkait akan ikut terhapus secara permanen.')) {
+            return;
+        }
         try {
             const response = await fetch(`/api/servers/${id}`, {
                 method: 'DELETE'
@@ -104,9 +107,13 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
             if (response.ok) {
                 setServers(prev => prev.filter(s => s.id !== id));
+            } else {
+                const err = await response.json();
+                alert('Gagal menghapus server: ' + (err.error || 'Unknown error'));
             }
         } catch (error) {
             console.error('Error deleting server', error);
+            alert('Terjadi kesalahan saat menghapus server.');
         }
     };
 

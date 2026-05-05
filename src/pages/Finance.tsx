@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2, Printer, AlertTriangle } from "lucide-react";
+import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2, Printer, AlertTriangle, Eye, EyeOff, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Mock Data for dev (replace with API calls later)
@@ -12,6 +12,7 @@ export function Finance() {
     const [activeTab, setActiveTab] = useState<'unpaid' | 'history' | 'invalid' | 'recap' | 'analytics'>('analytics');
     const [invoices, setInvoices] = useState<any[]>([]);
     const [analyticsData, setAnalyticsData] = useState<any>(null);
+    const [showNominal, setShowNominal] = useState(true);
     const [monthlyStatusFilters, setMonthlyStatusFilters] = useState({ PAID: true, UNPAID: true, CANCELLED: false, INVALID: false });
     const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
 
@@ -344,9 +345,10 @@ export function Finance() {
         }
     };
 
-    const handleBulkBlock = async () => {
+    const handleBulkBlock = async (actionType?: 'disable' | 'kick') => {
         if (selectedIds.size === 0) return;
-        if (!confirm(`Are you sure you want to block/disable ${selectedIds.size} customers on their respective routers? This will also terminate their active sessions.`)) return;
+        const actionLabel = actionType === 'disable' ? 'DISABLE PPP' : actionType === 'kick' ? 'KICK ACTIVE' : 'BLOCK';
+        if (!confirm(`Are you sure you want to ${actionLabel} ${selectedIds.size} customers?`)) return;
 
         setIsLoading(true);
         try {
@@ -355,7 +357,8 @@ export function Finance() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     invoiceIds: Array.from(selectedIds),
-                    user: user || { username: 'Unknown' }
+                    user: user || { username: 'Unknown' },
+                    actionType
                 })
             });
             const result = await res.json();
@@ -374,7 +377,7 @@ export function Finance() {
 
     const SkeletonRow = () => (
         <tr className="animate-pulse">
-            {user?.role === 'superadmin' && <td className="px-4 py-4 w-[40px]"><div className="h-4 w-4 bg-slate-200 dark:bg-slate-700 rounded mx-auto"></div></td>}
+            {(user?.role === 'superadmin' || user?.role === 'admin') && <td className="px-4 py-4 w-[40px]"><div className="h-4 w-4 bg-slate-200 dark:bg-slate-700 rounded mx-auto"></div></td>}
             <td className="px-6 py-4"><div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
             <td className="px-6 py-4"><div className="h-4 w-40 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
             <td className="px-6 py-4"><div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded"></div></td>
@@ -405,7 +408,7 @@ export function Finance() {
 
 
     const handleBulkDelete = async () => {
-        if (!user || user.role !== 'superadmin') return;
+        if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) return;
         const itemName = activeTab === 'recap' ? 'payments' : 'invoices';
         if (!confirm(`Are you sure you want to delete ${selectedIds.size} ${itemName}? This cannot be undone.`)) return;
 
@@ -482,6 +485,14 @@ export function Finance() {
                         <Layers className="w-4 h-4" />
                         {groupByServer ? "Ungroup" : "Group by Server"}
                     </button>
+                    <button
+                        onClick={() => setShowNominal(!showNominal)}
+                        className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
+                        title={showNominal ? "Hide Nominals" : "Show Nominals"}
+                    >
+                        {showNominal ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        {showNominal ? "Hide" : "Show"}
+                    </button>
                 </div>
                 <div className="flex gap-2">
                     <button
@@ -541,7 +552,7 @@ export function Finance() {
 
             {/* Bulk Actions Bar */}
             {
-                selectedIds.size > 0 && user?.role === 'superadmin' && (
+                selectedIds.size > 0 && (user?.role === 'superadmin' || user?.role === 'admin') && (
                     <div className="mb-6 p-4 bg-slate-900 text-white rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 fade-in duration-200">
                         <div className="flex items-center gap-3">
                             <div className="bg-white/10 px-3 py-1 rounded-md text-sm font-medium">
@@ -564,18 +575,24 @@ export function Finance() {
                                         <Ban className="w-4 h-4" /> Invalid
                                     </button>
                                     {activeTab === 'unpaid' && (
-                                        <button 
-                                            onClick={handleBulkBlock} 
-                                            disabled={isLoading}
-                                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-slate-600 disabled:opacity-50 disabled:cursor-wait"
-                                        >
-                                            {isLoading ? (
-                                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                            ) : (
-                                                <Ban className="w-4 h-4" />
-                                            )}
-                                            {isLoading ? 'Processing...' : 'Block Customers'}
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => handleBulkBlock('disable')} 
+                                                disabled={isLoading}
+                                                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-slate-600 disabled:opacity-50"
+                                            >
+                                                {isLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <Ban className="w-4 h-4" />}
+                                                Disable PPP
+                                            </button>
+                                            <button 
+                                                onClick={() => handleBulkBlock('kick')} 
+                                                disabled={isLoading}
+                                                className="px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-red-600 disabled:opacity-50"
+                                            >
+                                                {isLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <Zap className="w-4 h-4" />}
+                                                Kick Active
+                                            </button>
+                                        </div>
                                     )}
                                 </>
                             )}
@@ -674,12 +691,12 @@ export function Finance() {
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
                                     <div className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">Total Revenue</div>
-                                    <div className="text-3xl font-bold text-slate-900 dark:text-white">Rp {(analyticsData.summary.totalPaid || 0).toLocaleString('id-ID')}</div>
+                                    <div className="text-3xl font-bold text-slate-900 dark:text-white">Rp {showNominal ? (analyticsData.summary.totalPaid || 0).toLocaleString('id-ID') : 'xxx'}</div>
                                     <div className="text-xs text-green-600 font-medium mt-2">Received from {analyticsData.summary.paidCount || 0} payments</div>
                                 </div>
                                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
                                     <div className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">Unpaid Amount</div>
-                                    <div className="text-3xl font-bold text-red-600 dark:text-red-400">Rp {(analyticsData.summary.totalUnpaid || 0).toLocaleString('id-ID')}</div>
+                                    <div className="text-3xl font-bold text-red-600 dark:text-red-400">Rp {showNominal ? (analyticsData.summary.totalUnpaid || 0).toLocaleString('id-ID') : 'xxx'}</div>
                                     <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-2">From {analyticsData.summary.unpaidCount || 0} customer invoices</div>
                                 </div>
                                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between col-span-1 lg:col-span-2">
@@ -722,7 +739,7 @@ export function Finance() {
                                                     >
                                                         <div className="flex justify-between text-sm">
                                                             <span className="font-medium text-slate-700 dark:text-slate-300">{item.name}</span>
-                                                            <span className="font-semibold text-slate-900 dark:text-white">Rp {item.amount.toLocaleString('id-ID')}</span>
+                                                            <span className="font-semibold text-slate-900 dark:text-white">Rp {showNominal ? item.amount.toLocaleString('id-ID') : 'xxx'}</span>
                                                         </div>
                                                         <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                                                             <div className="bg-blue-500 h-full rounded-full" style={{ width: `${percentage}%` }}></div>
@@ -756,7 +773,7 @@ export function Finance() {
                                                     >
                                                         <div className="flex justify-between text-sm">
                                                             <span className="font-medium text-slate-700 dark:text-slate-300 capitalize">{item.name ? (paymentMethodsList.find((m: any) => m.id.toLowerCase() === item.name.toLowerCase())?.name || item.name.replace('_', ' ')) : '-'}</span>
-                                                            <span className="font-semibold text-slate-900 dark:text-white">Rp {item.amount.toLocaleString('id-ID')}</span>
+                                                            <span className="font-semibold text-slate-900 dark:text-white">Rp {showNominal ? item.amount.toLocaleString('id-ID') : 'xxx'}</span>
                                                         </div>
                                                         <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                                                             <div className={`${color} h-full rounded-full`} style={{ width: `${percentage}%` }}></div>
@@ -791,7 +808,7 @@ export function Finance() {
                                                     </div>
                                                     <div className="flex gap-2">
                                                         <button onClick={() => handleEditClick(anom.invoice)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-xs font-medium text-slate-700 dark:text-slate-200 transition-colors">Edit</button>
-                                                        {user?.role === 'superadmin' && (
+                                                        {(user?.role === 'superadmin' || user?.role === 'admin') && (
                                                             <button onClick={() => handleDeleteInvoice(anom.invoice)} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors">Delete</button>
                                                         )}
                                                     </div>
@@ -817,7 +834,7 @@ export function Finance() {
                                                         <div key={i} className="flex-1 flex flex-col justify-end items-center group relative min-w-[10px]">
                                                             {/* Tooltip on hover */}
                                                             <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none">
-                                                                {day.date}: Rp {day.amount.toLocaleString('id-ID')}
+                                                                {day.date}: Rp {showNominal ? day.amount.toLocaleString('id-ID') : 'xxx'}
                                                             </div>
                                                             <div 
                                                                 className="w-full bg-primary/80 hover:bg-primary transition-all rounded-t-sm" 
@@ -884,10 +901,10 @@ export function Finance() {
                                                             {/* Tooltip on hover */}
                                                             <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-2 px-3 rounded whitespace-nowrap z-10 pointer-events-none flex flex-col gap-1 shadow-lg">
                                                                 <div className="font-bold border-b border-slate-600 pb-1 mb-1">{formatPeriod(month.period)}</div>
-                                                                {monthlyStatusFilters.PAID && month.PAID > 0 && <div className="flex justify-between gap-4"><span className="text-blue-300">Paid:</span> <span>Rp {month.PAID.toLocaleString('id-ID')}</span></div>}
-                                                                {monthlyStatusFilters.UNPAID && month.UNPAID > 0 && <div className="flex justify-between gap-4"><span className="text-red-300">Unpaid:</span> <span>Rp {month.UNPAID.toLocaleString('id-ID')}</span></div>}
-                                                                {monthlyStatusFilters.CANCELLED && month.CANCELLED > 0 && <div className="flex justify-between gap-4"><span className="text-slate-300">Cancel:</span> <span>Rp {month.CANCELLED.toLocaleString('id-ID')}</span></div>}
-                                                                {monthlyStatusFilters.INVALID && month.INVALID > 0 && <div className="flex justify-between gap-4"><span className="text-orange-300">Invalid:</span> <span>Rp {month.INVALID.toLocaleString('id-ID')}</span></div>}
+                                                                {monthlyStatusFilters.PAID && month.PAID > 0 && <div className="flex justify-between gap-4"><span className="text-blue-300">Paid:</span> <span>Rp {showNominal ? month.PAID.toLocaleString('id-ID') : 'xxx'}</span></div>}
+                                                                {monthlyStatusFilters.UNPAID && month.UNPAID > 0 && <div className="flex justify-between gap-4"><span className="text-red-300">Unpaid:</span> <span>Rp {showNominal ? month.UNPAID.toLocaleString('id-ID') : 'xxx'}</span></div>}
+                                                                {monthlyStatusFilters.CANCELLED && month.CANCELLED > 0 && <div className="flex justify-between gap-4"><span className="text-slate-300">Cancel:</span> <span>Rp {showNominal ? month.CANCELLED.toLocaleString('id-ID') : 'xxx'}</span></div>}
+                                                                {monthlyStatusFilters.INVALID && month.INVALID > 0 && <div className="flex justify-between gap-4"><span className="text-orange-300">Invalid:</span> <span>Rp {showNominal ? month.INVALID.toLocaleString('id-ID') : 'xxx'}</span></div>}
                                                             </div>
                                                             <div className="w-full flex flex-col justify-end h-full">
                                                                 {totalH > 0 && (
@@ -920,7 +937,7 @@ export function Finance() {
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
                                 <tr>
-                                    {user?.role === 'superadmin' && (
+                                    {(user?.role === 'superadmin' || user?.role === 'admin') && (
                                         <th className="px-4 py-4 w-[40px]">
                                             <input
                                                 type="checkbox"
@@ -954,6 +971,14 @@ export function Finance() {
                                             )}
                                         </div>
                                     </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('profile')}>
+                                        <div className="flex items-center gap-2">
+                                            Daya
+                                            {sortConfig?.key === 'profile' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
                                     <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('period')}>
                                         <div className="flex items-center gap-2">
                                             Invoice Period
@@ -983,7 +1008,7 @@ export function Finance() {
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                                 {invoices.length === 0 ? (
                                     <tr>
-                                        <td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
+                                        <td colSpan={user?.role === 'superadmin' ? 8 : 7} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
                                             No payments found for this criteria.
                                         </td>
                                     </tr>
@@ -991,7 +1016,7 @@ export function Finance() {
                                     Object.entries(groupedInvoices).map(([serverName, groupInvoices]) => (
                                         <React.Fragment key={`group-${serverName}`}>
                                             <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                                                <td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
+                                                <td colSpan={user?.role === 'superadmin' ? 8 : 7} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
                                                     <div className="flex items-center gap-2">
                                                         <Layers className="w-3.5 h-3.5" />
                                                         {serverName} <span className="text-slate-400 font-normal">({groupInvoices.length} payments)</span>
@@ -1020,6 +1045,9 @@ export function Finance() {
                                                         {payment.Invoice?.Customer?.name || '-'}
                                                     </td>
                                                     <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                        {payment.Invoice?.Customer?.profile || '-'}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
                                                         {formatPeriod(payment.Invoice?.period)}
                                                     </td>
                                                     <td className="px-6 py-4">
@@ -1028,7 +1056,7 @@ export function Finance() {
                                                         </span>
                                                     </td>
                                                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-white text-right">
-                                                        Rp {Number(payment.amount).toLocaleString('id-ID')}
+                                                        Rp {showNominal ? Number(payment.amount).toLocaleString('id-ID') : 'xxx'}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -1037,7 +1065,7 @@ export function Finance() {
                                 ) : (
                                     invoices.map(payment => (
                                         <tr key={payment.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                            {user?.role === 'superadmin' && (
+                                            {(user?.role === 'superadmin' || user?.role === 'admin') && (
                                                 <td className="px-4 py-4 w-[40px]">
                                                     <input
                                                         type="checkbox"
@@ -1057,6 +1085,9 @@ export function Finance() {
                                                 {payment.Invoice?.Customer?.name || '-'}
                                             </td>
                                             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                                                {payment.Invoice?.Customer?.profile || '-'}
+                                            </td>
+                                            <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
                                                 {formatPeriod(payment.Invoice?.period)}
                                             </td>
                                             <td className="px-6 py-4">
@@ -1065,7 +1096,7 @@ export function Finance() {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 font-medium text-slate-900 dark:text-white text-right">
-                                                Rp {Number(payment.amount).toLocaleString('id-ID')}
+                                                Rp {showNominal ? Number(payment.amount).toLocaleString('id-ID') : 'xxx'}
                                             </td>
                                         </tr>
                                     ))
@@ -1076,7 +1107,7 @@ export function Finance() {
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
                                 <tr>
-                                    {user?.role === 'superadmin' && (
+                                    {(user?.role === 'superadmin' || user?.role === 'admin') && (
                                         <th className="px-4 py-4 w-[40px]">
                                             <input
                                                 type="checkbox"
@@ -1098,6 +1129,14 @@ export function Finance() {
                                         <div className="flex items-center gap-2">
                                             Customer
                                             {sortConfig?.key === 'customer_name' && (
+                                                <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
+                                            )}
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('profile')}>
+                                        <div className="flex items-center gap-2">
+                                            Daya
+                                            {sortConfig?.key === 'profile' && (
                                                 <ArrowUpDown className={cn("w-3 h-3 text-slate-400", sortConfig.direction === 'asc' ? "rotate-0" : "rotate-180")} />
                                             )}
                                         </div>
@@ -1149,7 +1188,7 @@ export function Finance() {
                                     </>
                                 ) : invoices.length === 0 ? (
                                     <tr>
-                                        <td colSpan={user?.role === 'superadmin' ? 10 : 9} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
+                                        <td colSpan={user?.role === 'superadmin' ? 11 : 10} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
                                             No invoices found for this category.
                                         </td>
                                     </tr>
@@ -1157,7 +1196,7 @@ export function Finance() {
                                     Object.entries(groupedInvoices).map(([serverName, groupInvoices]) => (
                                         <React.Fragment key={`group-${serverName}`}>
                                             <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                                                <td colSpan={user?.role === 'superadmin' ? 10 : 9} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
+                                                <td colSpan={user?.role === 'superadmin' ? 11 : 10} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider border-y border-slate-100 dark:border-slate-800">
                                                     <div className="flex items-center gap-2">
                                                         <Layers className="w-3.5 h-3.5" />
                                                         {serverName} <span className="text-slate-400 font-normal">({groupInvoices.length} invoices)</span>
@@ -1178,6 +1217,7 @@ export function Finance() {
                                                     onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
                                                     isSuperAdmin={user?.role === 'superadmin'}
                                                     paymentMethodsList={paymentMethodsList}
+                                                    showNominal={showNominal}
                                                 />
                                             ))}
                                         </React.Fragment>
@@ -1197,6 +1237,7 @@ export function Finance() {
                                             onDelete={user?.role === 'superadmin' ? () => handleDeleteInvoice(inv) : undefined}
                                             isSuperAdmin={user?.role === 'superadmin'}
                                             paymentMethodsList={paymentMethodsList}
+                                            showNominal={showNominal}
                                         />
                                     ))
                                 )}
@@ -1535,7 +1576,7 @@ export function Finance() {
                                                     {inv.Customer?.comment || '-'}
                                                 </div>
                                                 <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
-                                                    <span className="font-medium text-slate-700 dark:text-slate-300">Rp {Number(inv.amount).toLocaleString('id-ID')}</span>
+                                                    <span className="font-medium text-slate-700 dark:text-slate-300">Rp {showNominal ? Number(inv.amount).toLocaleString('id-ID') : 'xxx'}</span>
                                                     <span>Period: {inv.period}</span>
                                                     <span>Due: {inv.due_date}</span>
                                                     <span>By: <span className="text-blue-600 dark:text-blue-400 font-medium">{inv.updatedBy || '-'}</span></span>
@@ -1568,7 +1609,7 @@ export function Finance() {
     );
 }
 
- function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete, isSuperAdmin, paymentMethodsList }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void, isSuperAdmin?: boolean, paymentMethodsList?: any[] }) {
+ function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete, isSuperAdmin, paymentMethodsList, showNominal }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void, isSuperAdmin?: boolean, paymentMethodsList?: any[], showNominal: boolean }) {
     const methodId = invoice.Payments && invoice.Payments.length > 0 ? invoice.Payments[0].method : null;
     const methodName = methodId && paymentMethodsList ? (paymentMethodsList.find((m: any) => m.id.toLowerCase() === methodId.toLowerCase())?.name || methodId) : '-';
     
@@ -1594,6 +1635,9 @@ export function Finance() {
                 </div>
             </td>
             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                {invoice.Customer?.profile || '-'}
+            </td>
+            <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
                 {formattedPeriod}
             </td>
             <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
@@ -1605,7 +1649,7 @@ export function Finance() {
                 </span>
             </td>
             <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
-                Rp {Number(invoice.amount).toLocaleString('id-ID')}
+                Rp {showNominal ? Number(invoice.amount).toLocaleString('id-ID') : 'xxx'}
             </td>
             <td className="px-6 py-4">
                 <span className={cn(

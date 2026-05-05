@@ -80,7 +80,7 @@ export function RemoteDevices() {
         setStatus(null);
         try {
             const res = await MikrotikApi.syncNatRules(selectedServerId);
-            setStatus({ type: 'success', message: `Successfully synced ${res.count} remote devices from Mikrotik` });
+            setStatus({ type: 'success', message: `Successfully synced ${res.count} remote from Mikrotik` });
             fetchRules();
         } catch (error: any) {
             setStatus({ type: 'error', message: error.message || 'Sync failed' });
@@ -133,7 +133,7 @@ export function RemoteDevices() {
                 toAddress: formData.toAddress,
                 toPorts: formData.toPorts
             });
-            setStatus({ type: 'success', message: 'Remote device updated and synced to Mikrotik' });
+            setStatus({ type: 'success', message: 'Remote updated and synced to Mikrotik' });
             setIsModalOpen(false);
             fetchRules();
         } catch (error: any) {
@@ -148,7 +148,7 @@ export function RemoteDevices() {
         setLoading(true);
         try {
             await MikrotikApi.deleteNatRule(selectedServerId, id);
-            setStatus({ type: 'success', message: 'Remote device removed' });
+            setStatus({ type: 'success', message: 'Remote removed' });
             fetchRules();
         } catch (error: any) {
             setStatus({ type: 'error', message: error.message || 'Delete failed' });
@@ -174,7 +174,7 @@ export function RemoteDevices() {
                         <Monitor className="w-8 h-8" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Remote Device</h1>
+                        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Remote</h1>
                         <p className="text-slate-500 text-sm">Auto-sync Mikrotik NAT containing "remote"</p>
                     </div>
                 </div>
@@ -343,7 +343,7 @@ export function RemoteDevices() {
                         <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
                             <div>
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                                    {editingRule ? 'Edit Remote Device' : 'Add New Remote Device'}
+                                    {editingRule ? 'Edit Remote' : 'Add New Remote'}
                                 </h3>
                                 <p className="text-xs text-slate-500">{selectedServer?.name}</p>
                             </div>

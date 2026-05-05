@@ -88,12 +88,25 @@ export const RemoteDevice = sequelize.define('RemoteDevice', {
     last_check_status: { type: DataTypes.STRING, defaultValue: 'unknown' } // online, offline, unknown
 });
 
+export const OnuChangeLog = sequelize.define('OnuChangeLog', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    server_id: { type: DataTypes.UUID, allowNull: false },
+    old_username: { type: DataTypes.STRING, allowNull: false },
+    new_username: { type: DataTypes.STRING, allowNull: false },
+    old_comment: { type: DataTypes.STRING, allowNull: true },
+    user_name: { type: DataTypes.STRING, allowNull: false },
+    timestamp: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
+});
+
 // --- Associations ---
 
-Server.hasMany(Customer, { foreignKey: 'server_id' });
+Server.hasMany(Customer, { foreignKey: 'server_id', onDelete: 'CASCADE' });
 Customer.belongsTo(Server, { foreignKey: 'server_id' });
 
-Customer.hasMany(Invoice, { foreignKey: 'customer_id' });
+Server.hasMany(Invoice, { foreignKey: 'server_id', onDelete: 'CASCADE' });
+Invoice.belongsTo(Server, { foreignKey: 'server_id' });
+
+Customer.hasMany(Invoice, { foreignKey: 'customer_id', onDelete: 'CASCADE' });
 Invoice.belongsTo(Customer, { foreignKey: 'customer_id' });
 
 Invoice.hasMany(Payment, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
@@ -104,6 +117,9 @@ InvoiceHistory.belongsTo(Invoice, { foreignKey: 'invoice_id' });
 
 Server.hasMany(RemoteDevice, { foreignKey: 'server_id', onDelete: 'CASCADE' });
 RemoteDevice.belongsTo(Server, { foreignKey: 'server_id' });
+
+Server.hasMany(OnuChangeLog, { foreignKey: 'server_id', onDelete: 'CASCADE' });
+OnuChangeLog.belongsTo(Server, { foreignKey: 'server_id' });
 
 // Function to sync database
 export const initDB = async () => {
@@ -252,6 +268,7 @@ export const initDB = async () => {
         
         // Ensure RemoteDevices table exists
         await RemoteDevice.sync();
+        await OnuChangeLog.sync();
     } catch (error) {
         console.error('[Database] Unable to connect or sync:', error);
     }

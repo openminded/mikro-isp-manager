@@ -28,6 +28,7 @@ const Monitoring = lazy(() => import("./pages/Monitoring").then(m => ({ default:
 const Finance = lazy(() => import("./pages/Finance").then(m => ({ default: m.Finance })));
 const RemoteDevices = lazy(() => import("./pages/RemoteDevices").then(m => ({ default: m.RemoteDevices })));
 const ChangeOnu = lazy(() => import("./pages/ChangeOnu").then(m => ({ default: m.ChangeOnu })));
+const MikrotikBackup = lazy(() => import("./pages/MikrotikBackup").then(m => ({ default: m.MikrotikBackup })));
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950">
@@ -72,6 +73,7 @@ function App() {
                       <Route path="/finance" element={<Finance />} />
                       <Route path="/remote-devices" element={<RemoteDevices />} />
                       <Route path="/maintenance/change-onu" element={<ChangeOnu />} />
+                      <Route path="/device/backup" element={<MikrotikBackup />} />
                     </Route>
                   </Route>
 

@@ -4,7 +4,7 @@ import { useServers, type MikrotikServer } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
 import { useData } from '@/context/DataContext';
 import { type Customer } from '@/types';
-import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud, Map as MapIcon, MapPin } from 'lucide-react';
+import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud, Map as MapIcon, MapPin, Trash2 } from 'lucide-react';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { cn } from '@/lib/utils';
 
@@ -25,6 +25,10 @@ export function Customers() {
 
     const [syncLoading, setSyncLoading] = useState(false);
 
+    // Bulk Selection State
+    const [selectedCrmIds, setSelectedCrmIds] = useState<Set<string>>(new Set());
+    const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState<number>(10);
@@ -40,10 +44,11 @@ export function Customers() {
 
         setSyncLoading(true);
         setSyncStatus(null);
+        setSelectedCrmIds(new Set()); // clear selection on sync
         try {
             await Promise.all(servers.map(server => MikrotikApi.syncSecrets(server)));
             setSyncStatus({ type: 'success', message: 'Data synced successfully' });
-            refreshCustomers(true); // Re-read from cache (forced)
+            refreshCustomers(true);
         } catch (error) {
             console.error(error);
             setSyncStatus({ type: 'error', message: 'Failed to sync data from some routers' });
@@ -51,6 +56,52 @@ export function Customers() {
             setSyncLoading(false);
             setTimeout(() => setSyncStatus(null), 3000);
         }
+    };
+
+    const handleBulkDelete = async () => {
+        const ids = Array.from(selectedCrmIds);
+        if (ids.length === 0) return;
+        if (!confirm(`Hapus ${ids.length} data customer dari database aplikasi? Data di Mikrotik TIDAK akan terhapus.`)) return;
+
+        setIsBulkDeleting(true);
+        try {
+            const res = await fetch('/api/customers/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customerIds: ids })
+            });
+            const result = await res.json();
+            if (result.success) {
+                setSyncStatus({ type: 'success', message: result.message });
+                setSelectedCrmIds(new Set());
+                refreshCustomers(true);
+            } else {
+                setSyncStatus({ type: 'error', message: result.error || 'Bulk delete failed' });
+            }
+        } catch (e: any) {
+            setSyncStatus({ type: 'error', message: `Error: ${e.message}` });
+        } finally {
+            setIsBulkDeleting(false);
+            setTimeout(() => setSyncStatus(null), 4000);
+        }
+    };
+
+    const handleSelectAll = (checked: boolean) => {
+        if (checked) {
+            const ids = paginatedCustomers
+                .filter(c => c.crmId)
+                .map(c => c.crmId as string);
+            setSelectedCrmIds(new Set(ids));
+        } else {
+            setSelectedCrmIds(new Set());
+        }
+    };
+
+    const handleSelectOne = (crmId: string, checked: boolean) => {
+        const next = new Set(selectedCrmIds);
+        if (checked) next.add(crmId);
+        else next.delete(crmId);
+        setSelectedCrmIds(next);
     };
 
     // Calculate unique profiles based on current server filter
@@ -358,7 +409,7 @@ export function Customers() {
                         value={serverFilter}
                         onChange={(val) => {
                             setServerFilter(val);
-                            setProfileFilter('all'); // Reset profile filter when server changes
+                            setProfileFilter('all');
                         }}
                         options={[
                             { label: 'All Servers', value: 'all' },
@@ -381,12 +432,54 @@ export function Customers() {
                 </div>
             </div>
 
+            {/* Bulk Action Bar */}
+            {selectedCrmIds.size > 0 && (
+                <div className="p-4 bg-slate-900 text-white rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 fade-in duration-200">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-white/10 px-3 py-1 rounded-md text-sm font-medium">
+                            {selectedCrmIds.size} dipilih
+                        </div>
+                        <span className="text-sm text-slate-400 border-l border-white/20 pl-3">
+                            Hanya data di aplikasi yang akan dihapus, akun di Mikrotik tidak berubah.
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setSelectedCrmIds(new Set())}
+                            className="px-3 py-1.5 text-sm text-slate-300 hover:text-white transition-colors"
+                        >
+                            Batal
+                        </button>
+                        <button
+                            onClick={handleBulkDelete}
+                            disabled={isBulkDeleting}
+                            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                        >
+                            {isBulkDeleting
+                                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                : <Trash2 className="w-4 h-4" />
+                            }
+                            Hapus dari Aplikasi
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Table */}
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
                 <div className="overflow-x-auto overflow-y-hidden rounded-t-xl">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
+                                <th className="px-4 py-3 w-[40px]">
+                                    <input
+                                        type="checkbox"
+                                        className="rounded border-slate-300"
+                                        checked={paginatedCustomers.filter(c => c.crmId).length > 0 && paginatedCustomers.filter(c => c.crmId).every(c => selectedCrmIds.has(c.crmId as string))}
+                                        onChange={e => handleSelectAll(e.target.checked)}
+                                        title="Pilih semua di halaman ini"
+                                    />
+                                </th>
                                 {[
                                     { label: 'Username', key: 'name' },
                                     { label: 'Real Name', key: 'realName' },
@@ -417,13 +510,25 @@ export function Customers() {
                         <tbody className="divide-y divide-slate-100">
                             {filteredAndSortedCustomers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={9} className="px-6 py-8 text-center text-slate-400">
+                                    <td colSpan={11} className="px-6 py-8 text-center text-slate-400">
                                         No customers found matching your filters.
                                     </td>
                                 </tr>
                             ) : (
                                 paginatedCustomers.map((customer) => (
-                                    <tr key={`${customer.serverId}-${customer.name}`} className="hover:bg-slate-50/50 group">
+                                    <tr key={`${customer.serverId}-${customer.name}`} className={cn("hover:bg-slate-50/50 group", customer.crmId && selectedCrmIds.has(customer.crmId) && "bg-blue-50/50")}>
+                                        <td className="px-4 py-3 w-[40px]">
+                                            {customer.crmId ? (
+                                                <input
+                                                    type="checkbox"
+                                                    className="rounded border-slate-300"
+                                                    checked={selectedCrmIds.has(customer.crmId)}
+                                                    onChange={e => handleSelectOne(customer.crmId as string, e.target.checked)}
+                                                />
+                                            ) : (
+                                                <span title="Belum tersimpan di DB aplikasi" className="block w-4 h-4 rounded border border-dashed border-slate-300" />
+                                            )}
+                                        </td>
                                         <td className="px-6 py-3 font-medium text-slate-900">
                                             {customer.name}
                                         </td>

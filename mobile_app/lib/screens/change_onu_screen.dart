@@ -22,6 +22,23 @@ class _ChangeOnuScreenState extends State<ChangeOnuScreen> {
 
   String _searchOld = '';
   String _searchNew = '';
+  List<dynamic> _logs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchLogs();
+  }
+
+  Future<void> _fetchLogs() async {
+    try {
+      final api = ApiService();
+      final List<dynamic> data = await api.get('/mikrotik/onu-logs');
+      setState(() => _logs = data);
+    } catch (e) {
+      print('Error fetching logs: $e');
+    }
+  }
 
   Future<void> _fetchSecrets() async {
     if (_selectedServerId == null) return;
@@ -150,6 +167,7 @@ class _ChangeOnuScreenState extends State<ChangeOnuScreen> {
           _searchNew = '';
         });
         _fetchSecrets(); // Refresh list
+        _fetchLogs(); // Refresh logs
       } else {
         throw Exception(res['error'] ?? 'Unknown error');
       }
@@ -278,11 +296,77 @@ class _ChangeOnuScreenState extends State<ChangeOnuScreen> {
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                       : const Text('APPLY CHANGE ONU', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 32),
+
+                  _buildSectionHeader('MIGRATION RULES'),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.blue.shade100),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildRuleItem('Target device will receive Profile & Comment from Old Device.'),
+                        _buildRuleItem('Old Device profile will be set to "BELUM AKTIF".'),
+                        _buildRuleItem('Customer metadata (Real Name, etc) will be migrated.'),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+                  _buildSectionHeader('RECENT CHANGES'),
+                  const SizedBox(height: 8),
+                  _logs.isEmpty
+                      ? Center(child: Text('No history available', style: TextStyle(fontSize: 12, color: Colors.grey.shade400)))
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _logs.length,
+                          itemBuilder: (ctx, index) {
+                            final log = _logs[index];
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              child: ListTile(
+                                dense: true,
+                                title: Row(
+                                  children: [
+                                    Text(log['old_username'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                    const Icon(Icons.arrow_forward, size: 12, color: Colors.grey),
+                                    Text(log['new_username'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green)),
+                                  ],
+                                ),
+                                subtitle: Text(
+                                  '${log['Server']?['name'] ?? ''} • ${log['timestamp'] != null ? log['timestamp'].toString().split('T')[0] : ''} • by ${log['user_name'] ?? ''}',
+                                  style: const TextStyle(fontSize: 10),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRuleItem(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.check_circle, size: 14, color: Colors.blue),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 11, color: Colors.blue.shade900))),
         ],
       ),
     );

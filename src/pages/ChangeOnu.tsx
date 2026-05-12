@@ -138,7 +138,7 @@ export function ChangeOnu() {
     );
 
     return (
-        <div className="p-8 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
+        <div className="p-8 space-y-8 animate-in fade-in duration-500">
             <div className="flex flex-col gap-2">
                 <h1 className="text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
                     <RefreshCw className="w-8 h-8 text-primary animate-spin-slow" />
@@ -330,7 +330,7 @@ export function ChangeOnu() {
                                 logs.map(log => (
                                     <div key={log.id} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800 relative group">
                                         <div className="text-[10px] text-slate-400 mb-1 flex justify-between">
-                                            <span>{new Date(log.timestamp).toLocaleString('id-ID')}</span>
+                                            <span>{log.timestamp ? new Date(log.timestamp).toLocaleString('id-ID') : '-'}</span>
                                             <span className="font-medium text-primary uppercase">{log.Server?.name}</span>
                                         </div>
                                         <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">

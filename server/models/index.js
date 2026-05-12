@@ -22,7 +22,8 @@ export const Server = sequelize.define('Server', {
 export const Customer = sequelize.define('Customer', {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     mikrotik_name: { type: DataTypes.STRING, allowNull: false }, // Username in PPPoE
-    name: { type: DataTypes.STRING, allowNull: true }, // Real Name
+    name: { type: DataTypes.STRING, allowNull: true }, // Comment/Customer Name
+    real_name: { type: DataTypes.STRING, allowNull: true }, // Actual Person Name
     comment: { type: DataTypes.STRING, allowNull: true }, // Mikrotik Comment
     phone_number: { type: DataTypes.STRING, allowNull: true },
     profile: { type: DataTypes.STRING, allowNull: true },
@@ -132,43 +133,13 @@ export const initDB = async () => {
         // We handle critical schema updates manually below or via scripts.
         await sequelize.sync({ alter: false });
 
-        // [MIGRATION-V3] Standardize all existing mikrotik_names to lowercase for consistency
-        // This is critical for Linux-based production servers like aaPanel.
-        console.log('[Database] Running mikrotik_name standardization (V3)...');
-        const customersToFix = await Customer.findAll();
-        for (const c of customersToFix) {
-            const currentName = c.mikrotik_name || '';
-            const lowerName = currentName.toLowerCase().trim();
-            if (currentName !== lowerName) {
-                await c.update({ mikrotik_name: lowerName });
-                console.log(`[Database] Migrated: ${currentName} -> ${lowerName}`);
-            }
-        }
-        console.log('[Database] Standardization complete.');
-
-        // Explicitly check for sub_area_id column in Customers
+        // Explicitly check for missing columns in Customers and Servers before any model queries
         const tableInfo = await sequelize.getQueryInterface().describeTable('Customers');
+        
         if (!tableInfo.sub_area_id) {
             console.log('[Database] Adding missing column sub_area_id to Customers...');
             await sequelize.getQueryInterface().addColumn('Customers', 'sub_area_id', {
                 type: DataTypes.STRING,
-                allowNull: true
-            });
-        }
-
-        // Check for Server lat/lng
-        const serverMapInfo = await sequelize.getQueryInterface().describeTable('Servers');
-        if (!serverMapInfo.lat) {
-            console.log('[Database] Adding missing column lat to Servers...');
-            await sequelize.getQueryInterface().addColumn('Servers', 'lat', {
-                type: DataTypes.DECIMAL(10, 6),
-                allowNull: true
-            });
-        }
-        if (!serverMapInfo.lng) {
-            console.log('[Database] Adding missing column lng to Servers...');
-            await sequelize.getQueryInterface().addColumn('Servers', 'lng', {
-                type: DataTypes.DECIMAL(10, 6),
                 allowNull: true
             });
         }
@@ -254,7 +225,30 @@ export const initDB = async () => {
             });
         }
 
+        if (!tableInfo.real_name) {
+            console.log('[Database] Adding missing column real_name to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'real_name', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
         const serverTableInfo = await sequelize.getQueryInterface().describeTable('Servers');
+        if (!serverTableInfo.lat) {
+            console.log('[Database] Adding missing column lat to Servers...');
+            await sequelize.getQueryInterface().addColumn('Servers', 'lat', {
+                type: DataTypes.DECIMAL(10, 6),
+                allowNull: true
+            });
+        }
+        if (!serverTableInfo.lng) {
+            console.log('[Database] Adding missing column lng to Servers...');
+            await sequelize.getQueryInterface().addColumn('Servers', 'lng', {
+                type: DataTypes.DECIMAL(10, 6),
+                allowNull: true
+            });
+        }
+
         if (!serverTableInfo.installation_costs) {
             console.log('[Database] Adding missing column installation_costs to Servers...');
             await sequelize.getQueryInterface().addColumn('Servers', 'installation_costs', {
@@ -263,6 +257,20 @@ export const initDB = async () => {
                 defaultValue: []
             });
         }
+
+        // [MIGRATION-V3] Standardize all existing mikrotik_names to lowercase for consistency
+        // This is critical for Linux-based production servers like aaPanel.
+        console.log('[Database] Running mikrotik_name standardization (V3)...');
+        const customersToFix = await Customer.findAll();
+        for (const c of customersToFix) {
+            const currentName = c.mikrotik_name || '';
+            const lowerName = currentName.toLowerCase().trim();
+            if (currentName !== lowerName) {
+                await c.update({ mikrotik_name: lowerName });
+                console.log(`[Database] Migrated: ${currentName} -> ${lowerName}`);
+            }
+        }
+        console.log('[Database] Standardization complete.');
 
         console.log('[Database] Models synchronized.');
         

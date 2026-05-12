@@ -70,6 +70,7 @@ class _RemoteDeviceScreenState extends State<RemoteDeviceScreen> {
   }
 
   Future<void> _showEditDialog(RemoteDevice device) async {
+    final commentController = TextEditingController(text: device.comment);
     final dstPortController = TextEditingController(text: device.dstPort);
     final toAddressController = TextEditingController(text: device.toAddress);
     final toPortsController = TextEditingController(text: device.toPorts);
@@ -82,6 +83,11 @@ class _RemoteDeviceScreenState extends State<RemoteDeviceScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              TextField(
+                controller: commentController,
+                decoration: const InputDecoration(labelText: 'Name / Comment', hintText: 'e.g. ONU-1-Name'),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: dstPortController,
                 decoration: const InputDecoration(labelText: 'Public Port (dst-port)', hintText: 'e.g. 8081'),
@@ -114,6 +120,7 @@ class _RemoteDeviceScreenState extends State<RemoteDeviceScreen> {
 
     if (result == true) {
       await _updateDevice(device, {
+        'comment': commentController.text,
         'dstPort': dstPortController.text,
         'toAddress': toAddressController.text,
         'toPorts': toPortsController.text,

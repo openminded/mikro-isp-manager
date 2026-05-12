@@ -512,13 +512,14 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                         });
                     } else {
                         // Create new customer from Mikrotik
+                        // username = PPP Secret name, comment = PPP Secret comment, real_name = from app DB
                         await Customer.create({
                             server_id: server.id,
-                            mikrotik_name: item.name,
+                            mikrotik_name: item.name,   // PPP Secret: name
+                            name: item.name,             // store ppp secret name (username) here too
                             profile: item.profile,
                             status: status,
-                            comment: item.comment || '',
-                            name: item.comment || item.name // fallback for 'name' col
+                            comment: item.comment || '' // PPP Secret: comment
                         });
                     }
                 } catch (err) {
@@ -811,6 +812,253 @@ app.delete('/api/mikrotik/nat', async (req, res) => {
     }
 });
 
+// --- Mikrotik Backup / Restore ---
+
+// List backup files on Mikrotik
+app.get('/api/mikrotik/backup/files', async (req, res) => {
+    const { serverId } = req.query;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const client = new RouterOSAPI({
+            host: server.ip, port: server.port || 8728,
+            user: server.username, password: server.password,
+            keepalive: false, timeout: 20
+        });
+        client.on('error', (err) => console.error('[Backup List] Error:', err.message));
+
+        await client.connect();
+        const files = await client.write(['/file/print']);
+        await client.close();
+
+        // Filter backup files (.backup extension)
+        const backupFiles = files.filter(f => f.name && f.name.endsWith('.backup'));
+        res.json(backupFiles);
+    } catch (e) {
+        console.error('[Backup List] Failed:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Trigger backup now on Mikrotik
+app.post('/api/mikrotik/backup/create', async (req, res) => {
+    const { serverId, backupName } = req.body;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const name = backupName || `backup-${server.name.replace(/\s+/g, '_')}-${timestamp}`;
+
+        const client = new RouterOSAPI({
+            host: server.ip, port: server.port || 8728,
+            user: server.username, password: server.password,
+            keepalive: false, timeout: 60
+        });
+        client.on('error', (err) => console.error('[Backup Create] Error:', err.message));
+
+        await client.connect();
+        // Create backup with no password (or with password if needed)
+        await client.write(['/system/backup/save', `=name=${name}`, '=dont-encrypt=yes']);
+        await client.close();
+
+        await logActivity(req, 'MIKROTIK_BACKUP', { serverId, server: server.name, backupName: name });
+
+        res.json({ success: true, fileName: `${name}.backup`, message: `Backup created: ${name}.backup` });
+    } catch (e) {
+        console.error('[Backup Create] Failed:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Download a backup file from Mikrotik (streams it to client)
+app.get('/api/mikrotik/backup/download', async (req, res) => {
+    const { serverId, fileName } = req.query;
+    if (!serverId || !fileName) return res.status(400).json({ error: 'Missing serverId or fileName' });
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        // Use FTP to download the backup file since RouterOS API doesn't support file download directly
+        // We'll use a workaround: read the file via /tool/fetch or direct FTP
+        // Since node-routeros doesn't support binary transfer, we use node's net module with FTP
+        
+        const net = await import('net');
+        
+        const ftpDownload = () => new Promise((resolve, reject) => {
+            const chunks = [];
+            let dataSocket = null;
+            const controlSocket = new net.default.Socket();
+
+            const send = (cmd) => {
+                console.log(`[FTP] C: ${cmd}`);
+                controlSocket.write(cmd + '\r\n');
+            };
+
+            let step = 0;
+            let passivePort = null;
+            let passiveHost = null;
+
+            controlSocket.on('data', async (data) => {
+                const lines = data.toString().split('\r\n').filter(Boolean);
+                for (const line of lines) {
+                    console.log(`[FTP] S: ${line}`);
+                    const code = parseInt(line.substring(0, 3));
+
+                    if (code === 220 && step === 0) { step++; send(`USER ${server.username}`); }
+                    else if (code === 331 && step === 1) { step++; send(`PASS ${server.password}`); }
+                    else if (code === 230 && step === 2) { step++; send('TYPE I'); }
+                    else if (code === 200 && step === 3) { step++; send('PASV'); }
+                    else if (code === 227 && step === 4) {
+                        step++;
+                        const match = line.match(/\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
+                        if (!match) { reject(new Error('PASV parse failed')); return; }
+                        passiveHost = `${match[1]}.${match[2]}.${match[3]}.${match[4]}`;
+                        passivePort = parseInt(match[5]) * 256 + parseInt(match[6]);
+
+                        dataSocket = new net.default.Socket();
+                        dataSocket.connect(passivePort, passiveHost, () => {
+                            send(`RETR ${fileName}`);
+                        });
+                        dataSocket.on('data', (chunk) => chunks.push(chunk));
+                        dataSocket.on('error', (err) => reject(err));
+                    }
+                    else if (code === 150 || code === 125) { /* transfer starting */ }
+                    else if (code === 226) {
+                        // Transfer complete
+                        if (dataSocket) dataSocket.destroy();
+                        send('QUIT');
+                        resolve(Buffer.concat(chunks));
+                    }
+                    else if (code >= 400) {
+                        reject(new Error(`FTP Error: ${line}`));
+                    }
+                }
+            });
+
+            controlSocket.on('error', (err) => reject(err));
+            controlSocket.connect(21, server.ip);
+        });
+
+        const fileBuffer = await ftpDownload();
+        
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Length', fileBuffer.length);
+        res.send(fileBuffer);
+
+        await logActivity(req, 'MIKROTIK_BACKUP_DOWNLOAD', { serverId, server: server.name, fileName });
+
+    } catch (e) {
+        console.error('[Backup Download] Failed:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Upload backup file and restore on Mikrotik
+app.post('/api/mikrotik/backup/restore', upload.single('backupFile'), async (req, res) => {
+    const { serverId } = req.body;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+    if (!req.file) return res.status(400).json({ error: 'No backup file uploaded' });
+
+    const uploadedPath = req.file.path;
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) {
+            fs.unlinkSync(uploadedPath);
+            return res.status(404).json({ error: 'Server not found' });
+        }
+
+        const fileName = req.file.originalname;
+        const fileBuffer = fs.readFileSync(uploadedPath);
+
+        // Upload file to Mikrotik via FTP, then trigger restore
+        const net = await import('net');
+        
+        const ftpUpload = () => new Promise((resolve, reject) => {
+            const controlSocket = new net.default.Socket();
+            let dataSocket = null;
+            let step = 0;
+
+            const send = (cmd) => {
+                console.log(`[FTP Upload] C: ${cmd}`);
+                controlSocket.write(cmd + '\r\n');
+            };
+
+            controlSocket.on('data', (data) => {
+                const lines = data.toString().split('\r\n').filter(Boolean);
+                for (const line of lines) {
+                    console.log(`[FTP Upload] S: ${line}`);
+                    const code = parseInt(line.substring(0, 3));
+
+                    if (code === 220 && step === 0) { step++; send(`USER ${server.username}`); }
+                    else if (code === 331 && step === 1) { step++; send(`PASS ${server.password}`); }
+                    else if (code === 230 && step === 2) { step++; send('TYPE I'); }
+                    else if (code === 200 && step === 3) { step++; send('PASV'); }
+                    else if (code === 227 && step === 4) {
+                        step++;
+                        const match = line.match(/\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
+                        if (!match) { reject(new Error('PASV parse failed')); return; }
+                        const host = `${match[1]}.${match[2]}.${match[3]}.${match[4]}`;
+                        const port = parseInt(match[5]) * 256 + parseInt(match[6]);
+
+                        dataSocket = new net.default.Socket();
+                        dataSocket.connect(port, host, () => {
+                            dataSocket.write(fileBuffer);
+                            dataSocket.end();
+                            send(`STOR ${fileName}`);
+                        });
+                        dataSocket.on('error', (err) => reject(err));
+                    }
+                    else if (code === 150 || code === 125) { /* upload starting */ }
+                    else if (code === 226) {
+                        send('QUIT');
+                        resolve(true);
+                    }
+                    else if (code >= 400) {
+                        reject(new Error(`FTP Error: ${line}`));
+                    }
+                }
+            });
+
+            controlSocket.on('error', (err) => reject(err));
+            controlSocket.connect(21, server.ip);
+        });
+
+        await ftpUpload();
+        fs.unlinkSync(uploadedPath);
+
+        // Now trigger restore on Mikrotik via API
+        const restoreName = fileName.replace('.backup', '');
+        const client = new RouterOSAPI({
+            host: server.ip, port: server.port || 8728,
+            user: server.username, password: server.password,
+            keepalive: false, timeout: 60
+        });
+        client.on('error', (err) => console.error('[Backup Restore] Error:', err.message));
+
+        await client.connect();
+        await client.write(['/system/backup/load', `=name=${restoreName}`, '=dont-encrypt=yes']);
+        // Note: router will reboot after this, connection will drop
+        try { await client.close(); } catch (_) {}
+
+        await logActivity(req, 'MIKROTIK_RESTORE', { serverId, server: server.name, fileName });
+
+        res.json({ success: true, message: `Restore initiated from ${fileName}. Router will reboot.` });
+    } catch (e) {
+        console.error('[Backup Restore] Failed:', e.message);
+        try { if (fs.existsSync(uploadedPath)) fs.unlinkSync(uploadedPath); } catch (_) {}
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- ONU Change Endpoints ---
 
 // List PPP Secrets for a server
@@ -832,6 +1080,41 @@ app.get('/api/mikrotik/secrets/:serverId', async (req, res) => {
 
         res.json(secrets);
     } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+// Delete a backup file from Mikrotik via FTP
+app.delete('/api/mikrotik/backup/delete', async (req, res) => {
+    const { serverId, fileName } = req.body;
+    if (!serverId || !fileName) return res.status(400).json({ error: 'Missing serverId or fileName' });
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+        const net = await import('net');
+        const ftpDelete = () => new Promise((resolve, reject) => {
+            const controlSocket = new net.default.Socket();
+            let step = 0;
+            const send = (cmd) => { controlSocket.write(cmd + '\r\n'); };
+            controlSocket.on('data', (data) => {
+                const lines = data.toString().split('\r\n').filter(Boolean);
+                for (const line of lines) {
+                    const code = parseInt(line.substring(0, 3));
+                    if (code === 220 && step === 0) { step++; send(`USER ${server.username}`); }
+                    else if (code === 331 && step === 1) { step++; send(`PASS ${server.password}`); }
+                    else if (code === 230 && step === 2) { step++; send('TYPE I'); }
+                    else if (code === 200 && step === 3) { step++; send(`DELE ${fileName}`); }
+                    else if (code === 250) { resolve(true); }
+                    else if (code >= 400) { reject(new Error(`FTP Error: ${line}`)); }
+                }
+            });
+            controlSocket.on('error', (err) => reject(err));
+            controlSocket.connect(21, server.ip);
+        });
+        await ftpDelete();
+        await logActivity(req, 'MIKROTIK_BACKUP_DELETE', { serverId, server: server.name, fileName });
+        res.json({ success: true, message: `Backup ${fileName} deleted` });
+    } catch (e) {
+        console.error('[Backup Delete] Failed:', e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -974,15 +1257,45 @@ app.post('/api/mikrotik/change-onu', async (req, res) => {
             user_name: user?.username || 'Unknown'
         });
 
-        // 7. Update SQL Customer table if exists (Sync the mikrotik_name)
-        const customer = await Customer.findOne({ 
+        // 7. Update SQL Customer table
+        // We find the source customer (old device)
+        const oldCustomer = await Customer.findOne({ 
             where: { 
                 server_id: serverId, 
                 mikrotik_name: String(oldUsername).toLowerCase().trim() 
             } 
         });
-        if (customer) {
-            await customer.update({ mikrotik_name: String(newUsername).toLowerCase().trim() });
+
+        if (oldCustomer) {
+            const newLower = String(newUsername).toLowerCase().trim();
+            
+            // Check if there's already a record for the new username (e.g. from a previous sync)
+            const existingNew = await Customer.findOne({
+                where: { server_id: serverId, mikrotik_name: newLower }
+            });
+
+            if (existingNew && existingNew.id !== oldCustomer.id) {
+                console.log(`[Change ONU] Deleting existing placeholder for ${newLower} (ID: ${existingNew.id})`);
+                await existingNew.destroy();
+            }
+
+            // Rename the old record to the new username
+            await oldCustomer.update({ mikrotik_name: newLower });
+
+            // 8. Update JSON Cache (Metadata)
+            // This is crucial for real_name, address, etc. if they are stored in JSON
+            const oldKey = `${String(serverId).toLowerCase()}-${String(oldUsername).toLowerCase().trim()}`;
+            const newKey = `${String(serverId).toLowerCase()}-${newLower}`;
+
+            if (CACHE.customers && CACHE.customers[oldKey]) {
+                console.log(`[Change ONU] Moving JSON metadata from ${oldKey} to ${newKey}`);
+                CACHE.customers[newKey] = {
+                    ...(CACHE.customers[newKey] || {}),
+                    ...CACHE.customers[oldKey]
+                };
+                delete CACHE.customers[oldKey];
+                queueWrite('customers', CACHE.customers);
+            }
         }
 
         logActivity(req, 'CHANGE_ONU', `Changed ONU for ${oldUsername} to ${newUsername} on server ${server.name}`);
@@ -1211,6 +1524,27 @@ app.post('/api/customers/meta', async (req, res) => {
     }
 });
 
+// Bulk Delete Customers (App DB only — does NOT touch Mikrotik)
+// Deletes by crmId (SQL UUID). Cascade removes linked invoices & payments.
+app.post('/api/customers/bulk-delete', async (req, res) => {
+    const { customerIds } = req.body;
+    if (!Array.isArray(customerIds) || customerIds.length === 0) {
+        return res.status(400).json({ error: 'Missing or empty customerIds array' });
+    }
+
+    try {
+        const deleted = await Customer.destroy({
+            where: { id: { [Op.in]: customerIds } }
+        });
+
+        logActivity(req, 'BULK_DELETE_CUSTOMERS', `Deleted ${deleted} customer records from app DB (IDs: ${customerIds.join(', ')})`);
+        res.json({ success: true, deleted, message: `${deleted} customer record(s) deleted from app database.` });
+    } catch (e) {
+        console.error('[BulkDelete] Customer error:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- Billing Endpoints ---
 
 // Get Invoices (Optional filter by customer)
@@ -1223,6 +1557,8 @@ app.get('/api/billing/invoices', async (req, res) => {
             search,
             period,
             serverId,
+            subAreaId,
+            paymentDate,
             page = 1,
             limit = 50,
             sortBy,
@@ -1239,20 +1575,30 @@ app.get('/api/billing/invoices', async (req, res) => {
         // Invoices also store server_id, so we can filter directly or via Customer
         if (serverId) whereInvoice.server_id = serverId;
 
-        // Customer Search Filter
         const includeCustomer = {
             model: Customer,
-            required: true // Join is required if we are searching
+            required: true,
+            where: {},
+            include: [{ model: Server, required: false }] // Include server info for display
         };
+
+        if (subAreaId) {
+            whereInvoice['$Customer.sub_area_id$'] = subAreaId;
+        }
 
         if (search) {
             whereInvoice[Op.or] = [
+                { '$Customer.mikrotik_name$': { [Op.like]: `%${search}%` } }, // PPP Secret name (username)
+                { '$Customer.comment$': { [Op.like]: `%${search}%` } },        // PPP Secret comment (customer label)
+                { '$Customer.real_name$': { [Op.like]: `%${search}%` } },      // Real name from app DB
                 { '$Customer.name$': { [Op.like]: `%${search}%` } },
-                { '$Customer.mikrotik_name$': { [Op.like]: `%${search}%` } },
                 { period: { [Op.like]: `%${search}%` } },
-                { status: { [Op.like]: `%${search}%` } },
-                { amount: { [Op.like]: `%${search}%` } }
+                { status: { [Op.like]: `%${search}%` } }
             ];
+            
+            if (!isNaN(search) && String(search).trim() !== '') {
+                whereInvoice[Op.or].push({ amount: search });
+            }
         }
 
         // Sorting Logic
@@ -1270,12 +1616,29 @@ app.get('/api/billing/invoices', async (req, res) => {
             }
         }
 
+        const includePayment = { model: Payment, required: false };
+        if (paymentDate) {
+            // paymentDate is expected as YYYY-MM-DD
+            const startDate = new Date(paymentDate);
+            const endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + 1);
+
+            includePayment.where = {
+                transaction_date: {
+                    [Op.gte]: startDate,
+                    [Op.lt]: endDate
+                }
+            };
+            includePayment.required = true; // Must have payment on this date to show up
+        }
+
         const { count, rows } = await Invoice.findAndCountAll({
             where: whereInvoice,
-            include: [includeCustomer, { model: Payment, required: false }],
+            include: [includeCustomer, includePayment],
             order: orderClause,
             limit: Number(limit),
-            offset: Number(offset)
+            offset: Number(offset),
+            subQuery: false
         });
 
         res.json({
@@ -1457,6 +1820,8 @@ app.get('/api/billing/payments', async (req, res) => {
             search,
             period,
             serverId,
+            subAreaId,
+            paymentDate,
             page = 1,
             limit = 50,
             sortBy,
@@ -1472,16 +1837,34 @@ app.get('/api/billing/payments', async (req, res) => {
 
         // Build Customer Filters (to search by name)
         const whereCustomer = {};
+        if (subAreaId) {
+            wherePayment['$Invoice.Customer.sub_area_id$'] = subAreaId;
+        }
 
         const wherePayment = {};
+        if (paymentDate) {
+            const startDate = new Date(paymentDate);
+            const endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + 1);
+            wherePayment.transaction_date = {
+                [Op.gte]: startDate,
+                [Op.lt]: endDate
+            };
+        }
+
         if (search) {
             wherePayment[Op.or] = [
-                { method: { [Op.like]: `%${search}%` } },
-                { amount: { [Op.like]: `%${search}%` } },
-                { '$Invoice.period$': { [Op.like]: `%${search}%` } },
+                { '$Invoice.Customer.mikrotik_name$': { [Op.like]: `%${search}%` } }, // PPP Secret: name (username)
+                { '$Invoice.Customer.comment$': { [Op.like]: `%${search}%` } },        // PPP Secret: comment (customer label)
+                { '$Invoice.Customer.real_name$': { [Op.like]: `%${search}%` } },      // Real name dari DB app
                 { '$Invoice.Customer.name$': { [Op.like]: `%${search}%` } },
-                { '$Invoice.Customer.mikrotik_name$': { [Op.like]: `%${search}%` } }
+                { '$Invoice.period$': { [Op.like]: `%${search}%` } },
+                { method: { [Op.like]: `%${search}%` } }
             ];
+            
+            if (!isNaN(search) && String(search).trim() !== '') {
+                wherePayment[Op.or].push({ amount: search });
+            }
         }
 
         let orderClause = [['transaction_date', 'DESC']];
@@ -1501,25 +1884,24 @@ app.get('/api/billing/payments', async (req, res) => {
         }
 
         const { count, rows } = await Payment.findAndCountAll({
-            where: Object.keys(wherePayment).length > 0 ? wherePayment : undefined,
+            where: wherePayment,
             include: [
                 {
                     model: Invoice,
-                    where: Object.keys(whereInvoice).length > 0 ? whereInvoice : undefined,
                     required: true,
-                    include: [
-                        {
-                            model: Customer,
-                            where: Object.keys(whereCustomer).length > 0 ? whereCustomer : undefined,
-                            required: true,
-                            include: [Server]
-                        }
-                    ]
+                    where: whereInvoice,
+                    include: [{
+                        model: Customer,
+                        required: true,
+                        where: whereCustomer,
+                        include: [Server]
+                    }]
                 }
             ],
             order: orderClause,
             limit: Number(limit) > 0 ? Number(limit) : undefined,
-            offset: Number(offset) > 0 ? Number(offset) : 0
+            offset: Number(offset) > 0 ? Number(offset) : 0,
+            subQuery: false
         });
 
         res.json({
@@ -1770,7 +2152,7 @@ app.post('/api/billing/bulk-block', async (req, res) => {
 
 // Create Payment (Pay Invoice)
 app.post('/api/billing/pay', upload.single('proof'), async (req, res) => {
-    const { invoiceId, amount, method, user } = req.body;
+    const { invoiceId, amount, method, user, paymentDate } = req.body;
     const proof = req.file ? `/uploads/${req.file.filename}` : null;
 
     if (!invoiceId || !amount) return res.status(400).json({ error: 'Missing data' });
@@ -1783,21 +2165,25 @@ app.post('/api/billing/pay', upload.single('proof'), async (req, res) => {
         invoice.status = 'PAID';
         await invoice.save();
 
+        const transactionDate = paymentDate ? new Date(paymentDate) : new Date();
+
         // Create Payment Record
         const payment = await Payment.create({
             invoice_id: invoiceId,
             amount,
             method,
             proof_url: proof,
-            verified_at: new Date()
+            verified_at: transactionDate,
+            transaction_date: transactionDate
         });
 
         // Log History
         await InvoiceHistory.create({
-            invoice_id: invoice.id,
-            user_name: user?.username || user || 'Unknown',
+            invoice_id: invoiceId,
+            user_name: user || 'System',
             action: 'PAYMENT',
-            details: `Payment of ${amount} via ${method}.`
+            details: `Payment of Rp${amount} via ${method}`,
+            timestamp: transactionDate
         });
 
         logActivity(req, 'PAY_INVOICE', `Paid invoice ${invoiceId} - Amount: ${amount}`);
@@ -1809,7 +2195,14 @@ app.post('/api/billing/pay', upload.single('proof'), async (req, res) => {
 });
 
 // Generate Invoices Manual Trigger
+let isGeneratingInvoices = false;
+
 app.post('/api/billing/generate', async (req, res) => {
+    if (isGeneratingInvoices) {
+        return res.status(429).json({ error: 'Invoice generation is already in progress. Please wait.' });
+    }
+    isGeneratingInvoices = true;
+    
     const { serverId, month: customMonth, year: customYear } = req.body || {};
     // This would typically be a cron job
     try {
@@ -1862,6 +2255,14 @@ app.post('/api/billing/generate', async (req, res) => {
 
             const secret = serverSecretsMap[customer.server_id][customer.mikrotik_name];
             const meta = customersMetaDB[`${customer.server_id}-${customer.mikrotik_name}`] || {};
+
+            // Rule 3: Skip if mikrotik_name does NOT exist in the Mikrotik cache (phantom/stale DB record)
+            // Only enforce this check if the cache is loaded (non-empty)
+            if (Object.keys(serverSecretsMap[customer.server_id]).length > 0 && !secret) {
+                console.log(`[Invoice] Skipped ${customer.mikrotik_name} (Not found in Mikrotik cache — possible stale/phantom record)`);
+                continue;
+            }
+
             // Check cache, then customer object, then metadata file
             const lastLogout = (secret && secret['last-logged-out']) || customer.last_logout || meta['last-logged-out'];
 
@@ -1874,11 +2275,19 @@ app.post('/api/billing/generate', async (req, res) => {
                 }
             }
 
-            // Check if a VALID invoice exists (ignore INVALID/CANCELLED)
+
+            // Check if a VALID invoice exists (ignore INVALID/CANCELLED) for this mikrotik_name
             const exists = await Invoice.findOne({
+                include: [{
+                    model: Customer,
+                    where: {
+                        mikrotik_name: customer.mikrotik_name,
+                        server_id: customer.server_id
+                    }
+                }],
                 where: {
-                    customer_id: customer.id,
-                    period
+                    period,
+                    status: { [Op.notIn]: ['INVALID', 'CANCELLED'] }
                 }
             });
 
@@ -1919,6 +2328,8 @@ app.post('/api/billing/generate', async (req, res) => {
         res.json({ message: `Generated ${count} invoices.` });
     } catch (e) {
         res.status(500).json({ error: e.message });
+    } finally {
+        isGeneratingInvoices = false;
     }
 });
 

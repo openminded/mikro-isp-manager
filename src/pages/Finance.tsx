@@ -22,6 +22,8 @@ export function Finance() {
     const [historyLogs, setHistoryLogs] = useState<any[]>([]);
     const [editFormData, setEditFormData] = useState({ amount: '', due_date: '', status: '' });
     const [selectedAnalyticsGroup, setSelectedAnalyticsGroup] = useState<{ title: string, invoices: any[] } | null>(null);
+    const [isBulkMethodModalOpen, setIsBulkMethodModalOpen] = useState(false);
+    const [selectedBulkMethod, setSelectedBulkMethod] = useState('');
 
     // Grouping & Selection
     const [groupByServer, setGroupByServer] = useState(false);
@@ -394,6 +396,37 @@ export function Finance() {
         }
     };
 
+    const handleBulkMethodUpdate = async () => {
+        if (selectedIds.size === 0 || !selectedBulkMethod) return;
+        if (!confirm(`Are you sure you want to change payment method to ${selectedBulkMethod} for ${selectedIds.size} items?`)) return;
+
+        setIsLoading(true);
+        try {
+            const isRecap = activeTab === 'recap';
+            const payload = isRecap
+                ? { paymentIds: Array.from(selectedIds), method: selectedBulkMethod, user }
+                : { invoiceIds: Array.from(selectedIds), method: selectedBulkMethod, user };
+
+            const res = await fetch('/api/billing/bulk-method', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.success) {
+                setIsBulkMethodModalOpen(false);
+                setSelectedIds(new Set());
+                fetchInvoices();
+            } else {
+                alert('Update failed: ' + result.error);
+            }
+        } catch (e) {
+            alert('Failed to update payment methods');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const SkeletonRow = () => (
         <tr className="animate-pulse">
             {(user?.role === 'superadmin' || user?.role === 'admin') && <td className="px-4 py-4 w-[40px]"><div className="h-4 w-4 bg-slate-200 dark:bg-slate-700 rounded mx-auto"></div></td>}
@@ -660,6 +693,17 @@ export function Finance() {
                             <button onClick={handleBulkDelete} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-red-700">
                                 <Trash2 className="w-4 h-4" /> Delete Selected
                             </button>
+                            {user?.role === 'superadmin' && (activeTab === 'history' || activeTab === 'recap') && (
+                                <button
+                                    onClick={() => {
+                                        if (paymentMethodsList.length > 0) setSelectedBulkMethod(paymentMethodsList[0].id);
+                                        setIsBulkMethodModalOpen(true);
+                                    }}
+                                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                >
+                                    <Pencil className="w-4 h-4" /> Change Method
+                                </button>
+                            )}
                         </div>
                     </div>
                 )
@@ -1255,6 +1299,13 @@ export function Finance() {
                                                 )}
                                             </div>
                                         </th>
+                                        {activeTab === 'history' && (
+                                            <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white">
+                                                <div className="flex items-center gap-2">
+                                                    Method
+                                                </div>
+                                            </th>
+                                        )}
                                         <th className="px-6 py-4 font-semibold text-slate-900 dark:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" onClick={() => requestSort('status')}>
                                             <div className="flex items-center gap-2">
                                                 Status
@@ -1304,6 +1355,8 @@ export function Finance() {
                                                         subAreas={subAreas}
                                                         showNominal={showNominal}
                                                         showPaymentDate={activeTab === 'history'}
+                                                        showMethod={activeTab === 'history'}
+                                                        paymentMethodsList={paymentMethodsList}
                                                     />
                                                 ))}
                                             </React.Fragment>
@@ -1325,6 +1378,8 @@ export function Finance() {
                                                 subAreas={subAreas}
                                                 showNominal={showNominal}
                                                 showPaymentDate={activeTab === 'history'}
+                                                showMethod={activeTab === 'history'}
+                                                paymentMethodsList={paymentMethodsList}
                                             />
                                         ))
                                     )}
@@ -1333,7 +1388,7 @@ export function Finance() {
                         )}
                     </div>
                 </div>
-            )}v
+            )}
 
             {/* Pagination (Hide for Analytics) */}
             {activeTab !== 'analytics' && (
@@ -1705,11 +1760,53 @@ export function Finance() {
                     </div>
                 </div>
             )}
+            {/* Bulk Method Modal */}
+            {isBulkMethodModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl w-full max-w-sm overflow-hidden">
+                        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+                            <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Change Payment Method</h3>
+                            <button onClick={() => setIsBulkMethodModalOpen(false)} className="text-slate-500 hover:text-slate-700">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <p className="text-sm text-slate-500">
+                                Update payment method for {selectedIds.size} selected items.
+                            </p>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                    New Payment Method
+                                </label>
+                                <select
+                                    value={selectedBulkMethod}
+                                    onChange={(e) => setSelectedBulkMethod(e.target.value)}
+                                    className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                >
+                                    {paymentMethodsList.map(m => (
+                                        <option key={m.id} value={m.id}>
+                                            {m.name} ({m.type.replace('_', ' ')})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <button
+                                onClick={handleBulkMethodUpdate}
+                                disabled={isLoading}
+                                className="w-full py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {isLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <CheckCircle className="w-4 h-4" />}
+                                Update Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }
 
-function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete, isSuperAdmin, subAreas, showNominal, showPaymentDate }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void, isSuperAdmin?: boolean, subAreas?: any[], showNominal: boolean, showPaymentDate?: boolean }) {
+function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete, isSuperAdmin, subAreas, showNominal, showPaymentDate, showMethod, paymentMethodsList }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void, isSuperAdmin?: boolean, subAreas?: any[], showNominal: boolean, showPaymentDate?: boolean, showMethod?: boolean, paymentMethodsList?: any[] }) {
 
     return (
         <tr className={cn("hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors", selected && "bg-blue-50/50 dark:bg-blue-900/10")}>
@@ -1766,6 +1863,13 @@ function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect,
             <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
                 Rp {showNominal ? Number(invoice.amount).toLocaleString('id-ID') : 'xxx'}
             </td>
+            {showMethod && (
+                <td className="px-6 py-4">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 uppercase">
+                        {invoice.Payments?.[0]?.method ? (paymentMethodsList?.find((m: any) => m.id.toLowerCase() === invoice.Payments[0].method.toLowerCase())?.name || invoice.Payments[0].method) : '-'}
+                    </span>
+                </td>
+            )}
             <td className="px-6 py-4">
                 <span className={cn(
                     "px-2.5 py-1 rounded-full text-xs font-medium border",

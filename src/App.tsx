@@ -29,6 +29,8 @@ const Finance = lazy(() => import("./pages/Finance").then(m => ({ default: m.Fin
 const RemoteDevices = lazy(() => import("./pages/RemoteDevices").then(m => ({ default: m.RemoteDevices })));
 const ChangeOnu = lazy(() => import("./pages/ChangeOnu").then(m => ({ default: m.ChangeOnu })));
 const MikrotikBackup = lazy(() => import("./pages/MikrotikBackup").then(m => ({ default: m.MikrotikBackup })));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy").then(m => ({ default: m.PrivacyPolicy })));
+
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950">
@@ -49,6 +51,8 @@ function App() {
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   <Route path="/login" element={<Login />} />
+                  <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+
 
                   <Route element={<ProtectedRoute />}>
                     <Route element={<AppLayout />}>

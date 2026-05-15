@@ -1,5 +1,8 @@
-package com.mikroisp.mobile_app
+package com.mikroisp.old
+
+
 
 import io.flutter.embedding.android.FlutterActivity
 
-class MainActivity: FlutterActivity()
+class OldMainActivity: FlutterActivity()
+

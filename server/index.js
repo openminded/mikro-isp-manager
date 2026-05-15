@@ -2007,6 +2007,58 @@ app.post('/api/billing/bulk-update', async (req, res) => {
     }
 });
 
+// Bulk Update Payment Methods (Superadmin only)
+app.post('/api/billing/bulk-method', async (req, res) => {
+    const { invoiceIds, paymentIds, method, user } = req.body;
+
+    if (!user || user.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Access denied. Superadmin only.' });
+    }
+
+    if (!method) {
+        return res.status(400).json({ error: 'No payment method specified' });
+    }
+
+    try {
+        let targetPaymentIds = [];
+        let targetInvoiceIds = [];
+
+        if (Array.isArray(paymentIds) && paymentIds.length > 0) {
+            targetPaymentIds = paymentIds;
+            const payments = await Payment.findAll({ where: { id: paymentIds }, attributes: ['invoice_id'] });
+            targetInvoiceIds = [...new Set(payments.map(p => p.invoice_id))];
+        } else if (Array.isArray(invoiceIds) && invoiceIds.length > 0) {
+            targetInvoiceIds = invoiceIds;
+            const payments = await Payment.findAll({ where: { invoice_id: invoiceIds }, attributes: ['id'] });
+            targetPaymentIds = payments.map(p => p.id);
+        } else {
+            return res.status(400).json({ error: 'No items selected' });
+        }
+
+        if (targetPaymentIds.length > 0) {
+            await Payment.update(
+                { method: method },
+                { where: { id: targetPaymentIds } }
+            );
+        }
+        
+        for (const id of targetInvoiceIds) {
+            await InvoiceHistory.create({
+                invoice_id: id,
+                user_name: user.username || 'System',
+                action: 'EDIT',
+                details: `Payment method bulk updated to ${method}`
+            });
+        }
+
+        logActivity(req, 'BULK_UPDATE_PAYMENT_METHOD', `Updated method to ${method} for ${targetPaymentIds.length} payments`);
+        res.json({ success: true, message: `Updated ${targetPaymentIds.length} items to ${method}` });
+    } catch (e) {
+        console.error('[Bulk-Method] Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Bulk Block Customers from Invoices
 app.post('/api/billing/bulk-block', async (req, res) => {
     const { invoiceIds, user, actionType } = req.body;

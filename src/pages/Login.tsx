@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+
 import axios from 'axios';
 import { Lock, User, Loader2 } from 'lucide-react';
 
@@ -105,9 +106,15 @@ export function Login() {
                 </form>
             </div>
 
-            <div className="absolute bottom-4 text-slate-400 text-xs font-medium">
-                &copy; {new Date().getFullYear()} TelajuApp ISP Management
+            <div className="absolute bottom-4 flex flex-col items-center gap-2">
+                <Link to="/privacy-policy" className="text-blue-600 hover:text-blue-800 font-medium text-xs transition-colors">
+                    Kebijakan Privasi
+                </Link>
+                <div className="text-slate-400 text-xs font-medium">
+                    &copy; {new Date().getFullYear()} TelajuApp ISP Management
+                </div>
             </div>
+
         </div>
     );
 }

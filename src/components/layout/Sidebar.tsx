@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, CreditCard, Monitor, RefreshCw, HardDrive } from "lucide-react";
+import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, CreditCard, Monitor, RefreshCw, HardDrive, MonitorOff } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +50,7 @@ const navigation = [
                 children: [
                     { name: "Servers", href: "/servers", icon: Server },
                     { name: "Remote", href: "/remote-devices", icon: Monitor },
+                    { name: "Offline ONU", href: "/device/offline-onu", icon: MonitorOff },
                     { name: "Change ONU", href: "/maintenance/change-onu", icon: RefreshCw },
                     { name: "Mikrotik Backup", href: "/device/backup", icon: HardDrive },
                 ]

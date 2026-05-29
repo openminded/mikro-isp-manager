@@ -29,6 +29,7 @@ const Finance = lazy(() => import("./pages/Finance").then(m => ({ default: m.Fin
 const RemoteDevices = lazy(() => import("./pages/RemoteDevices").then(m => ({ default: m.RemoteDevices })));
 const ChangeOnu = lazy(() => import("./pages/ChangeOnu").then(m => ({ default: m.ChangeOnu })));
 const MikrotikBackup = lazy(() => import("./pages/MikrotikBackup").then(m => ({ default: m.MikrotikBackup })));
+const OfflineOnu = lazy(() => import("./pages/OfflineOnu").then(m => ({ default: m.OfflineOnu })));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy").then(m => ({ default: m.PrivacyPolicy })));
 
 
@@ -77,6 +78,7 @@ function App() {
                       <Route path="/finance" element={<Finance />} />
                       <Route path="/remote-devices" element={<RemoteDevices />} />
                       <Route path="/maintenance/change-onu" element={<ChangeOnu />} />
+                      <Route path="/device/offline-onu" element={<OfflineOnu />} />
                       <Route path="/device/backup" element={<MikrotikBackup />} />
                     </Route>
                   </Route>

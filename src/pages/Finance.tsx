@@ -12,9 +12,12 @@ export function Finance() {
     const [activeTab, setActiveTab] = useState<'unpaid' | 'history' | 'invalid' | 'recap' | 'analytics'>('analytics');
     const [invoices, setInvoices] = useState<any[]>([]);
     const [analyticsData, setAnalyticsData] = useState<any>(null);
+    const [dailyRange, setDailyRange] = useState<'1w' | '2w' | '1m' | '1y'>('1w');
+    const [monthlyRange, setMonthlyRange] = useState<'3m' | '6m' | '1y' | 'all'>('3m');
     const [showNominal, setShowNominal] = useState(true);
     const [monthlyStatusFilters, setMonthlyStatusFilters] = useState({ PAID: true, UNPAID: true, CANCELLED: false, INVALID: false });
     const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+    const [chartTooltip, setChartTooltip] = useState<{ x: number, y: number, label: string, value: string } | null>(null);
 
     const [isPayModalOpen, setIsPayModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -58,20 +61,19 @@ export function Finance() {
     }, [activeTab]);
 
     useEffect(() => {
-        // Debounce search
+        // Debounce search and filter changes
         const timer = setTimeout(() => {
-            setPage(1); // Reset to page 1 on search/filter change
+            setPage(1); 
             fetchInvoices(1);
         }, 300);
         return () => clearTimeout(timer);
-    }, [search, period, filterServerId, filterSubAreaId, filterPaymentDate, activeTab, limit, sortConfig]);
+    }, [search, period, dailyRange, monthlyRange, filterServerId, filterSubAreaId, filterPaymentDate, activeTab, limit, sortConfig]);
 
     useEffect(() => {
-        // Fetch when page changes (skip initial redundant fetch)
+        // Fetch when page changes
         fetchInvoices(page);
     }, [page]);
 
-    // Initial load
     useEffect(() => {
         fetchPaymentMethods();
         fetchServers();
@@ -112,6 +114,8 @@ export function Finance() {
                 const params = new URLSearchParams();
                 if (period) params.append('period', period);
                 if (filterServerId) params.append('serverId', filterServerId);
+                params.append('dailyRange', dailyRange);
+                params.append('monthlyRange', monthlyRange);
 
                 const res = await fetch(`/api/billing/analytics?${params.toString()}`);
                 const data = await res.json();
@@ -568,7 +572,7 @@ export function Finance() {
             </div>
 
             <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-6 flex flex-col md:flex-row gap-4 items-center justify-between">
-                <div className="flex flex-1 gap-4 w-full md:w-auto">
+                <div className="flex flex-col md:flex-row flex-1 gap-4 w-full md:w-auto">
                     <div className="relative flex-1 md:max-w-xs">
                         <select
                             className="pl-10 pr-4 py-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm appearance-none min-w-[150px] w-full"
@@ -624,7 +628,7 @@ export function Finance() {
                     )}
                 </div>
 
-                <div className="flex items-center gap-4 w-full md:w-auto">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full md:w-auto">
                     <input
                         type="month"
                         value={period}
@@ -825,7 +829,9 @@ export function Finance() {
                             </div>
 
                             {/* Detailed Charts */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="flex flex-col gap-6">
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {/* Revenue By Server */}
                                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
                                     <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Revenue by Server</h3>
@@ -834,22 +840,35 @@ export function Finance() {
                                             <div className="text-center text-slate-500 py-4 text-sm">No server data</div>
                                         ) : (
                                             analyticsData.revenueByServer.sort((a: any, b: any) => b.amount - a.amount).map((item: any, i: number) => {
-                                                const maxAmount = Math.max(...analyticsData.revenueByServer.map((x: any) => x.amount));
-                                                const percentage = maxAmount > 0 ? (item.amount / maxAmount) * 100 : 0;
+                                                const maxTotal = Math.max(...analyticsData.revenueByServer.map((x: any) => x.amount + (x.unpaidAmount || 0)));
+                                                
+                                                const paidPercentage = maxTotal > 0 ? (item.amount / maxTotal) * 100 : 0;
+                                                const unpaidPercentage = maxTotal > 0 ? ((item.unpaidAmount || 0) / maxTotal) * 100 : 0;
+                                                
                                                 return (
                                                     <div
                                                         key={i}
                                                         className="space-y-1 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors"
                                                         onClick={() => setSelectedAnalyticsGroup({ title: `Server: ${item.name}`, invoices: item.invoices || [] })}
                                                     >
-                                                        <div className="flex justify-between text-sm">
+                                                        <div className="flex justify-between text-sm items-end">
                                                             <span className="font-medium text-slate-700 dark:text-slate-300">{item.name}</span>
-                                                            <span className="font-semibold text-slate-900 dark:text-white">Rp {showNominal ? item.amount.toLocaleString('id-ID') : 'xxx'}</span>
+                                                            <div className="flex flex-col items-end">
+                                                                <span className="font-semibold text-slate-900 dark:text-white">Rp {showNominal ? item.amount.toLocaleString('id-ID') : 'xxx'}</span>
+                                                            </div>
                                                         </div>
-                                                        <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
-                                                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${percentage}%` }}></div>
+                                                        <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden flex">
+                                                            <div className="bg-blue-500 h-full transition-all" style={{ width: `${paidPercentage}%` }}></div>
+                                                            <div className="bg-red-500 h-full transition-all" style={{ width: `${unpaidPercentage}%` }}></div>
                                                         </div>
-                                                        <div className="text-xs text-slate-500 dark:text-slate-400">{item.count} Payments</div>
+                                                        <div className="flex justify-between text-[11px] font-medium">
+                                                            <span className="text-blue-600 dark:text-blue-400">{item.count} Payments</span>
+                                                            {(item.unpaidCount > 0) && (
+                                                                <span className="text-red-500 dark:text-red-400">
+                                                                    {item.unpaidCount} Unpaid (Rp {showNominal ? (item.unpaidAmount || 0).toLocaleString('id-ID') : 'xxx'})
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 );
                                             })
@@ -921,43 +940,176 @@ export function Finance() {
                                             ))}
                                         </div>
                                     </div>
-                                )}
-
-                                {/* Daily Revenue Trend */}
+                                )}                                 {/* Daily Revenue Trend */}
                                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm col-span-1 lg:col-span-2">
-                                    <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Daily Revenue Trend</h3>
-                                    <div className="h-[200px] flex items-end gap-2 w-full pt-4">
+                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                                        <div>
+                                            <h3 className="font-semibold text-slate-900 dark:text-white">Daily Revenue Trend</h3>
+                                            <p className="text-xs text-slate-500 mt-1">Combination Bar + Trend Line</p>
+                                        </div>
+                                        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/50 p-1 rounded-lg border border-slate-200 dark:border-slate-800">
+                                            {(['1w', '2w', '1m', '1y'] as const).map((range) => (
+                                                <button
+                                                    key={range}
+                                                    onClick={() => setDailyRange(range)}
+                                                    className={cn(
+                                                        "px-3 py-1 rounded-md text-[10px] font-semibold transition-all",
+                                                        dailyRange === range 
+                                                            ? "bg-white dark:bg-slate-800 text-primary shadow-sm ring-1 ring-slate-200 dark:ring-slate-700" 
+                                                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                                                    )}
+                                                >
+                                                    {range === '1w' ? '1 WEEK' : range === '2w' ? '2 WEEKS' : range === '1m' ? '1 MONTH' : '1 YEAR'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="h-[200px] w-full pt-4">
                                         {analyticsData.dailyRevenue.length === 0 ? (
-                                            <div className="w-full text-center text-slate-500 self-center text-sm">No transactions in this period</div>
+                                            <div className="w-full h-full text-center text-slate-500 flex items-center justify-center text-sm">No transactions in this period</div>
                                         ) : (
                                             (() => {
-                                                const maxDaily = Math.max(...analyticsData.dailyRevenue.map((d: any) => d.amount));
-                                                return analyticsData.dailyRevenue.map((day: any, i: number) => {
-                                                    const height = maxDaily > 0 ? (day.amount / maxDaily) * 100 : 0;
-                                                    const dateShort = new Date(day.date).getDate();
-                                                    return (
-                                                        <div key={i} className="flex-1 flex flex-col justify-end items-center group relative min-w-[10px]">
-                                                            {/* Tooltip on hover */}
-                                                            <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none">
-                                                                {day.date}: Rp {showNominal ? day.amount.toLocaleString('id-ID') : 'xxx'}
+                                                const maxDaily = Math.max(...analyticsData.dailyRevenue.map((d: any) => d.amount), 1);
+                                                const height = 160;
+                                                const width = 1000;
+                                                const data = analyticsData.dailyRevenue;
+                                                const barWidth = (width / data.length) * 0.8;
+                                                const barGap = (width / data.length) * 0.2;
+
+                                                const points = data.map((d: any, i: number) => {
+                                                    const x = (i / (data.length - 1)) * width;
+                                                    const y = height - (d.amount / maxDaily) * height;
+                                                    return `${x},${y}`;
+                                                }).join(' ');
+
+                                                return (
+                                                    <div className="relative w-full h-full">
+                                                        <svg 
+                                                            viewBox={`0 0 ${width} ${height + 30}`} 
+                                                            className="w-full h-full overflow-visible" 
+                                                            preserveAspectRatio="none"
+                                                            onClick={() => setChartTooltip(null)}
+                                                        >
+                                                            {/* Grid Lines */}
+                                                            {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
+                                                                <line
+                                                                    key={tick}
+                                                                    x1="0"
+                                                                    y1={height - tick * height}
+                                                                    x2={width}
+                                                                    y2={height - tick * height}
+                                                                    stroke="currentColor"
+                                                                    strokeDasharray="4 4"
+                                                                    className="text-slate-100 dark:text-slate-700"
+                                                                />
+                                                            ))}
+                                                            
+                                                            {/* Bars */}
+                                                            {data.map((d: any, i: number) => {
+                                                                const x = i * (barWidth + barGap);
+                                                                const barHeight = (d.amount / maxDaily) * height;
+                                                                return (
+                                                                    <g 
+                                                                        key={i} 
+                                                                        className="group/bar cursor-pointer"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setChartTooltip({
+                                                                                x: (i / (data.length - 1)) * 100, // percentage for relative positioning
+                                                                                y: (height - barHeight) / height * 100,
+                                                                                label: `Daily: ${d.date}`,
+                                                                                value: `Rp ${showNominal ? d.amount.toLocaleString('id-ID') : 'xxx'}`
+                                                                            });
+                                                                        }}
+                                                                    >
+                                                                        <rect
+                                                                            x={x}
+                                                                            y={height - barHeight}
+                                                                            width={barWidth}
+                                                                            height={barHeight}
+                                                                            fill="rgb(59, 130, 246)"
+                                                                            className="opacity-40 group-hover/bar:opacity-70 transition-opacity"
+                                                                            rx="2"
+                                                                        />
+                                                                        <title>{`Date: ${d.date}\nAmount: Rp ${showNominal ? d.amount.toLocaleString('id-ID') : 'xxx'}`}</title>
+                                                                    </g>
+                                                                );
+                                                            })}
+
+                                                            {/* Trend Line */}
+                                                            <polyline
+                                                                points={points}
+                                                                fill="none"
+                                                                stroke="rgb(59, 130, 246)"
+                                                                strokeWidth="2"
+                                                                strokeLinecap="round"
+                                                                strokeLinejoin="round"
+                                                                className="drop-shadow-sm pointer-events-none"
+                                                            />
+
+                                                            {/* X-Axis Labels */}
+                                                            {data.length > 0 && [0, 0.25, 0.5, 0.75, 1].map(tick => {
+                                                                const idx = Math.floor(tick * (data.length - 1));
+                                                                const x = tick * width;
+                                                                const dateStr = data[idx].date;
+                                                                return (
+                                                                    <text
+                                                                        key={tick}
+                                                                        x={x}
+                                                                        y={height + 25}
+                                                                        textAnchor="middle"
+                                                                        className="text-[10px] fill-slate-400 font-medium"
+                                                                    >
+                                                                        {dateStr.split('-')[2]}/{dateStr.split('-')[1]}
+                                                                    </text>
+                                                                );
+                                                            })}
+                                                        </svg>
+
+                                                        {/* Interactive Label (Floating) */}
+                                                        {chartTooltip && chartTooltip.label.startsWith('Daily') && (
+                                                            <div 
+                                                                className="absolute z-10 bg-slate-900 text-white text-[10px] px-2 py-1 rounded shadow-xl pointer-events-none whitespace-nowrap animate-in zoom-in-95 duration-200"
+                                                                style={{ 
+                                                                    left: `${chartTooltip.x}%`, 
+                                                                    top: `${chartTooltip.y}%`,
+                                                                    transform: 'translate(-50%, -120%)'
+                                                                }}
+                                                            >
+                                                                <div className="font-bold">{chartTooltip.value}</div>
+                                                                <div className="opacity-70">{chartTooltip.label}</div>
+                                                                <div className="absolute bottom-[-4px] left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 rotate-45"></div>
                                                             </div>
-                                                            <div
-                                                                className="w-full bg-primary/80 hover:bg-primary transition-all rounded-t-sm"
-                                                                style={{ height: `${height}%`, minHeight: '4px' }}
-                                                            ></div>
-                                                            <div className="text-[10px] text-slate-400 mt-1 truncate max-w-full">{dateShort}</div>
-                                                        </div>
-                                                    );
-                                                });
+                                                        )}
+                                                    </div>
+                                                );
                                             })()
                                         )}
                                     </div>
                                 </div>
-
                                 {/* Monthly Revenue Trend */}
                                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm col-span-1 lg:col-span-2">
                                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-                                        <h3 className="font-semibold text-slate-900 dark:text-white">Monthly Revenue Trend</h3>
+                                        <div>
+                                            <h3 className="font-semibold text-slate-900 dark:text-white">Monthly Revenue Trend</h3>
+                                            <p className="text-xs text-slate-500 mt-1">Stacked by status + Total trend line</p>
+                                        </div>
+                                        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/50 p-1 rounded-lg border border-slate-200 dark:border-slate-800">
+                                            {(['3m', '6m', '1y', 'all'] as const).map((range) => (
+                                                <button
+                                                    key={range}
+                                                    onClick={() => setMonthlyRange(range)}
+                                                    className={cn(
+                                                        "px-3 py-1 rounded-md text-[10px] font-semibold transition-all",
+                                                        monthlyRange === range
+                                                            ? "bg-white dark:bg-slate-800 text-primary shadow-sm ring-1 ring-slate-200 dark:ring-slate-700"
+                                                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                                                    )}
+                                                >
+                                                    {range === '6m' ? '6 MONTHS' : range === '1y' ? '1 YEAR' : '2 YEARS'}
+                                                </button>
+                                            ))}
+                                        </div>
                                         <div className="flex flex-wrap items-center gap-4 text-sm">
                                             <label className="flex items-center gap-1.5 cursor-pointer">
                                                 <input type="checkbox" className="rounded border-slate-300 text-blue-500 focus:ring-blue-500 w-4 h-4" checked={monthlyStatusFilters.PAID} onChange={(e) => setMonthlyStatusFilters(p => ({ ...p, PAID: e.target.checked }))} />
@@ -978,64 +1130,198 @@ export function Finance() {
                                         </div>
                                     </div>
 
-                                    <div className="h-[250px] flex items-end gap-4 w-full pt-4 pb-2">
+                                    <div className="h-[300px] w-full pt-4">
                                         {!analyticsData.monthlyTrend || analyticsData.monthlyTrend.length === 0 ? (
-                                            <div className="w-full text-center text-slate-500 self-center text-sm">No monthly data available</div>
+                                            <div className="w-full h-full text-center text-slate-500 flex items-center justify-center text-sm">No monthly data available</div>
                                         ) : (
                                             (() => {
-                                                const maxTotal = Math.max(...analyticsData.monthlyTrend.map((m: any) => {
-                                                    let total = 0;
-                                                    if (monthlyStatusFilters.PAID) total += m.PAID;
-                                                    if (monthlyStatusFilters.UNPAID) total += m.UNPAID;
-                                                    if (monthlyStatusFilters.CANCELLED) total += m.CANCELLED;
-                                                    if (monthlyStatusFilters.INVALID) total += m.INVALID;
-                                                    return total;
-                                                }));
+                                                const trends = analyticsData.monthlyTrend;
+                                                const height = 240;
+                                                const width = 1000;
+                                                const padding = 40;
+                                                const chartWidth = width - padding * 2;
+                                                const chartHeight = height - 40;
 
-                                                return analyticsData.monthlyTrend.map((month: any, i: number) => {
-                                                    const paidH = maxTotal > 0 ? (month.PAID / maxTotal) * 100 : 0;
-                                                    const unpaidH = maxTotal > 0 ? (month.UNPAID / maxTotal) * 100 : 0;
-                                                    const cancelledH = maxTotal > 0 ? (month.CANCELLED / maxTotal) * 100 : 0;
-                                                    const invalidH = maxTotal > 0 ? (month.INVALID / maxTotal) * 100 : 0;
+                                                // Calculate max for stacked Y axis
+                                                const maxVal = Math.max(...trends.map((m: any) => {
+                                                    let sum = 0;
+                                                    if (monthlyStatusFilters.PAID) sum += m.PAID;
+                                                    if (monthlyStatusFilters.UNPAID) sum += m.UNPAID;
+                                                    if (monthlyStatusFilters.CANCELLED) sum += m.CANCELLED;
+                                                    if (monthlyStatusFilters.INVALID) sum += m.INVALID;
+                                                    return sum;
+                                                }), 1);
 
-                                                    const totalH = paidH + unpaidH + cancelledH + invalidH;
-                                                    // Only render bar if totalH > 0 to prevent 0-height bars from rendering if no filters match
+                                                const getX = (i: number) => padding + (i / (trends.length - 1)) * chartWidth;
+                                                const getY = (val: number) => chartHeight - (val / maxVal) * chartHeight;
+                                                
+                                                const barWidth = Math.min(40, (chartWidth / trends.length) * 0.6);
 
-                                                    return (
-                                                        <div key={i} className="flex-1 flex flex-col justify-end items-center group relative min-w-[20px] h-full">
-                                                            {/* Tooltip on hover */}
-                                                            <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-2 px-3 rounded whitespace-nowrap z-10 pointer-events-none flex flex-col gap-1 shadow-lg">
-                                                                <div className="font-bold border-b border-slate-600 pb-1 mb-1">{formatPeriod(month.period)}</div>
-                                                                {monthlyStatusFilters.PAID && month.PAID > 0 && <div className="flex justify-between gap-4"><span className="text-blue-300">Paid:</span> <span>Rp {showNominal ? month.PAID.toLocaleString('id-ID') : 'xxx'}</span></div>}
-                                                                {monthlyStatusFilters.UNPAID && month.UNPAID > 0 && <div className="flex justify-between gap-4"><span className="text-red-300">Unpaid:</span> <span>Rp {showNominal ? month.UNPAID.toLocaleString('id-ID') : 'xxx'}</span></div>}
-                                                                {monthlyStatusFilters.CANCELLED && month.CANCELLED > 0 && <div className="flex justify-between gap-4"><span className="text-slate-300">Cancel:</span> <span>Rp {showNominal ? month.CANCELLED.toLocaleString('id-ID') : 'xxx'}</span></div>}
-                                                                {monthlyStatusFilters.INVALID && month.INVALID > 0 && <div className="flex justify-between gap-4"><span className="text-orange-300">Invalid:</span> <span>Rp {showNominal ? month.INVALID.toLocaleString('id-ID') : 'xxx'}</span></div>}
+                                                const statusConfig = [
+                                                    { key: 'PAID', color: 'rgb(59, 130, 246)', label: 'Paid' },
+                                                    { key: 'UNPAID', color: 'rgb(239, 68, 68)', label: 'Unpaid' },
+                                                    { key: 'CANCELLED', color: 'rgb(148, 163, 184)', label: 'Cancelled' },
+                                                    { key: 'INVALID', color: 'rgb(251, 146, 60)', label: 'Invalid' },
+                                                ];
+
+                                                const totalPoints = trends.map((m: any, i: number) => {
+                                                    const total = (m.PAID || 0) + (m.UNPAID || 0);
+                                                    return `${getX(i)},${getY(total)}`;
+                                                }).join(' ');
+
+                                                return (
+                                                    <div className="relative w-full h-full">
+                                                        <svg 
+                                                            viewBox={`0 0 ${width} ${height}`} 
+                                                            className="w-full h-full overflow-visible"
+                                                            onClick={() => setChartTooltip(null)}
+                                                        >
+                                                            {/* Y-Axis Grid */}
+                                                            {[0, 0.25, 0.5, 0.75, 1].map(tick => (
+                                                                <g key={tick}>
+                                                                    <line
+                                                                        x1={padding}
+                                                                        y1={getY(tick * maxVal)}
+                                                                        x2={width - padding}
+                                                                        y2={getY(tick * maxVal)}
+                                                                        stroke="currentColor"
+                                                                        strokeDasharray="4 4"
+                                                                        className="text-slate-100 dark:text-slate-800"
+                                                                    />
+                                                                    <text
+                                                                        x={padding - 10}
+                                                                        y={getY(tick * maxVal) + 4}
+                                                                        textAnchor="end"
+                                                                        className="text-[10px] fill-slate-400 font-mono"
+                                                                    >
+                                                                        {showNominal ? (tick * maxVal).toLocaleString('id-ID', { notation: 'compact' }) : 'xxx'}
+                                                                    </text>
+                                                                </g>
+                                                            ))}
+
+                                                            {/* Stacked Bars */}
+                                                            {trends.map((m: any, i: number) => {
+                                                                let currentY = chartHeight;
+                                                                return (
+                                                                    <g key={i}>
+                                                                        {statusConfig.map(config => {
+                                                                            if (!monthlyStatusFilters[config.key as keyof typeof monthlyStatusFilters]) return null;
+                                                                            const val = m[config.key] || 0;
+                                                                            if (val === 0) return null;
+                                                                            const barH = (val / maxVal) * chartHeight;
+                                                                            const rect = (
+                                                                                <g 
+                                                                                    key={config.key} 
+                                                                                    className="group/segment cursor-pointer"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        setChartTooltip({
+                                                                                            x: (getX(i) / width) * 100,
+                                                                                            y: (currentY - barH) / height * 100,
+                                                                                            label: `${formatPeriod(m.period)} - ${config.label}`,
+                                                                                            value: `Rp ${showNominal ? val.toLocaleString('id-ID') : 'xxx'}`
+                                                                                        });
+                                                                                    }}
+                                                                                >
+                                                                                    <rect
+                                                                                        x={getX(i) - barWidth / 2}
+                                                                                        y={currentY - barH}
+                                                                                        width={barWidth}
+                                                                                        height={barH}
+                                                                                        fill={config.color}
+                                                                                        className="opacity-80 hover:opacity-100 transition-opacity"
+                                                                                        rx="1"
+                                                                                    />
+                                                                                    <title>{`${formatPeriod(m.period)} - ${config.label}: Rp ${showNominal ? val.toLocaleString('id-ID') : 'xxx'}`}</title>
+                                                                                </g>
+                                                                            );
+                                                                            currentY -= barH;
+                                                                            return rect;
+                                                                        })}
+                                                                    </g>
+                                                                );
+                                                            })}
+
+                                                            {/* Total Line (Paid + Unpaid) */}
+                                                            <polyline
+                                                                points={totalPoints}
+                                                                fill="none"
+                                                                stroke="currentColor"
+                                                                strokeWidth="2"
+                                                                strokeDasharray="4 4"
+                                                                className="text-slate-400 dark:text-slate-600 pointer-events-none"
+                                                            />
+                                                            
+                                                            {/* Total Trend Dots */}
+                                                            {trends.map((m: any, i: number) => {
+                                                                const total = (m.PAID || 0) + (m.UNPAID || 0);
+                                                                return (
+                                                                    <g key={i} className="group/total">
+                                                                        <circle
+                                                                            cx={getX(i)}
+                                                                            cy={getY(total)}
+                                                                            r="4"
+                                                                            fill="white"
+                                                                            stroke="currentColor"
+                                                                            strokeWidth="2"
+                                                                            className="text-primary cursor-pointer opacity-0 group-hover/total:opacity-100 transition-opacity"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                setChartTooltip({
+                                                                                    x: (getX(i) / width) * 100,
+                                                                                    y: (getY(total) / height) * 100,
+                                                                                    label: `${formatPeriod(m.period)} Total`,
+                                                                                    value: `Rp ${showNominal ? total.toLocaleString('id-ID') : 'xxx'}`
+                                                                                });
+                                                                            }}
+                                                                        />
+                                                                        <title>{`${formatPeriod(m.period)} Total Revenue: Rp ${showNominal ? total.toLocaleString('id-ID') : 'xxx'}`}</title>
+                                                                    </g>
+                                                                );
+                                                            })}
+
+                                                            {/* X-Axis Labels */}
+                                                            {trends.map((m: any, i: number) => (
+                                                                <text
+                                                                    key={i}
+                                                                    x={getX(i)}
+                                                                    y={chartHeight + 25}
+                                                                    textAnchor="middle"
+                                                                    className="text-[11px] fill-slate-500 font-medium"
+                                                                >
+                                                                    {m.period.slice(5, 7)}/{m.period.slice(2, 4)}
+                                                                </text>
+                                                            ))}
+                                                        </svg>
+
+                                                        {/* Interactive Label (Floating) */}
+                                                        {chartTooltip && !chartTooltip.label.startsWith('Daily') && (
+                                                            <div 
+                                                                className="absolute z-10 bg-slate-900 text-white text-[10px] px-2 py-1 rounded shadow-xl pointer-events-none whitespace-nowrap animate-in zoom-in-95 duration-200"
+                                                                style={{ 
+                                                                    left: `${chartTooltip.x}%`, 
+                                                                    top: `${chartTooltip.y}%`,
+                                                                    transform: 'translate(-50%, -120%)'
+                                                                }}
+                                                            >
+                                                                <div className="font-bold">{chartTooltip.value}</div>
+                                                                <div className="opacity-70">{chartTooltip.label}</div>
+                                                                <div className="absolute bottom-[-4px] left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 rotate-45"></div>
                                                             </div>
-                                                            <div className="w-full flex flex-col justify-end h-full">
-                                                                {totalH > 0 && (
-                                                                    <div className="w-full flex flex-col justify-end rounded-t-md overflow-hidden relative" style={{ height: `${totalH}%`, minHeight: '4px' }}>
-                                                                        {monthlyStatusFilters.INVALID && invalidH > 0 && <div className="w-full bg-orange-400 transition-all border-b border-white/20" style={{ height: `${(invalidH / totalH) * 100}%` }}></div>}
-                                                                        {monthlyStatusFilters.CANCELLED && cancelledH > 0 && <div className="w-full bg-slate-400 transition-all border-b border-white/20" style={{ height: `${(cancelledH / totalH) * 100}%` }}></div>}
-                                                                        {monthlyStatusFilters.UNPAID && unpaidH > 0 && <div className="w-full bg-red-500 transition-all border-b border-white/20" style={{ height: `${(unpaidH / totalH) * 100}%` }}></div>}
-                                                                        {monthlyStatusFilters.PAID && paidH > 0 && <div className="w-full bg-blue-500 transition-all" style={{ height: `${(paidH / totalH) * 100}%` }}></div>}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                            <div className="text-xs font-medium text-slate-500 mt-3 truncate max-w-full">
-                                                                {month.period.slice(5, 7)}/{month.period.slice(2, 4)}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                });
+                                                        )}
+                                                    </div>
+                                                );
                                             })()
                                         )}
                                     </div>
                                 </div>
                             </div>
-                        </>
-                    )}
-                </div>
-            ) : (
+                        </div>
+                    </>
+                )
+            }
+        </div>
+        ) : (
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
                     <div className="overflow-x-auto">
                         {activeTab === 'recap' ? (
@@ -1806,7 +2092,11 @@ export function Finance() {
     );
 }
 
-function InvoiceRow({ invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete, isSuperAdmin, subAreas, showNominal, showPaymentDate, showMethod, paymentMethodsList }: { invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void, isSuperAdmin?: boolean, subAreas?: any[], showNominal: boolean, showPaymentDate?: boolean, showMethod?: boolean, paymentMethodsList?: any[] }) {
+function InvoiceRow({ 
+    invoice, petugasName, formattedPeriod, selected, onSelect, onPay, onEdit, onViewHistory, onDelete, isSuperAdmin, subAreas, showNominal, showPaymentDate, showMethod, paymentMethodsList 
+}: { 
+    invoice: any, petugasName: string, formattedPeriod: string, selected: boolean, onSelect: (c: boolean) => void, onPay: () => void, onEdit: () => void, onViewHistory: () => void, onDelete?: () => void, isSuperAdmin?: boolean, subAreas?: any[], showNominal: boolean, showPaymentDate?: boolean, showMethod?: boolean, paymentMethodsList?: any[] 
+}) {
 
     return (
         <tr className={cn("hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors", selected && "bg-blue-50/50 dark:bg-blue-900/10")}>

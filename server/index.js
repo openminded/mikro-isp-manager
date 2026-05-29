@@ -571,9 +571,16 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                 timestamp: new Date().toISOString(),
                 data: Array.isArray(data) ? data : []
             };
-            queueWrite('sync_cache', cacheDataFinal, cachePath);
+            await queueWrite('sync_cache', cacheDataFinal, cachePath);
 
 
+        } else {
+             // For non-secrets, await the first queueWrite to ensure it finishes
+             const cacheData = {
+                timestamp: new Date().toISOString(),
+                data: Array.isArray(data) ? data : []
+             };
+             await queueWrite('sync_cache', cacheData, cachePath);
         }
 
         // Return potentially enriched data
@@ -607,6 +614,148 @@ app.get('/api/mikrotik/data', async (req, res) => {
         res.json({ timestamp: null, data: [] });
     }
 
+});
+
+// --- Offline ONU Logic ---
+function parseMikrotikDate(dateStr) {
+    if (!dateStr || dateStr === '-') return null;
+    
+    // Format 1: YYYY-MM-DD HH:mm:ss (RouterOS v7 / API format)
+    if (dateStr.includes('-')) {
+        const parts = dateStr.split(' ');
+        if (parts.length !== 2) return null;
+        const [year, month, day] = parts[0].split('-').map(Number);
+        const [hours, minutes, seconds] = parts[1].split(':').map(Number);
+        // Important: month is 0-indexed in JS Date
+        return new Date(year, month - 1, day, hours, minutes, seconds);
+    }
+
+    // Format 2: mmm/DD/YYYY HH:mm:ss (RouterOS v6 format)
+    if (dateStr.includes('/')) {
+        const months = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+        const parts = dateStr.toLowerCase().split(' ');
+        if (parts.length !== 2) return null;
+        const dateParts = parts[0].split('/');
+        if (dateParts.length !== 3) return null;
+        const month = months[dateParts[0]];
+        const day = parseInt(dateParts[1], 10);
+        const year = parseInt(dateParts[2], 10);
+        const timeParts = parts[1].split(':');
+        if (timeParts.length !== 3) return null;
+        const hours = parseInt(timeParts[0], 10);
+        const minutes = parseInt(timeParts[1], 10);
+        const seconds = parseInt(timeParts[2], 10);
+        return new Date(year, month, day, hours, minutes, seconds);
+    }
+    
+    return null;
+}
+
+app.get('/api/mikrotik/offline-onu', async (req, res) => {
+    const { serverId } = req.query;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const secretsPath = getCachePath(serverId, 'secrets');
+        const activePath = getCachePath(serverId, 'active_ppp');
+
+        let secretsData = [];
+        let activeData = [];
+
+        if (fs.existsSync(secretsPath)) {
+            const fileContent = await fs.promises.readFile(secretsPath, 'utf8');
+            const parsed = JSON.parse(fileContent);
+            if (Array.isArray(parsed.data)) secretsData = parsed.data;
+        }
+
+        if (fs.existsSync(activePath)) {
+            const fileContent = await fs.promises.readFile(activePath, 'utf8');
+            const parsed = JSON.parse(fileContent);
+            if (Array.isArray(parsed.data)) activeData = parsed.data;
+        }
+
+        const activeNames = new Set(activeData.map(a => String(a.name).trim()));
+        const sqlCustomers = await Customer.findAll({ where: { server_id: serverId } });
+        const sqlMap = new Map();
+        sqlCustomers.forEach(c => {
+            sqlMap.set(String(c.mikrotik_name).toLowerCase().trim(), c.toJSON());
+        });
+
+        const now = new Date();
+        const MAX_OFFLINE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+
+        const offlineUsers = [];
+
+        for (const secret of secretsData) {
+            // Check if disabled
+            if (secret.disabled === 'true' || secret.disabled === 'yes' || secret.disabled === true) {
+                continue; // exclude disabled
+            }
+
+            const name = String(secret.name).trim();
+            if (activeNames.has(name)) {
+                continue; // exclude online
+            }
+
+            // Exclude profile BELUM AKTIF
+            const profile = String(secret.profile).trim().toUpperCase();
+            if (profile === 'BELUM AKTIF') {
+                continue;
+            }
+
+            const lastLoggedOutStr = secret['last-logged-out'];
+            const lastDate = parseMikrotikDate(lastLoggedOutStr);
+            if (!lastDate) {
+                continue; // skip if no valid date
+            }
+
+            const diffMs = now.getTime() - lastDate.getTime();
+            
+            // Allow negative slightly in case server clock differs, but strictly <= 3 days
+            if (diffMs > MAX_OFFLINE_MS) {
+                continue; // > 3x24h
+            }
+
+            // Calculate formatted duration
+            let durationStr = '-';
+            if (diffMs > 0) {
+                const diffSecs = Math.floor(diffMs / 1000);
+                const d = Math.floor(diffSecs / (3600 * 24));
+                const h = Math.floor((diffSecs % (3600 * 24)) / 3600);
+                const m = Math.floor((diffSecs % 3600) / 60);
+                const s = diffSecs % 60;
+                
+                const parts = [];
+                if (d > 0) parts.push(`${d}d`);
+                if (h > 0) parts.push(`${h}h`);
+                if (m > 0) parts.push(`${m}m`);
+                if (s > 0 && d === 0) parts.push(`${s}s`);
+                durationStr = parts.join(' ');
+            } else {
+                durationStr = 'Just now';
+            }
+
+            const key = name.toLowerCase();
+            const sqlC = sqlMap.get(key);
+
+            offlineUsers.push({
+                id: secret['.id'] || name,
+                name: name,
+                realName: sqlC ? (sqlC.name || '') : '',
+                profile: secret.profile || '-',
+                comment: secret.comment || (sqlC ? sqlC.comment : ''),
+                lastLoggedOut: lastLoggedOutStr,
+                lastLoggedOutDate: lastDate.toISOString(),
+                offlineDurationMs: diffMs > 0 ? diffMs : 0,
+                offlineDurationStr: durationStr
+            });
+        }
+
+        res.json(offlineUsers);
+    } catch (error) {
+        console.error('[Offline ONU]', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // --- Mikrotik Firewall NAT (Remote Devices) ---
@@ -1592,6 +1741,7 @@ app.get('/api/billing/invoices', async (req, res) => {
                 { '$Customer.comment$': { [Op.like]: `%${search}%` } },        // PPP Secret comment (customer label)
                 { '$Customer.real_name$': { [Op.like]: `%${search}%` } },      // Real name from app DB
                 { '$Customer.name$': { [Op.like]: `%${search}%` } },
+                { '$Customer.profile$': { [Op.like]: `%${search}%` } },        // Profile/Daya
                 { period: { [Op.like]: `%${search}%` } },
                 { status: { [Op.like]: `%${search}%` } }
             ];
@@ -1656,141 +1806,146 @@ app.get('/api/billing/invoices', async (req, res) => {
 });
 
 // Get Billing Analytics
+// Get Billing Analytics
 app.get('/api/billing/analytics', async (req, res) => {
     try {
-        const { period, serverId } = req.query;
+        const { period, serverId, dailyRange, monthlyRange } = req.query;
 
-        const whereInvoice = {};
-        if (period) whereInvoice.period = period;
-        if (serverId) whereInvoice.server_id = serverId;
+        // Base where for filtering by server
+        const baseWhere = {};
+        if (serverId) baseWhere.server_id = serverId;
 
-        // Fetch all invoices for the period/server to calculate stats
-        const invoices = await Invoice.findAll({
-            where: whereInvoice,
+        // Helper to calculate start period
+        const getStartPeriod = (endP, months) => {
+            if (!endP) return null;
+            const [y, m] = endP.split('-').map(Number);
+            const date = new Date(y, m - 1, 1);
+            date.setMonth(date.getMonth() - (months - 1));
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        // 1. Fetch Summary Data (Strictly for the selected period)
+        const summaryWhere = { ...baseWhere };
+        if (period) summaryWhere.period = period;
+        
+        const summaryInvoices = await Invoice.findAll({
+            where: summaryWhere,
             include: [
-                {
-                    model: Customer,
-                    include: [Server]
-                },
-                {
-                    model: Payment
-                },
-                {
-                    model: InvoiceHistory
-                }
+                { model: Payment },
+                { model: Customer }
             ]
         });
 
-        // Calculate stats
+        // Map server UUIDs to names
+        const servers = await Server.findAll();
+        const serverMap = {};
+        for(const s of servers) serverMap[s.id] = s.name;
+
         let totalPaid = 0;
         let totalUnpaid = 0;
         let paidCount = 0;
         let unpaidCount = 0;
-        
-        const serverStats = {};
-        const methodStats = {};
-        const dailyStats = {};
+        const revenueByServerMap = {};
+        const methodStatsMap = {};
         const anomalies = [];
 
-        for (const inv of invoices) {
-            const serverName = inv.Customer?.Server?.name || 'Unknown';
-            if (!serverStats[serverName]) serverStats[serverName] = { amount: 0, count: 0, invoices: [] };
-            
-            // Determine who recorded the payment or last status update
-            let updatedBy = '-';
-            if (inv.InvoiceHistories && inv.InvoiceHistories.length > 0) {
-                const sortedHistory = [...inv.InvoiceHistories].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-                const lastAction = sortedHistory.find(h => ['PAYMENT', 'STATUS_UPDATE', 'EDIT'].includes(h.action));
-                if (lastAction) updatedBy = lastAction.user_name;
-            }
-            inv.setDataValue('updatedBy', updatedBy);
-            
-            const hasPayments = inv.Payments && inv.Payments.length > 0;
+        for (const inv of summaryInvoices) {
             const isPaid = inv.status === 'PAID';
+            const hasPayments = inv.Payments && inv.Payments.length > 0;
+            const amount = Number(inv.amount) || 0;
+            const serverName = serverMap[inv.server_id] || inv.server_id || 'Unknown';
 
-            // --- Anomaly Detection ---
-            if (isPaid && !hasPayments) {
-                anomalies.push({
-                    invoice: inv,
-                    type: 'MISSING_PAYMENT',
-                    description: 'Status is PAID but no payment record exists. (Missing from Revenue by Method)'
-                });
-            } else if (!isPaid && hasPayments) {
-                anomalies.push({
-                    invoice: inv,
-                    type: 'PAID_BUT_UNMARKED',
-                    description: `Has ${inv.Payments.length} payment(s) but status is ${inv.status}. (Potential fraud or manipulation)`
-                });
-            } else if (isPaid && inv.Payments && inv.Payments.length > 1) {
-                anomalies.push({
-                    invoice: inv,
-                    type: 'MULTIPLE_PAYMENTS',
-                    description: `Invoice for [${serverName}] has ${inv.Payments.length} payment records. (Multiple entries on a single unique invoice ID)`
-                });
+            if (!revenueByServerMap[serverName]) {
+                revenueByServerMap[serverName] = { 
+                    amount: 0, count: 0, 
+                    unpaidAmount: 0, unpaidCount: 0,
+                    invoices: [] 
+                };
             }
-
+            
             if (isPaid) {
                 paidCount++;
-                const amount = Number(inv.amount);
                 totalPaid += amount;
-                
-                serverStats[serverName].amount += amount;
-                serverStats[serverName].count++;
-                serverStats[serverName].invoices.push(inv);
-                
-                // Process payments for method and daily stats (Option B: One per Invoice)
+                revenueByServerMap[serverName].amount += amount;
+                revenueByServerMap[serverName].count++;
+                revenueByServerMap[serverName].invoices.push(inv);
+
                 let method = 'unknown';
-                let dateStr = 'Unknown';
-                
                 if (hasPayments) {
-                    const p = inv.Payments[0]; // Take first payment as source of truth
-                    method = p.method || 'unknown';
-                    dateStr = p.transaction_date ? new Date(p.transaction_date).toISOString().split('T')[0] : 'Unknown';
+                    method = inv.Payments[0].method || 'unknown';
                 }
-
-                if (!methodStats[method]) methodStats[method] = { amount: 0, count: 0, invoices: [] };
-                methodStats[method].amount += amount; // Use Invoice amount
-                methodStats[method].count++;
-                methodStats[method].invoices.push(inv);
-
-                if (dateStr !== 'Unknown') {
-                    if (!dailyStats[dateStr]) dailyStats[dateStr] = 0;
-                    dailyStats[dateStr] += amount; // Use Invoice amount
-                }
+                if (!methodStatsMap[method]) methodStatsMap[method] = { amount: 0, count: 0, invoices: [] };
+                methodStatsMap[method].amount += amount;
+                methodStatsMap[method].count++;
+                methodStatsMap[method].invoices.push(inv);
             } else if (inv.status === 'UNPAID') {
                 unpaidCount++;
-                totalUnpaid += Number(inv.amount);
+                totalUnpaid += amount;
+                
+                revenueByServerMap[serverName].unpaidAmount += amount;
+                revenueByServerMap[serverName].unpaidCount++;
+                revenueByServerMap[serverName].invoices.push(inv);
             }
         }
 
-        const revenueByServer = Object.keys(serverStats).map(k => ({ name: k, ...serverStats[k] }));
-        const revenueByMethod = Object.keys(methodStats).map(k => ({ name: k, ...methodStats[k] }));
-        const dailyRevenue = Object.keys(dailyStats).sort().map(k => ({ date: k, amount: dailyStats[k] }));
+        // 2. Fetch Daily Revenue (Based on dailyRange)
+        const dailyWhere = { ...baseWhere, status: 'PAID' };
+        if (period) {
+            if (dailyRange === '1w' || dailyRange === '2w' || dailyRange === '1m') {
+                // For daily within a month or two, we just filter by the period
+                // (Assuming period is like '2025-05')
+                dailyWhere.period = period; 
+            } else if (dailyRange === '1y') {
+                const startP = getStartPeriod(period, 12);
+                dailyWhere.period = { [Op.between]: [startP, period] };
+            } else {
+                dailyWhere.period = period;
+            }
+        }
 
-        // Monthly Trend Calculation (Ignores 'period' filter to get all months)
-        const whereAllMonths = {};
-        if (serverId) whereAllMonths.server_id = serverId;
-        const allInvoices = await Invoice.findAll({
-            where: whereAllMonths,
+        const dailyInvoices = await Invoice.findAll({
+            where: dailyWhere,
+            include: [{ model: Payment, required: true }]
+        });
+
+        const dailyStatsMap = {};
+        for (const inv of dailyInvoices) {
+            for (const p of inv.Payments) {
+                const dateStr = p.transaction_date ? new Date(p.transaction_date).toISOString().split('T')[0] : 'Unknown';
+                if (dateStr !== 'Unknown') {
+                    if (!dailyStatsMap[dateStr]) dailyStatsMap[dateStr] = 0;
+                    dailyStatsMap[dateStr] += Number(inv.amount);
+                }
+            }
+        }
+        const dailyRevenue = Object.keys(dailyStatsMap).sort().map(k => ({ date: k, amount: dailyStatsMap[k] }));
+
+        // 3. Fetch Monthly Trend (Based on monthlyRange)
+        const monthlyWhere = { ...baseWhere };
+        if (period) {
+            if (monthlyRange === 'all') {
+                // No period filter
+            } else {
+                const months = monthlyRange === '6m' ? 6 : monthlyRange === '1y' ? 12 : 3;
+                const startP = getStartPeriod(period, months);
+                monthlyWhere.period = { [Op.between]: [startP, period] };
+            }
+        }
+
+        const monthlyInvoices = await Invoice.findAll({
+            where: monthlyWhere,
             attributes: ['period', 'status', 'amount']
         });
 
-        const monthlyStats = {};
-        for (const inv of allInvoices) {
+        const monthlyStatsMap = {};
+        for (const inv of monthlyInvoices) {
             const p = inv.period || 'Unknown';
-            if (!monthlyStats[p]) {
-                monthlyStats[p] = { PAID: 0, UNPAID: 0, CANCELLED: 0, INVALID: 0 };
-            }
+            if (!monthlyStatsMap[p]) monthlyStatsMap[p] = { PAID: 0, UNPAID: 0, CANCELLED: 0, INVALID: 0 };
             const status = inv.status || 'UNPAID';
             const amt = Number(inv.amount) || 0;
-            if (monthlyStats[p][status] !== undefined) {
-                monthlyStats[p][status] += amt;
-            }
+            if (monthlyStatsMap[p][status] !== undefined) monthlyStatsMap[p][status] += amt;
         }
-        const monthlyTrend = Object.keys(monthlyStats).sort().map(k => ({
-            period: k,
-            ...monthlyStats[k]
-        }));
+        const monthlyTrend = Object.keys(monthlyStatsMap).sort().map(k => ({ period: k, ...monthlyStatsMap[k] }));
 
         res.json({
             summary: {
@@ -1800,8 +1955,8 @@ app.get('/api/billing/analytics', async (req, res) => {
                 unpaidCount,
                 totalRevenue: totalPaid
             },
-            revenueByServer,
-            revenueByMethod,
+            revenueByServer: Object.keys(revenueByServerMap).map(k => ({ name: k, ...revenueByServerMap[k] })),
+            revenueByMethod: Object.keys(methodStatsMap).map(k => ({ name: k, ...methodStatsMap[k] })),
             dailyRevenue,
             monthlyTrend,
             anomalies
@@ -1812,6 +1967,7 @@ app.get('/api/billing/analytics', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
 
 // Get Payment Recap (Filter by customer, period, server, search, pagination)
 app.get('/api/billing/payments', async (req, res) => {
@@ -1837,11 +1993,11 @@ app.get('/api/billing/payments', async (req, res) => {
 
         // Build Customer Filters (to search by name)
         const whereCustomer = {};
+        const wherePayment = {};
+
         if (subAreaId) {
             wherePayment['$Invoice.Customer.sub_area_id$'] = subAreaId;
         }
-
-        const wherePayment = {};
         if (paymentDate) {
             const startDate = new Date(paymentDate);
             const endDate = new Date(startDate);
@@ -1858,6 +2014,7 @@ app.get('/api/billing/payments', async (req, res) => {
                 { '$Invoice.Customer.comment$': { [Op.like]: `%${search}%` } },        // PPP Secret: comment (customer label)
                 { '$Invoice.Customer.real_name$': { [Op.like]: `%${search}%` } },      // Real name dari DB app
                 { '$Invoice.Customer.name$': { [Op.like]: `%${search}%` } },
+                { '$Invoice.Customer.profile$': { [Op.like]: `%${search}%` } },        // Profile/Daya
                 { '$Invoice.period$': { [Op.like]: `%${search}%` } },
                 { method: { [Op.like]: `%${search}%` } }
             ];

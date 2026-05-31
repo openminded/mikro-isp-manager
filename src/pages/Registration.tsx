@@ -77,6 +77,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
     const [filterDateEnd, setFilterDateEnd] = useState('');
     const [filterServer, setFilterServer] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
+    const [filterData, setFilterData] = useState('all');
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -302,6 +303,19 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         const matchesServer = filterServer ? r.locationId === filterServer : true;
         const matchesStatus = filterStatus !== 'all' ? r.status === filterStatus : true;
 
+        let matchesData = true;
+        if (filterData !== 'all') {
+            const hasPhone = !!r.phoneNumber;
+            const hasMaps = !!r.mapsUrl;
+            const hasAddress = !!r.address;
+            const coords = extractCoordinates(r.mapsUrl);
+            const isValidMap = r.mapsUrl ? !!coords : false;
+            const isComplete = hasPhone && hasMaps && hasAddress && (!r.mapsUrl || isValidMap);
+            
+            if (filterData === 'complete') matchesData = isComplete;
+            else if (filterData === 'incomplete') matchesData = !isComplete;
+        }
+
         let matchesDate = true;
         if (filterDateStart || filterDateEnd) {
             if (!r.createdAt) {
@@ -317,7 +331,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             }
         }
 
-        return matchesSearch && matchesServer && matchesStatus && matchesDate;
+        return matchesSearch && matchesServer && matchesStatus && matchesDate && matchesData;
     }).sort((a, b) => {
         if (!sortConfig) return 0;
         const { key, direction } = sortConfig;
@@ -356,7 +370,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         ? filteredRegs
         : filteredRegs.slice(startIndex, startIndex + itemsPerPage);
 
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, filterStatus, filterServer, filterDateStart, filterDateEnd, itemsPerPage]);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, filterStatus, filterServer, filterDateStart, filterDateEnd, filterData, itemsPerPage]);
 
     return (
         <div className="p-8">
@@ -435,6 +449,19 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                     { label: 'Cancelled', value: 'cancel' }
                                 ]}
                                 placeholder="Status"
+                            />
+                        </div>
+
+                        <div className="w-[180px]">
+                            <SearchableSelect
+                                value={filterData}
+                                onChange={setFilterData}
+                                options={[
+                                    { label: 'Semua Kelengkapan', value: 'all' },
+                                    { label: 'Data Lengkap', value: 'complete' },
+                                    { label: 'Data Kosong', value: 'incomplete' }
+                                ]}
+                                placeholder="Kelengkapan Data"
                             />
                         </div>
 

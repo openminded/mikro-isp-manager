@@ -1,9 +1,59 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, XCircle, Wrench, Smartphone, Calendar, Eye, User, RotateCcw, CheckCircle, MapPin, Trash2 } from 'lucide-react';
+import { Plus, Search, Edit2, XCircle, Wrench, Smartphone, Calendar, Eye, User, RotateCcw, CheckCircle, MapPin, Trash2, List, Map as MapIcon } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import type { Registration } from '@/types';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+import iconUrl from 'leaflet/dist/images/marker-icon.png';
+import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
+import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({ iconRetinaUrl, iconUrl, shadowUrl });
+
+const extractCoordinates = (url: string | undefined): [number, number] | null => {
+    if (!url) return null;
+    const match = url.match(/@?(-?\d+\.\d+),\s*(-?\d+\.\d+)/) || url.match(/q=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
+    if (match) return [parseFloat(match[1]), parseFloat(match[2])];
+    return null;
+};
+
+const SERVER_COLORS = [
+    '#ef4444', '#8b5cf6', '#10b981', '#f59e0b', '#0ea5e9',
+    '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'
+];
+
+const getServerColor = (locationId: string) => {
+    if (!locationId) return '#94a3b8';
+    let hash = 0;
+    for (let i = 0; i < locationId.length; i++) {
+        hash = locationId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return SERVER_COLORS[Math.abs(hash) % SERVER_COLORS.length];
+};
+
+const createCustomIcon = (locationId: string, status: string) => {
+    const serverColor = getServerColor(locationId);
+    let statusColor = '#94a3b8';
+    if (status === 'queue') statusColor = '#f59e0b';
+    else if (status === 'installation_process') statusColor = '#3b82f6';
+    else if (status === 'done') statusColor = '#10b981';
+    else if (status === 'cancel') statusColor = '#ef4444';
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 40" width="32" height="40"><path d="M16 0c-8.837 0-16 7.163-16 16 0 11.046 16 24 16 24s16-12.954 16-24c0-8.837-7.163-16-16-16z" fill="${serverColor}" /><circle cx="16" cy="16" r="10" fill="#ffffff" /><circle cx="16" cy="16" r="7" fill="${statusColor}" /></svg>`;
+
+    return L.divIcon({
+        className: 'custom-map-marker bg-transparent border-none',
+        html: svg,
+        iconSize: [32, 40],
+        iconAnchor: [16, 40],
+        popupAnchor: [0, -40]
+    });
+};
 
 interface RegistrationProps {
     view?: 'active' | 'completed';
@@ -11,6 +61,7 @@ interface RegistrationProps {
 
 export function Registration({ view = 'active' }: RegistrationProps) {
     const [registrations, setRegistrations] = useState<Registration[]>([]);
+    const [activeTab, setActiveTab] = useState<'data' | 'map'>('data');
     const [servers, setServers] = useState<any[]>([]);
     const [employees, setEmployees] = useState<any[]>([]);
     const [jobTitles, setJobTitles] = useState<any[]>([]);
@@ -308,7 +359,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
     useEffect(() => { setCurrentPage(1); }, [searchTerm, filterStatus, filterServer, filterDateStart, filterDateEnd, itemsPerPage]);
 
     return (
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-8">
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">
@@ -338,7 +389,27 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                 </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            {view === 'active' && (
+                <div className="flex gap-4 mb-6 border-b border-slate-200 px-2">
+                    <button
+                        onClick={() => setActiveTab('data')}
+                        className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'data' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}
+                    >
+                        <List className="w-4 h-4" />
+                        Data (Active Registrations)
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('map')}
+                        className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'map' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}
+                    >
+                        <MapIcon className="w-4 h-4" />
+                        Registration Map
+                    </button>
+                </div>
+            )}
+
+            {activeTab === 'data' || view === 'completed' ? (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 border-b border-slate-200 space-y-4">
                     <div className="flex flex-col md:flex-row gap-4">
                         <div className="relative flex-1 max-w-md">
@@ -431,16 +502,30 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                 <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('fullName')}>Customer</th>
                                 <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('locationId')}>Location</th>
                                 <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('date')}>Installation Info</th>
+                                <th className="px-6 py-4">Kelengkapan Data</th>
                                 <th className="px-6 py-4">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200">
                             {loading ? (
-                                <tr><td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
+                                <tr><td colSpan={user?.role === 'superadmin' ? 8 : 7} className="px-6 py-8 text-center text-slate-400">Loading...</td></tr>
                             ) : paginatedRegs.length === 0 ? (
-                                <tr><td colSpan={user?.role === 'superadmin' ? 7 : 6} className="px-6 py-8 text-center text-slate-400">No registrations found</td></tr>
-                            ) : paginatedRegs.map(reg => (
-                                <tr key={reg.id} className={`hover:bg-slate-50 transition-colors ${selectedIds.includes(reg.id) ? 'bg-blue-50/50' : ''}`}>
+                                <tr><td colSpan={user?.role === 'superadmin' ? 8 : 7} className="px-6 py-8 text-center text-slate-400">No registrations found</td></tr>
+                            ) : paginatedRegs.map(reg => {
+                                const missing = [];
+                                if (!reg.phoneNumber) missing.push('No. HP');
+                                if (!reg.mapsUrl) missing.push('Maps');
+                                if (!reg.address) missing.push('Alamat');
+                                
+                                const coords = extractCoordinates(reg.mapsUrl);
+                                if (reg.mapsUrl && !coords) {
+                                    missing.push('URL Map Invalid');
+                                }
+
+                                const isDataComplete = missing.length === 0;
+
+                                return (
+                                <tr key={reg.id} className={`hover:bg-slate-50 transition-colors ${selectedIds.includes(reg.id) ? 'bg-blue-50/50' : (!isDataComplete ? 'bg-yellow-50' : '')}`}>
                                     {user?.role === 'superadmin' && (
                                         <td className="px-6 py-4 text-center">
                                             <input 
@@ -501,6 +586,24 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                         )}
                                     </td>
                                     <td className="px-6 py-4">
+                                        {isDataComplete ? (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
+                                                Lengkap
+                                            </span>
+                                        ) : (
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-[10px] text-amber-600 font-semibold uppercase tracking-wider">Data Kosong:</span>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {missing.map(m => (
+                                                        <span key={m} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                                                            {m}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4">
                                         <div className="flex items-center gap-2">
                                             <button onClick={() => openDetail(reg)} className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="View Details">
                                                 <Eye className="w-4 h-4" />
@@ -510,9 +613,15 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                                     <button onClick={() => openEdit(reg)} className="p-1.5 text-slate-500 hover:text-primary hover:bg-primary/5 rounded-md transition-colors" title="Edit">
                                                         <Edit2 className="w-4 h-4" />
                                                     </button>
-                                                    <button onClick={() => openInstall(reg)} className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Process Installation">
-                                                        <Wrench className="w-4 h-4" />
-                                                    </button>
+                                                    {isDataComplete ? (
+                                                        <button onClick={() => openInstall(reg)} className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Process Installation">
+                                                            <Wrench className="w-4 h-4" />
+                                                        </button>
+                                                    ) : (
+                                                        <button disabled className="p-1.5 text-slate-300 cursor-not-allowed rounded-md" title="Lengkapi data terlebih dahulu untuk proses instalasi">
+                                                            <Wrench className="w-4 h-4" />
+                                                        </button>
+                                                    )}
                                                     <button onClick={() => handleCancelReg(reg.id)} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Cancel">
                                                         <XCircle className="w-4 h-4" />
                                                     </button>
@@ -531,7 +640,8 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                         </div>
                                     </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -582,8 +692,74 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                             Next
                         </button>
                     </div>
+                    </div>
                 </div>
-            </div>
+            ) : (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[600px] h-[calc(100vh-220px)] relative z-0">
+                    <MapContainer center={[-0.366535, 101.556898]} zoom={13} style={{ height: '100%', width: '100%' }}>
+                        <TileLayer url={`https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}`} attribution='&copy; Google Maps' maxZoom={22} />
+                        {registrations.filter(r => r.status !== 'done' && r.status !== 'cancel').map(reg => {
+                            const missing = [];
+                            if (!reg.phoneNumber) missing.push('No. HP');
+                            if (!reg.mapsUrl) missing.push('Maps');
+                            if (!reg.address) missing.push('Alamat');
+                            const coords = extractCoordinates(reg.mapsUrl);
+                            if (reg.mapsUrl && !coords) missing.push('URL Map Invalid');
+                            
+                            if (missing.length > 0 || !coords) return null;
+
+                            return (
+                                <Marker key={reg.id} position={coords} icon={createCustomIcon(reg.locationId, reg.status)}>
+                                    <Tooltip permanent direction="bottom" offset={[0, 10]} className="bg-white/90 shadow-sm border-slate-200 text-xs font-semibold text-slate-700 rounded-md">
+                                        {reg.fullName}
+                                    </Tooltip>
+                                    <Popup className="rounded-xl overflow-hidden min-w-[200px]">
+                                        <div className="p-1 font-sans">
+                                            <h3 className="font-bold text-sm text-slate-800 mb-1">{reg.fullName}</h3>
+                                            <div className="text-xs text-slate-500 mb-2">{reg.phoneNumber}</div>
+                                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${reg.status === 'queue' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                                                {reg.status === 'queue' ? 'Pending' : 'Installing'}
+                                            </span>
+                                            <div className="mt-2 text-xs text-slate-600 truncate max-w-[200px]" title={reg.address}>{reg.address}</div>
+                                        </div>
+                                    </Popup>
+                                </Marker>
+                            );
+                        })}
+                    </MapContainer>
+                    
+                    {/* Map Legend */}
+                    <div className="absolute bottom-6 left-6 z-[1000] bg-white/90 backdrop-blur-sm p-4 rounded-xl shadow-lg border border-slate-200/60 max-w-[300px] text-sm">
+                        <div className="font-semibold text-slate-800 mb-3">Map Legend</div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                            <div>
+                                <div className="text-xs font-medium text-slate-500 mb-2 uppercase tracking-wider">Pin Color (Server)</div>
+                                <div className="space-y-1.5 max-h-[120px] overflow-y-auto pr-2">
+                                    {servers.map(s => (
+                                        <div key={s.name} className="flex items-center gap-2">
+                                            <div className="w-3 h-3 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: getServerColor(s.name) }}></div>
+                                            <span className="text-xs text-slate-600 truncate" title={s.name}>{s.name}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-xs font-medium text-slate-500 mb-2 uppercase tracking-wider">Dot Color (Status)</div>
+                                <div className="space-y-2 mt-1">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-3 h-3 rounded-full shrink-0 shadow-sm bg-[#f59e0b]"></div>
+                                        <span className="text-xs text-slate-600">Pending</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-3 h-3 rounded-full shrink-0 shadow-sm bg-[#3b82f6]"></div>
+                                        <span className="text-xs text-slate-600">Installing</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Registration Form Modal */}
             {isFormOpen && (

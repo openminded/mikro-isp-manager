@@ -1769,7 +1769,8 @@ app.get('/api/billing/invoices', async (req, res) => {
         const includePayment = { model: Payment, required: false };
         if (paymentDate) {
             // paymentDate is expected as YYYY-MM-DD
-            const startDate = new Date(paymentDate);
+            // Enforce GMT+7 (WIB) timezone boundaries for filtering
+            const startDate = new Date(`${paymentDate}T00:00:00+07:00`);
             const endDate = new Date(startDate);
             endDate.setDate(endDate.getDate() + 1);
 
@@ -1999,7 +2000,8 @@ app.get('/api/billing/payments', async (req, res) => {
             wherePayment['$Invoice.Customer.sub_area_id$'] = subAreaId;
         }
         if (paymentDate) {
-            const startDate = new Date(paymentDate);
+            // Enforce GMT+7 (WIB) timezone boundaries for filtering
+            const startDate = new Date(`${paymentDate}T00:00:00+07:00`);
             const endDate = new Date(startDate);
             endDate.setDate(endDate.getDate() + 1);
             wherePayment.transaction_date = {

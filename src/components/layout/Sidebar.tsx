@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, CreditCard, Monitor, RefreshCw, HardDrive, MonitorOff } from "lucide-react";
+import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, CreditCard, Monitor, RefreshCw, HardDrive, MonitorOff, Calculator } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +21,7 @@ const navigation = [
                 children: [
                     { name: "Active", href: "/registration/active", icon: ClipboardList },
                     { name: "Completed", href: "/registration/completed", icon: CheckCircle },
+                    { name: "Cancelled", href: "/registration/cancelled", icon: AlertTriangle },
                 ]
             },
             { name: "Support Tickets", href: "/tickets", icon: Wrench },
@@ -30,6 +31,7 @@ const navigation = [
                 children: [
                     { name: "In Progress", href: "/working-order/progress", icon: Wrench },
                     { name: "Completed", href: "/working-order/completed", icon: CheckCircle },
+                    { name: "Cancelled", href: "/working-order/cancelled", icon: AlertTriangle },
                 ]
             },
         ]
@@ -50,6 +52,7 @@ const navigation = [
                 children: [
                     { name: "Servers", href: "/servers", icon: Server },
                     { name: "Remote", href: "/remote-devices", icon: Monitor },
+                    { name: "Kalkulator Kabel", href: "/device/cable-calculator", icon: Calculator },
                     { name: "Offline ONU", href: "/device/offline-onu", icon: MonitorOff },
                     { name: "Change ONU", href: "/maintenance/change-onu", icon: RefreshCw },
                     { name: "Mikrotik Backup", href: "/device/backup", icon: HardDrive },
@@ -144,10 +147,17 @@ export function Sidebar({ className, onClose }: SidebarProps) {
                                 {group.section}
                             </h3>
 
-                            {filteredItems.map((item) => {
+                                {filteredItems.map((item) => {
                                 if ('children' in item && item.children) {
                                     const isOpen = openMenus.includes(item.name);
-                                    const isActive = item.children.some(child => location.pathname === child.href);
+                                    
+                                    // Hide Cancelled from technicians
+                                    const visibleChildren = item.children.filter(child => {
+                                        if (isTech && child.name === 'Cancelled') return false;
+                                        return true;
+                                    });
+
+                                    const isActive = visibleChildren.some(child => location.pathname === child.href);
 
                                     return (
                                         <div key={item.name} className="flex flex-col gap-1">
@@ -166,7 +176,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
                                             </button>
                                             {isOpen && (
                                                 <div className="flex flex-col gap-1 pl-9 border-l border-slate-100 ml-5">
-                                                    {item.children.map((child) => (
+                                                    {visibleChildren.map((child) => (
                                                         <NavLink
                                                             key={child.name}
                                                             to={child.href}

@@ -1574,6 +1574,88 @@ app.put('/api/customers/:id', async (req, res) => {
 
 // --- CRM Endpoints (SQL) ---
 
+// Get Customer Gallery (Aggregates Registration, Customer, and Ticket photos)
+app.get('/api/customers/:id/gallery', async (req, res) => {
+    const { id } = req.params;
+    try {
+        let photos = [];
+        let customer;
+        
+        if (id && id.length > 10) {
+            customer = await Customer.findByPk(id);
+        }
+
+        if (!customer && req.query.serverId && req.query.mikrotikName) {
+            customer = await Customer.findOne({
+                where: { server_id: req.query.serverId, mikrotik_name: String(req.query.mikrotikName).toLowerCase().trim() }
+            });
+        }
+
+        const phoneNum = customer ? (customer.phone_number || (CACHE.customers && CACHE.customers[`${customer.server_id}-${customer.mikrotik_name}`]?.whatsapp)) : null;
+        const normalizedPhone = phoneNum ? phoneNum.replace(/\D/g, '') : null;
+
+        // 1. Customer Photos (Includes Registration if synced)
+        if (customer && Array.isArray(customer.photos)) {
+            photos = [...photos, ...customer.photos.map(url => ({ 
+                url, 
+                source: 'Customer Profile / Registration', 
+                date: customer.installationDate || customer.activationDate || customer.createdAt 
+            }))];
+        }
+
+        // 2. Registration Photos (Fallback/Explicit)
+        const registrations = getRegistrationsDB() || [];
+        const reg = registrations.find(r => 
+            (normalizedPhone && r.phoneNumber && r.phoneNumber.replace(/\D/g, '') === normalizedPhone) ||
+            (customer && customer.name && r.fullName.toLowerCase() === customer.name.toLowerCase())
+        );
+
+        if (reg && reg.installation && Array.isArray(reg.installation.photos)) {
+            photos = [...photos, ...reg.installation.photos.map(url => ({ 
+                url, 
+                source: 'Registration', 
+                date: reg.installation.finishDate || reg.createdAt 
+            }))];
+        }
+
+        // 3. Ticket Photos
+        const tickets = getTicketsDB() || [];
+        const custTickets = tickets.filter(t => 
+            (customer && t.customerId === customer.id) || 
+            (normalizedPhone && t.customerPhone && t.customerPhone.replace(/\D/g, '') === normalizedPhone) ||
+            (customer && t.customerName && t.customerName.toLowerCase() === customer.mikrotik_name.toLowerCase())
+        );
+
+        custTickets.forEach(t => {
+            if (Array.isArray(t.photos)) {
+                photos = [...photos, ...t.photos.map(url => ({ 
+                    url, 
+                    source: `Ticket ${t.ticketNumber || '#'+t.id.substring(0,6)}`, 
+                    date: t.createdAt 
+                }))];
+            }
+        });
+
+        // Deduplicate URLs
+        const uniquePhotos = [];
+        const seen = new Set();
+        for (const p of photos) {
+            if (p.url && !seen.has(p.url)) {
+                seen.add(p.url);
+                uniquePhotos.push(p);
+            }
+        }
+
+        // Sort by date descending
+        uniquePhotos.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+        res.json({ success: true, gallery: uniquePhotos });
+    } catch (e) {
+        console.error('Error fetching gallery:', e);
+        res.status(500).json({ error: 'Failed to fetch gallery' });
+    }
+});
+
 
 // Get All Meta Data (Formatted as Map for Frontend Compatibility)
 app.get('/api/customers/meta', async (req, res) => {
@@ -2129,7 +2211,7 @@ app.post('/api/billing/payments/bulk-delete', async (req, res) => {
 
 // Bulk Update Invoices
 app.post('/api/billing/bulk-update', async (req, res) => {
-    const { invoiceIds, status, user } = req.body;
+    const { invoiceIds, status, method, user } = req.body;
 
     if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
         return res.status(403).json({ error: 'Access denied. Authorized users only.' });
@@ -2144,23 +2226,53 @@ app.post('/api/billing/bulk-update', async (req, res) => {
     }
 
     try {
-        await Invoice.update(
-            { status: status },
-            { where: { id: invoiceIds } }
-        );
+        const invoices = await Invoice.findAll({ where: { id: invoiceIds } });
+        const now = new Date();
+        let updatedCount = 0;
 
-        // Individual Log History per invoice
-        for (const id of invoiceIds) {
-            await InvoiceHistory.create({
-                invoice_id: id,
-                user_name: req.body.user?.username || 'System',
-                action: 'STATUS_UPDATE',
-                details: `Status bulk updated to ${status}`
-            });
+        for (const inv of invoices) {
+            if (status === 'PAID' && inv.status !== 'PAID') {
+                await inv.update({ status: 'PAID' });
+                updatedCount++;
+                
+                if (method) {
+                    try {
+                        await Payment.create({
+                            invoice_id: inv.id,
+                            amount: inv.amount,
+                            method: method,
+                            verified_at: now,
+                            transaction_date: now
+                        });
+                    } catch (err) {
+                        console.error('Error creating bulk payment:', err);
+                    }
+                }
+                
+                await InvoiceHistory.create({
+                    invoice_id: inv.id,
+                    user_name: req.body.user?.username || 'System',
+                    action: 'PAYMENT',
+                    details: `Bulk payment via ${method || 'Unknown'}`
+                });
+            } else if (status !== 'PAID' && inv.status !== status) {
+                if (['UNPAID', 'INVALID', 'CANCELLED'].includes(status)) {
+                    await Payment.destroy({ where: { invoice_id: inv.id } });
+                }
+                await inv.update({ status: status });
+                updatedCount++;
+                
+                await InvoiceHistory.create({
+                    invoice_id: inv.id,
+                    user_name: req.body.user?.username || 'System',
+                    action: 'STATUS_UPDATE',
+                    details: `Status bulk updated to ${status}`
+                });
+            }
         }
 
-        logActivity(req, 'BULK_UPDATE_INVOICES', `Updated ${invoiceIds.length} invoices to ${status}`);
-        res.json({ success: true, message: `Updated ${invoiceIds.length} invoices to ${status}` });
+        logActivity(req, 'BULK_UPDATE_INVOICES', `Updated ${updatedCount} invoices to ${status}`);
+        res.json({ success: true, message: `Updated ${updatedCount} invoices to ${status}` });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -2402,6 +2514,15 @@ app.post('/api/billing/pay', upload.single('proof'), async (req, res) => {
         res.json({ success: true, payment });
     } catch (e) {
         res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/test-payments', async (req, res) => {
+    try {
+        const payments = await Payment.findAll({ order: [['transaction_date', 'DESC']], limit: 10 });
+        res.json({ payments });
+    } catch (e) {
+        res.json({ error: e.message });
     }
 });
 

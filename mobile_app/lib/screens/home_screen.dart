@@ -19,6 +19,8 @@ import 'dart:async';
 import '../services/notification_service.dart';
 import 'remote_device_screen.dart';
 import 'change_onu_screen.dart';
+import 'registration_map_screen.dart';
+import 'cable_calculator_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -239,6 +241,20 @@ class _HomeScreenState extends State<HomeScreen> {
                             title: const Text('Change ONU'),
                             onTap: () {
                                 Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChangeOnuScreen()));
+                            },
+                        ),
+                        ListTile(
+                            leading: const Icon(Icons.calculate),
+                            title: const Text('Kalkulator Kabel'),
+                            onTap: () {
+                                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CableCalculatorScreen()));
+                            },
+                        ),
+                        ListTile(
+                            leading: const Icon(Icons.map),
+                            title: const Text('Registration Map'),
+                            onTap: () {
+                                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegistrationMapScreen()));
                             },
                         ),
                     ],

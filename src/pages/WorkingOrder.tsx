@@ -52,16 +52,20 @@ interface PppProfile {
 interface StatusModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSubmit: (note: string) => void;
+    onSubmit: (note: string, cancelReason?: string) => void;
     title: string;
     actionType: 'pending' | 'cancel' | 'resolve'; // Added resolve
 }
 
 function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusModalProps) {
     const [note, setNote] = useState('');
+    const [cancelReason, setCancelReason] = useState('cancel');
 
     useEffect(() => {
-        if (isOpen) setNote('');
+        if (isOpen) {
+            setNote('');
+            setCancelReason('cancel');
+        }
     }, [isOpen]);
 
     if (!isOpen) return null;
@@ -75,6 +79,21 @@ function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusMod
                         ? 'Please provide resolution notes for this ticket.'
                         : 'Please provide a reason or note for this action.'}
                 </p>
+                {actionType === 'cancel' && (
+                    <div className="mb-4">
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Cancel Reason</label>
+                        <select
+                            className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 bg-slate-50"
+                            value={cancelReason}
+                            onChange={e => setCancelReason(e.target.value)}
+                        >
+                            <option value="cancel">Cancel - User - Undefined</option>
+                            <option value="cancel_user_price">Cancel - User - (Price)</option>
+                            <option value="cancel_admin_ooc">Cancel - Admin (Out of Coverage)</option>
+                            <option value="cancel_teknisi_odp">Cancel - Teknisi (ODP Full)</option>
+                        </select>
+                    </div>
+                )}
                 <textarea
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary min-h-[100px] bg-slate-50"
                     placeholder={actionType === 'resolve' ? "Resolution details..." : "Enter note here..."}
@@ -90,7 +109,7 @@ function StatusModal({ isOpen, onClose, onSubmit, title, actionType }: StatusMod
                         Cancel
                     </button>
                     <button
-                        onClick={() => onSubmit(note)}
+                        onClick={() => onSubmit(note, cancelReason)}
                         disabled={!note.trim()}
                         className={cn(
                             "px-4 py-2 text-white rounded-lg text-sm font-medium transition-colors",
@@ -345,8 +364,8 @@ function CompletionModal({ isOpen, onClose, onConfirm, serverName, fetchingSecre
     );
 }
 
-interface WorkingOrderProps {
-    view?: 'progress' | 'completed';
+export interface WorkingOrderProps {
+    view?: 'progress' | 'completed' | 'cancelled';
 }
 
 export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
@@ -357,6 +376,12 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('');
     const [sortConfig, setSortConfig] = useState<{ key: keyof WorkItem | 'date', direction: 'asc' | 'desc' } | null>(null);
+    
+    // Column Filters
+    const [typeFilter, setTypeFilter] = useState('all');
+    const [serverFilter, setServerFilter] = useState('all');
+    const [techFilter, setTechFilter] = useState('all');
+    const [statusFilter, setStatusFilter] = useState('all');
 
     // Modal State
     const [modalOpen, setModalOpen] = useState(false);
@@ -406,13 +431,17 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
             regs.forEach(r => {
                 let status: WorkItem['status'] = 'in_progress';
                 if (r.status === 'done' && r.workingOrderStatus === 'done') status = 'done';
-                if (r.status === 'cancel') status = 'cancel'; // Should act same as cancel
+                if (r.status && r.status.startsWith('cancel')) status = 'cancel'; // Should act same as cancel
                 if (r.workingOrderStatus === 'pending') status = 'pending';
 
                 // Only include based on view
                 const isCompleted = r.status === 'done' && r.workingOrderStatus === 'done';
-                if (view === 'progress' && isCompleted) return;
+                const isCancelled = r.status && r.status.startsWith('cancel');
+
+                if (view === 'progress' && (isCompleted || isCancelled)) return;
                 if (view === 'completed' && !isCompleted) return;
+                if (view === 'cancelled' && !isCancelled) return;
+
                 if (view === 'progress' && r.status === 'queue') return; // Queued not yet WO
 
                 // Normalize for "Installation Process"
@@ -430,7 +459,12 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                     status,
                     originalObject: r,
                     note: r.workingOrderNote,
-                    rawStatus: r.workingOrderStatus === 'pending' ? 'Pending' : (status === 'done' ? 'Completed' : 'Installation'),
+                    rawStatus: r.workingOrderStatus === 'pending' ? 'Pending' : (status === 'done' ? 'Completed' : (status === 'cancel' ? (
+                        r.status === 'cancel' ? 'Cancelled - User' : 
+                        r.status === 'cancel_user_price' ? 'Cancelled - Price' : 
+                        r.status === 'cancel_admin_ooc' ? 'Cancelled - OOC' : 
+                        r.status === 'cancel_teknisi_odp' ? 'Cancelled - ODP' : 'Cancelled'
+                    ) : 'Installation')),
                     mapsUrl: r.mapsUrl,
                 });
             });
@@ -442,8 +476,11 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
 
                 // Only include based on view
                 const isCompleted = t.status === 'resolved' || t.status === 'closed';
-                if (view === 'progress' && isCompleted) return;
-                if (view === 'completed' && !isCompleted) return;
+                const isCancelled = t.status === 'closed'; // Mapping closed to cancel logic if needed, but tickets use 'closed'
+
+                if (view === 'progress' && (isCompleted || isCancelled)) return;
+                if (view === 'completed' && t.status !== 'resolved') return;
+                if (view === 'cancelled' && t.status !== 'closed') return;
 
                 // For progress view, include Open and In Progress tickets
                 if (view === 'progress' && t.status !== 'open' && t.status !== 'in_progress') return;
@@ -539,7 +576,7 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
         }
     };
 
-    const handleModalSubmit = async (note: string) => {
+    const handleModalSubmit = async (note: string, cancelReason?: string) => {
         if (!selectedItem) return;
 
         try {
@@ -549,7 +586,7 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                     updates.workingOrderStatus = 'pending';
                     updates.status = 'installation_process';
                 } else if (modalAction === 'cancel') {
-                    updates.status = 'cancel';
+                    updates.status = cancelReason || 'cancel';
                     updates.workingOrderStatus = 'done';
                 }
                 await axios.put(`/api/registrations/${selectedItem.id}`, updates);
@@ -703,7 +740,14 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
                 item.technician.toLowerCase().includes(searchLower) ||
                 item.server.toLowerCase().includes(searchLower) ||
                 (item.type === 'ticket' && (item.originalObject as Ticket).ticketNumber.toLowerCase().includes(searchLower));
-            return matchesSearch;
+                
+            if (!matchesSearch) return false;
+            if (typeFilter !== 'all' && item.type !== typeFilter) return false;
+            if (serverFilter !== 'all' && item.server !== serverFilter) return false;
+            if (techFilter !== 'all' && item.technician !== techFilter) return false;
+            if (statusFilter !== 'all' && item.rawStatus !== statusFilter) return false;
+            
+            return true;
         })
         .sort((a, b) => {
             if (!sortConfig) return new Date(b.date).getTime() - new Date(a.date).getTime(); // Default new first
@@ -731,7 +775,7 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
     const startIndex = (currentPage - 1) * (itemsPerPage === -1 ? filteredAndSortedItems.length : itemsPerPage);
     const paginatedItems = itemsPerPage === -1 ? filteredAndSortedItems : filteredAndSortedItems.slice(startIndex, startIndex + itemsPerPage);
 
-    useEffect(() => { setCurrentPage(1); }, [filter, view, itemsPerPage]);
+    useEffect(() => { setCurrentPage(1); }, [filter, typeFilter, serverFilter, techFilter, statusFilter, view, itemsPerPage]);
 
     return (
         <div className="p-8 space-y-6">
@@ -861,33 +905,90 @@ export function WorkingOrder({ view = 'progress' }: WorkingOrderProps) {
             {/* Header */}
             <div>
                 <h1 className="text-2xl font-bold text-slate-900">
-                    {view === 'progress' ? 'Job List (In Progress)' : 'Job History (Completed)'}
+                    {view === 'progress' ? 'Active Working Orders' : view === 'cancelled' ? 'Cancelled Working Orders' : 'Completed Working Orders'}
                 </h1>
                 <p className="text-slate-500">
-                    {view === 'progress' ? 'Active installations and support tickets' : 'History of installations and resolved tickets'}
+                    {view === 'progress' ? 'Manage ongoing installations and active support tickets' : view === 'cancelled' ? 'History of cancelled working orders' : 'History of completed installations and resolved tickets'}
                 </p>
             </div>
 
             {/* Filters & Actions */}
-            <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-                <div className="relative flex-1 max-w-md w-full">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input
-                        className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                        placeholder="Search customer, phone, tech, or ticket #..."
-                        value={filter}
-                        onChange={e => setFilter(e.target.value)}
-                    />
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                    <div className="relative flex-1 max-w-md w-full">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input
+                            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            placeholder="Search customer, phone, tech, or ticket #..."
+                            value={filter}
+                            onChange={e => setFilter(e.target.value)}
+                        />
+                    </div>
+                    {user?.role === 'superadmin' && selectedIds.length > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shrink-0"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Delete Selected ({selectedIds.length})
+                        </button>
+                    )}
                 </div>
-                {user?.role === 'superadmin' && selectedIds.length > 0 && (
-                    <button
-                        onClick={handleBulkDelete}
-                        className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shrink-0"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                        Delete Selected ({selectedIds.length})
-                    </button>
-                )}
+
+                {/* Column Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1.5">Type Filter</label>
+                        <select
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white text-sm"
+                            value={typeFilter}
+                            onChange={e => setTypeFilter(e.target.value)}
+                        >
+                            <option value="all">All Types</option>
+                            <option value="installation">Installation</option>
+                            <option value="ticket">Ticket</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1.5">Server Filter</label>
+                        <select
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white text-sm"
+                            value={serverFilter}
+                            onChange={e => setServerFilter(e.target.value)}
+                        >
+                            <option value="all">All Servers</option>
+                            {Array.from(new Set(workItems.map(i => i.server))).filter(Boolean).sort().map(s => (
+                                <option key={s} value={s}>{s}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1.5">Technician Filter</label>
+                        <select
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white text-sm"
+                            value={techFilter}
+                            onChange={e => setTechFilter(e.target.value)}
+                        >
+                            <option value="all">All Technicians</option>
+                            {Array.from(new Set(workItems.map(i => i.technician))).filter(Boolean).sort().map(t => (
+                                <option key={t} value={t}>{t}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1.5">Status Filter</label>
+                        <select
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white text-sm"
+                            value={statusFilter}
+                            onChange={e => setStatusFilter(e.target.value)}
+                        >
+                            <option value="all">All Statuses</option>
+                            {Array.from(new Set(workItems.map(i => i.rawStatus || ''))).filter(Boolean).sort().map(s => (
+                                <option key={s} value={s}>{s}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
             </div>
 
             {/* Table */}

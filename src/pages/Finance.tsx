@@ -346,7 +346,21 @@ export function Finance() {
 
     const handleBulkAction = async (status: string) => {
         if (selectedIds.size === 0) return;
-        if (!confirm(`Are you sure you want to mark ${selectedIds.size} invoices as ${status}?`)) return;
+        
+        let methodId = undefined;
+        let confirmMessage = `Are you sure you want to mark ${selectedIds.size} invoices as ${status}?`;
+
+        if (status === 'PAID' && activeTab === 'unpaid') {
+            const cashMethod = paymentMethodsList.find(m => m.name.toLowerCase() === 'cash' || m.type === 'Cash');
+            if (!cashMethod) {
+                alert('Cash payment method not found. Please create one in settings.');
+                return;
+            }
+            methodId = cashMethod.id;
+            confirmMessage = `Are you sure you want to mark ${selectedIds.size} invoices as PAID using Cash payment method?`;
+        }
+
+        if (!confirm(confirmMessage)) return;
 
         try {
             const res = await fetch('/api/billing/bulk-update', {
@@ -355,6 +369,7 @@ export function Finance() {
                 body: JSON.stringify({
                     invoiceIds: Array.from(selectedIds),
                     status,
+                    method: methodId,
                     user: user || { username: 'Unknown' }
                 })
             });

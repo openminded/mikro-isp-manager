@@ -94,7 +94,8 @@ export interface Registration {
     ktpNumber: string;
     address: string;
     locationId: string;
-    status: 'queue' | 'installation_process' | 'done' | 'cancel';
+    sub_area_id?: string;
+    status: 'queue' | 'installation_process' | 'done' | 'cancel' | 'cancel_user_price' | 'cancel_admin_ooc' | 'cancel_teknisi_odp';
     installation?: {
         technician: string;
         companion: string;

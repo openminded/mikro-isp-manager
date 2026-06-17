@@ -30,6 +30,7 @@ const RemoteDevices = lazy(() => import("./pages/RemoteDevices").then(m => ({ de
 const ChangeOnu = lazy(() => import("./pages/ChangeOnu").then(m => ({ default: m.ChangeOnu })));
 const MikrotikBackup = lazy(() => import("./pages/MikrotikBackup").then(m => ({ default: m.MikrotikBackup })));
 const OfflineOnu = lazy(() => import("./pages/OfflineOnu").then(m => ({ default: m.OfflineOnu })));
+const CableCalculator = lazy(() => import("./pages/CableCalculator").then(m => ({ default: m.CableCalculator })));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy").then(m => ({ default: m.PrivacyPolicy })));
 
 
@@ -63,8 +64,10 @@ function App() {
                       <Route path="/customers" element={<Customers />} />
                       <Route path="/registration/active" element={<Registration view="active" />} />
                       <Route path="/registration/completed" element={<Registration view="completed" />} />
+                      <Route path="/registration/cancelled" element={<Registration view="cancelled" />} />
                       <Route path="/working-order/progress" element={<WorkingOrder view="progress" />} />
                       <Route path="/working-order/completed" element={<WorkingOrder view="completed" />} />
+                      <Route path="/working-order/cancelled" element={<WorkingOrder view="cancelled" />} />
                       <Route path="/employees" element={<Employees />} />
                       <Route path="/master/profiles" element={<Profiles />} />
                       <Route path="/master/ip-pools" element={<IpPools />} />
@@ -79,6 +82,7 @@ function App() {
                       <Route path="/remote-devices" element={<RemoteDevices />} />
                       <Route path="/maintenance/change-onu" element={<ChangeOnu />} />
                       <Route path="/device/offline-onu" element={<OfflineOnu />} />
+                      <Route path="/device/cable-calculator" element={<CableCalculator />} />
                       <Route path="/device/backup" element={<MikrotikBackup />} />
                     </Route>
                   </Route>

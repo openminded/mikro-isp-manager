@@ -767,6 +767,8 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
 
     // UI State
     const [activeTab, setActiveTab] = useState<'server' | 'app'>('server');
+    const [gallery, setGallery] = useState<{url: string, source: string, date?: string}[]>([]);
+    const [loadingGallery, setLoadingGallery] = useState(false);
 
     // Fetch Sub Areas on mount
     useEffect(() => {
@@ -852,6 +854,30 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         }
     }, [initialData, isOpen, servers]);
 
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        if (initialData) {
+            setLoadingGallery(true);
+            const customerId = initialData.crmId || initialData.id;
+            axios.get(`/api/customers/${customerId}/gallery`, {
+                params: {
+                    serverId: initialData.serverId,
+                    mikrotikName: initialData.name
+                }
+            })
+            .then(res => {
+                if (res.data.success) {
+                    setGallery(res.data.gallery);
+                }
+            })
+            .catch(err => console.error("Failed to fetch gallery:", err))
+            .finally(() => setLoadingGallery(false));
+        } else {
+            setGallery([]);
+        }
+    }, [initialData, isOpen]);
+
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
         setUploading(true);
@@ -859,6 +885,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
             const files = Array.from(e.target.files);
             const urls = await MikrotikApi.uploadPhotos(files);
             setFormData(prev => ({ ...prev, photos: [...prev.photos, ...urls] }));
+            setGallery(prev => [...urls.map(url => ({ url, source: 'New Upload' })), ...prev]);
         } catch (error) {
             alert("Failed to upload photos");
         } finally {
@@ -1094,19 +1121,36 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                     </div>
 
                                     <div className="space-y-2 mt-4">
-                                        <label className="text-sm font-medium text-slate-700">Installation Photos</label>
-                                        <div className="flex flex-wrap gap-2">
-                                            {formData.photos.map((url, i) => (
-                                                <a key={i} href={url} target="_blank" rel="noreferrer" className="block w-16 h-16 rounded overflow-hidden border border-slate-200 hover:opacity-80">
-                                                    <img src={url} alt="Install" className="w-full h-full object-cover" />
-                                                </a>
-                                            ))}
-                                            <label className="w-16 h-16 rounded border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-colors">
-                                                <Plus className="w-5 h-5" />
+                                        <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                            <span>Customer Gallery <span className="text-xs text-slate-400 font-normal ml-2">(Registration, Installations, & Tickets)</span></span>
+                                            {loadingGallery && <span className="text-xs text-blue-500 animate-pulse">Loading gallery...</span>}
+                                        </label>
+                                        <div className="flex flex-wrap gap-4">
+                                            <label className="w-24 h-24 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-colors hover:bg-slate-50">
+                                                <Plus className="w-6 h-6 mb-1" />
+                                                <span className="text-[10px] font-medium">Add Photo</span>
                                                 <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} disabled={uploading} />
                                             </label>
+                                            
+                                            {gallery.map((item, i) => (
+                                                <div key={i} className="relative group w-24 h-24 rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
+                                                    <a href={item.url} target="_blank" rel="noreferrer" className="block w-full h-full">
+                                                        <img src={item.url} alt={`Gallery item ${i}`} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                                    </a>
+                                                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 pt-6 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex flex-col justify-end">
+                                                        <span className="text-[10px] font-medium text-white truncate leading-tight">{item.source}</span>
+                                                        {item.date && <span className="text-[9px] text-white/80 mt-0.5">{new Date(item.date).toLocaleDateString()}</span>}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            
+                                            {gallery.length === 0 && !loadingGallery && !uploading && (
+                                                <div className="w-full text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-lg border border-slate-100 border-dashed">
+                                                    No photos found for this customer.
+                                                </div>
+                                            )}
                                         </div>
-                                        {uploading && <p className="text-xs text-blue-500">Uploading photos...</p>}
+                                        {uploading && <p className="text-xs text-blue-500 mt-2">Uploading photos...</p>}
                                     </div>
                                 </div>
                             </div>

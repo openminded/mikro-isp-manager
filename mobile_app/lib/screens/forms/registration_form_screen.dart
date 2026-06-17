@@ -150,7 +150,10 @@ class _RegistrationFormScreenState extends State<RegistrationFormScreen> {
                                     value: s.name, 
                                     child: Text(s.name)
                                 )).toList(),
-                                onChanged: (val) => setState(() => _selectedServerId = val),
+                                onChanged: (val) => setState(() {
+                                    _selectedServerId = val;
+                                    _selectedSubAreaId = null;
+                                }),
                             ),
                         ),
                     ),

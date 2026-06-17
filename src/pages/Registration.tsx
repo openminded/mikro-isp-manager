@@ -42,7 +42,7 @@ const createCustomIcon = (locationId: string, status: string) => {
     if (status === 'queue') statusColor = '#f59e0b';
     else if (status === 'installation_process') statusColor = '#3b82f6';
     else if (status === 'done') statusColor = '#10b981';
-    else if (status === 'cancel') statusColor = '#ef4444';
+    else if (status.startsWith('cancel')) statusColor = '#ef4444';
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 40" width="32" height="40"><path d="M16 0c-8.837 0-16 7.163-16 16 0 11.046 16 24 16 24s16-12.954 16-24c0-8.837-7.163-16-16-16z" fill="${serverColor}" /><circle cx="16" cy="16" r="10" fill="#ffffff" /><circle cx="16" cy="16" r="7" fill="${statusColor}" /></svg>`;
 
@@ -56,7 +56,7 @@ const createCustomIcon = (locationId: string, status: string) => {
 };
 
 interface RegistrationProps {
-    view?: 'active' | 'completed';
+    view?: 'active' | 'completed' | 'cancelled';
 }
 
 export function Registration({ view = 'active' }: RegistrationProps) {
@@ -93,6 +93,11 @@ export function Registration({ view = 'active' }: RegistrationProps) {
     const [isDetailOpen, setIsDetailOpen] = useState(false);
     const [detailReg, setDetailReg] = useState<Registration | null>(null);
 
+    // Cancel Modal
+    const [isCancelOpen, setIsCancelOpen] = useState(false);
+    const [cancelTargetId, setCancelTargetId] = useState('');
+    const [cancelReason, setCancelReason] = useState('cancel');
+
     // Bulk Actions
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -103,6 +108,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         ktpNumber: '',
         address: '',
         locationId: '',
+        sub_area_id: '',
         mapsUrl: '', // Add mapsUrl state
     });
     const [installData, setInstallData] = useState({
@@ -113,9 +119,12 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         costPrice: 0
     });
 
+    const [subAreas, setSubAreas] = useState<any[]>([]);
+
     useEffect(() => {
         fetchRegistrations();
         fetchServers();
+        fetchSubAreas();
         fetchEmployeesAndTitles();
         setSelectedIds([]); // Reset selection on view change
     }, [view]); // Refetch/Re-filter when view changes
@@ -139,6 +148,15 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             setServers(res.data);
         } catch (error) {
             console.error("Failed to fetch servers", error);
+        }
+    };
+
+    const fetchSubAreas = async () => {
+        try {
+            const res = await axios.get('/api/sub-areas');
+            setSubAreas(res.data);
+        } catch (error) {
+            console.error("Failed to fetch sub-areas", error);
         }
     };
 
@@ -179,7 +197,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             fetchRegistrations();
             setIsFormOpen(false);
             setEditingReg(null);
-            setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', mapsUrl: '' });
+            setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', sub_area_id: '', mapsUrl: '' });
         } catch (error) {
             alert('Failed to save registration');
         }
@@ -193,6 +211,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             ktpNumber: reg.ktpNumber,
             address: reg.address,
             locationId: reg.locationId,
+            sub_area_id: reg.sub_area_id || '',
             mapsUrl: reg.mapsUrl || '', // Load mapsUrl
         });
         setIsFormOpen(true);
@@ -230,11 +249,17 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         }
     };
 
-    const handleCancelReg = async (id: string) => {
-        if (!confirm('Are you sure you want to cancel this registration?')) return;
+    const openCancelModal = (id: string) => {
+        setCancelTargetId(id);
+        setCancelReason('cancel');
+        setIsCancelOpen(true);
+    };
+
+    const handleConfirmCancel = async () => {
         try {
-            await axios.put(`/api/registrations/${id}`, { status: 'cancel' });
+            await axios.put(`/api/registrations/${cancelTargetId}`, { status: cancelReason });
             fetchRegistrations();
+            setIsCancelOpen(false);
         } catch (error) {
             alert('Failed to cancel');
         }
@@ -292,9 +317,11 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         // VIEW FILTER
         if (view === 'completed') {
             if (r.status !== 'done') return false;
+        } else if (view === 'cancelled') {
+            if (!r.status.startsWith('cancel')) return false;
         } else {
-            // Active view: Show everything EXCEPT 'done'
-            if (r.status === 'done') return false;
+            // Active view: Show everything EXCEPT 'done' and 'cancel'
+            if (r.status === 'done' || r.status.startsWith('cancel')) return false;
         }
 
         const matchesSearch = r.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -377,10 +404,10 @@ export function Registration({ view = 'active' }: RegistrationProps) {
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">
-                        {view === 'completed' ? 'Completed Registrations' : 'Active Registrations'}
+                        {view === 'completed' ? 'Completed Registrations' : view === 'cancelled' ? 'Cancelled Registrations' : 'Active Registrations'}
                     </h1>
                     <p className="text-slate-500">
-                        {view === 'completed' ? 'History of completed registrations' : 'Manage new WiFi registrations'}
+                        {view === 'completed' ? 'History of completed registrations' : view === 'cancelled' ? 'History of cancelled registrations' : 'Manage new WiFi registrations'}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -394,7 +421,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                         </button>
                     )}
                     <button
-                        onClick={() => { setEditingReg(null); setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', mapsUrl: '' }); setIsFormOpen(true); }}
+                        onClick={() => { setEditingReg(null); setFormData({ phoneNumber: '', fullName: '', ktpNumber: '', address: '', locationId: '', sub_area_id: '', mapsUrl: '' }); setIsFormOpen(true); }}
                         className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
                     >
                         <Plus className="w-4 h-4" />
@@ -403,14 +430,14 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                 </div>
             </div>
 
-            {view === 'active' && (
+            {(view === 'active' || view === 'cancelled') && (
                 <div className="flex gap-4 mb-6 border-b border-slate-200 px-2">
                     <button
                         onClick={() => setActiveTab('data')}
                         className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'data' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}
                     >
                         <List className="w-4 h-4" />
-                        Data (Active Registrations)
+                        Data ({view === 'cancelled' ? 'Cancelled Registrations' : 'Active Registrations'})
                     </button>
                     <button
                         onClick={() => setActiveTab('map')}
@@ -446,7 +473,10 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                     { label: 'Pending', value: 'queue' },
                                     { label: 'Installing', value: 'installation_process' },
                                     { label: 'Done', value: 'done' },
-                                    { label: 'Cancelled', value: 'cancel' }
+                                    { label: 'Cancelled - User (Undefined)', value: 'cancel' },
+                                    { label: 'Cancelled - User (Price)', value: 'cancel_user_price' },
+                                    { label: 'Cancelled - Admin (OOC)', value: 'cancel_admin_ooc' },
+                                    { label: 'Cancelled - Teknisi (ODP Full)', value: 'cancel_teknisi_odp' }
                                 ]}
                                 placeholder="Status"
                             />
@@ -570,15 +600,19 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                         </td>
                                     )}
                                     <td className="px-6 py-4">
-                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${reg.status === 'queue' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${reg.status === 'queue' ? 'bg-amber-50 text-amber-700 border-amber-200' :
                                             reg.status === 'installation_process' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                                                 reg.status === 'done' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                    reg.status.startsWith('cancel') ? 'bg-red-50 text-red-700 border-red-200' :
                                                     'bg-slate-100 text-slate-600 border-slate-200'
                                             }`}>
                                             {reg.status === 'queue' && 'Pending'}
                                             {reg.status === 'installation_process' && 'Installing'}
                                             {reg.status === 'done' && 'Done'}
-                                            {reg.status === 'cancel' && 'Cancelled'}
+                                            {reg.status === 'cancel' && 'Cancelled - User (Undefined)'}
+                                            {reg.status === 'cancel_user_price' && 'Cancelled - User (Price)'}
+                                            {reg.status === 'cancel_admin_ooc' && 'Cancelled - Admin (OOC)'}
+                                            {reg.status === 'cancel_teknisi_odp' && 'Cancelled - Teknisi (ODP Full)'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4">
@@ -649,12 +683,12 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                                             <Wrench className="w-4 h-4" />
                                                         </button>
                                                     )}
-                                                    <button onClick={() => handleCancelReg(reg.id)} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Cancel">
+                                                    <button onClick={() => openCancelModal(reg.id)} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Cancel">
                                                         <XCircle className="w-4 h-4" />
                                                     </button>
                                                 </>
                                             )}
-                                            {reg.status === 'cancel' && (
+                                            {reg.status.startsWith('cancel') && (
                                                 <button onClick={() => handleReinstall(reg.id)} className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors" title="Reinstall">
                                                     <RotateCcw className="w-4 h-4" />
                                                 </button>
@@ -725,7 +759,10 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[600px] h-[calc(100vh-220px)] relative z-0">
                     <MapContainer center={[-0.366535, 101.556898]} zoom={13} style={{ height: '100%', width: '100%' }}>
                         <TileLayer url={`https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}`} attribution='&copy; Google Maps' maxZoom={22} />
-                        {registrations.filter(r => r.status !== 'done' && r.status !== 'cancel').map(reg => {
+                        {registrations.filter(r => {
+                            if (view === 'cancelled') return r.status.startsWith('cancel');
+                            return r.status !== 'done' && !r.status.startsWith('cancel');
+                        }).map(reg => {
                             const missing = [];
                             if (!reg.phoneNumber) missing.push('No. HP');
                             if (!reg.mapsUrl) missing.push('Maps');
@@ -744,8 +781,17 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                         <div className="p-1 font-sans">
                                             <h3 className="font-bold text-sm text-slate-800 mb-1">{reg.fullName}</h3>
                                             <div className="text-xs text-slate-500 mb-2">{reg.phoneNumber}</div>
-                                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${reg.status === 'queue' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-                                                {reg.status === 'queue' ? 'Pending' : 'Installing'}
+                                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                                                reg.status === 'queue' ? 'bg-amber-50 text-amber-700 border-amber-200' : 
+                                                reg.status === 'installation_process' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                                reg.status.startsWith('cancel') ? 'bg-red-50 text-red-700 border-red-200' :
+                                                'bg-slate-100 text-slate-600 border-slate-200'
+                                            }`}>
+                                                {reg.status === 'queue' ? 'Pending' : reg.status === 'installation_process' ? 'Installing' : 
+                                                 reg.status === 'cancel' ? 'Cancelled - User (Undefined)' :
+                                                 reg.status === 'cancel_user_price' ? 'Cancelled - User (Price)' :
+                                                 reg.status === 'cancel_admin_ooc' ? 'Cancelled - Admin (OOC)' :
+                                                 reg.status === 'cancel_teknisi_odp' ? 'Cancelled - Teknisi (ODP)' : reg.status}
                                             </span>
                                             <div className="mt-2 text-xs text-slate-600 truncate max-w-[200px]" title={reg.address}>{reg.address}</div>
                                         </div>
@@ -773,14 +819,24 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                             <div>
                                 <div className="text-xs font-medium text-slate-500 mb-2 uppercase tracking-wider">Dot Color (Status)</div>
                                 <div className="space-y-2 mt-1">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 rounded-full shrink-0 shadow-sm bg-[#f59e0b]"></div>
-                                        <span className="text-xs text-slate-600">Pending</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 rounded-full shrink-0 shadow-sm bg-[#3b82f6]"></div>
-                                        <span className="text-xs text-slate-600">Installing</span>
-                                    </div>
+                                    {view === 'active' && (
+                                        <>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 rounded-full shrink-0 shadow-sm bg-[#f59e0b]"></div>
+                                                <span className="text-xs text-slate-600">Pending</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 rounded-full shrink-0 shadow-sm bg-[#3b82f6]"></div>
+                                                <span className="text-xs text-slate-600">Installing</span>
+                                            </div>
+                                        </>
+                                    )}
+                                    {view === 'cancelled' && (
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 rounded-full shrink-0 shadow-sm bg-[#ef4444]"></div>
+                                            <span className="text-xs text-slate-600">Cancelled</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -853,7 +909,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                 <SearchableSelect
                                     required
                                     value={formData.locationId}
-                                    onChange={(val) => setFormData({ ...formData, locationId: val })}
+                                    onChange={(val) => setFormData({ ...formData, locationId: val, sub_area_id: '' })}
                                     options={[
                                         { label: 'Select Server...', value: '' },
                                         ...servers.map(server => ({ label: server.name, value: server.name }))
@@ -861,6 +917,23 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                     placeholder="Select Server..."
                                 />
                             </div>
+                            {formData.locationId && (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Sub Area</label>
+                                    <SearchableSelect
+                                        value={formData.sub_area_id}
+                                        onChange={(val) => setFormData({ ...formData, sub_area_id: val })}
+                                        options={[
+                                            { label: 'Select Sub Area...', value: '' },
+                                            ...subAreas.filter(sa => {
+                                                const server = servers.find(s => s.name === formData.locationId);
+                                                return server && sa.serverId === server.id;
+                                            }).map(sa => ({ label: sa.name, value: sa.id }))
+                                        ]}
+                                        placeholder="Select Sub Area..."
+                                    />
+                                </div>
+                            )}
                             <div className="flex justify-end gap-3 mt-6">
                                 <button type="button" onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
                                 <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90">Save Registration</button>
@@ -1091,7 +1164,38 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                     </div>
                 </div>
             )}
+            {/* Cancel Modal */}
+            {isCancelOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <h3 className="font-semibold text-lg text-slate-900">Cancel Registration</h3>
+                            <button onClick={() => setIsCancelOpen(false)} className="text-slate-400 hover:text-slate-600"><XCircle className="w-6 h-6" /></button>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-slate-500 mb-4 text-sm">Please select a reason for cancelling this registration:</p>
+                            <select
+                                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 bg-slate-50 mb-6"
+                                value={cancelReason}
+                                onChange={(e) => setCancelReason(e.target.value)}
+                            >
+                                <option value="cancel">Cancel - User - Undefined</option>
+                                <option value="cancel_user_price">Cancel - User - (Price)</option>
+                                <option value="cancel_admin_ooc">Cancel - Admin (Out of Coverage)</option>
+                                <option value="cancel_teknisi_odp">Cancel - Teknisi (ODP Full)</option>
+                            </select>
+                            <div className="flex justify-end gap-3">
+                                <button onClick={() => setIsCancelOpen(false)} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
+                                    Cancel
+                                </button>
+                                <button onClick={handleConfirmCancel} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors">
+                                    Confirm Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
-
 }

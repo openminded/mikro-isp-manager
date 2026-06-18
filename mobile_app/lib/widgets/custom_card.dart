@@ -92,9 +92,15 @@ class WorkItemCard extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 8.0),
                     child: InkWell(
                       onTap: () async {
-                        final uri = Uri.parse(item.mapsUrl!);
-                        if (await canLaunchUrl(uri)) {
+                        var urlString = item.mapsUrl!;
+                        if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+                          urlString = 'https://$urlString';
+                        }
+                        final uri = Uri.parse(urlString);
+                        try {
                           await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        } catch (e) {
+                          debugPrint('Could not launch maps: $e');
                         }
                       },
                       child: Row(

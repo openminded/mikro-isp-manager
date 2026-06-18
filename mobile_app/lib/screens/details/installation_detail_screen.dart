@@ -471,10 +471,14 @@ class _InstallationDetailScreenState extends State<InstallationDetailScreen> {
                      padding: const EdgeInsets.symmetric(vertical: 4),
                      child: InkWell(
                        onTap: () async {
-                         final uri = Uri.parse(widget.item.mapsUrl!);
-                         if (await canLaunchUrl(uri)) {
+                         var urlString = widget.item.mapsUrl!;
+                         if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+                           urlString = 'https://$urlString';
+                         }
+                         final uri = Uri.parse(urlString);
+                         try {
                            await launchUrl(uri, mode: LaunchMode.externalApplication);
-                         } else {
+                         } catch (e) {
                            if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not launch maps')));
                          }
                        },

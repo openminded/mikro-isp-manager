@@ -1,7 +1,7 @@
 {
   "name": "new-isp",
   "private": true,
-  "version": "1.0.1+2",
+  "version": "1.0.3+12",
   "type": "module",
   "scripts": {
     "dev": "vite",

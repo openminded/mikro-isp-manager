@@ -144,25 +144,46 @@ class _RegistrationMapScreenState extends State<RegistrationMapScreen> {
           markers.add(
             Marker(
               point: coords,
-              width: 40,
-              height: 40,
+              width: 140,
+              height: 70,
               child: GestureDetector(
                 onTap: () => _showRegistrationInfo(context, reg),
-                child: Stack(
-                  alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.location_on, color: _getServerColor(reg.locationId), size: 40),
-                    Positioned(
-                      top: 6,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: _getStatusColor(reg.status),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.95),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.grey.shade300),
+                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 2, offset: Offset(0, 1))]
                       ),
+                      child: Text(
+                        reg.fullName,
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black87),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Icon(Icons.location_on, color: _getServerColor(reg.locationId), size: 40),
+                        Positioned(
+                          top: 6,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: _getStatusColor(reg.status),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

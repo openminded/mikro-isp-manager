@@ -15,6 +15,7 @@ class RegistrationMapScreen extends StatefulWidget {
 
 class _RegistrationMapScreenState extends State<RegistrationMapScreen> {
   String _view = 'active'; // 'active', 'completed', 'cancelled'
+  String _mapType = 'm'; // 'm' for street, 'y' for satellite
 
   LatLng? _extractCoordinates(String url) {
     if (url.isEmpty) return null;
@@ -22,12 +23,20 @@ class _RegistrationMapScreenState extends State<RegistrationMapScreen> {
       if (url.contains('?q=')) {
         final parts = url.split('?q=')[1].split('&')[0].split(',');
         if (parts.length >= 2) {
-          return LatLng(double.parse(parts[0]), double.parse(parts[1]));
+          double lat = double.parse(parts[0]);
+          double lng = double.parse(parts[1]);
+          if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+            return LatLng(lat, lng);
+          }
         }
       } else if (url.contains('@')) {
         final parts = url.split('@')[1].split(',');
         if (parts.length >= 2) {
-          return LatLng(double.parse(parts[0]), double.parse(parts[1]));
+          double lat = double.parse(parts[0]);
+          double lng = double.parse(parts[1]);
+          if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+            return LatLng(lat, lng);
+          }
         }
       }
     } catch (e) {
@@ -218,11 +227,49 @@ class _RegistrationMapScreenState extends State<RegistrationMapScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                urlTemplate: 'https://mt1.google.com/vt/lyrs=$_mapType&x={x}&y={y}&z={z}',
                 userAgentPackageName: 'com.example.app',
               ),
               MarkerLayer(markers: markers),
             ],
+          ),
+          // Map Type Toggle
+          Positioned(
+            top: 20,
+            right: 20,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+              ),
+              child: Row(
+                children: [
+                  InkWell(
+                    onTap: () => setState(() => _mapType = 'm'),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _mapType == 'm' ? Colors.blue : Colors.transparent,
+                        borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
+                      ),
+                      child: Text('Street', style: TextStyle(color: _mapType == 'm' ? Colors.white : Colors.black87, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => setState(() => _mapType = 'y'),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _mapType == 'y' ? Colors.blue : Colors.transparent,
+                        borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
+                      ),
+                      child: Text('Satellite', style: TextStyle(color: _mapType == 'y' ? Colors.white : Colors.black87, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           // Simple Legend
           Positioned(

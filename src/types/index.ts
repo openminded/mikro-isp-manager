@@ -12,6 +12,7 @@ export interface Customer {
     serverId: string;
     // CRM Fields (from simple DB)
     whatsapp?: string;
+    address?: string;
     lat?: string;
     long?: string;
     photos?: string[]; // URLs

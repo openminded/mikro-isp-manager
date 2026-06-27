@@ -543,6 +543,22 @@ export function Monitoring() {
 
                             return (
                                 <MapContainer center={[mapSettings.defaultLat, mapSettings.defaultLng]} zoom={mapSettings.defaultZoom} style={{ height: '100%', width: '100%', cursor: activeTool === 'FIBER_LINE' ? 'crosshair' : activeTool !== 'SELECT' ? 'crosshair' : 'grab' }}>
+                                    <div className="absolute top-4 right-4 z-[1000]">
+                                        <div className="bg-white rounded-lg shadow-md border border-slate-200 p-1 flex gap-1">
+                                            <button 
+                                                onClick={() => setMapSettings(prev => ({...prev, mapStyle: 'm'}))}
+                                                className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", mapSettings.mapStyle === 'm' ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100")}
+                                            >
+                                                Street
+                                            </button>
+                                            <button 
+                                                onClick={() => setMapSettings(prev => ({...prev, mapStyle: 'y'}))}
+                                                className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", mapSettings.mapStyle === 'y' ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100")}
+                                            >
+                                                Satellite
+                                            </button>
+                                        </div>
+                                    </div>
                                     {focusedPosition && <MapFocus pos={focusedPosition} />}
                                     <TileLayer url={`https://mt1.google.com/vt/lyrs=${mapSettings.mapStyle || 'm'}&x={x}&y={y}&z={z}`} attribution='&copy; Google Maps' maxZoom={mapSettings.maxZoomIn || 22} />
                                     <MapEvents onClick={handleMapClick} onMouseMove={(lat, lng) => setMousePos([lat, lng])} />

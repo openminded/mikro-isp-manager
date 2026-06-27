@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import type { Registration } from '@/types';
+import { cn } from '@/lib/utils';
 import { MapContainer, TileLayer, Marker, Popup, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -18,7 +19,13 @@ L.Icon.Default.mergeOptions({ iconRetinaUrl, iconUrl, shadowUrl });
 const extractCoordinates = (url: string | undefined): [number, number] | null => {
     if (!url) return null;
     const match = url.match(/@?(-?\d+\.\d+),\s*(-?\d+\.\d+)/) || url.match(/q=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
-    if (match) return [parseFloat(match[1]), parseFloat(match[2])];
+    if (match) {
+        const lat = parseFloat(match[1]);
+        const lng = parseFloat(match[2]);
+        if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+            return [lat, lng];
+        }
+    }
     return null;
 };
 
@@ -66,6 +73,7 @@ export function Registration({ view = 'active' }: RegistrationProps) {
     const [employees, setEmployees] = useState<any[]>([]);
     const [jobTitles, setJobTitles] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [mapType, setMapType] = useState<'m' | 'y'>('m');
     const [searchTerm, setSearchTerm] = useState('');
     const { user } = useAuth();
 
@@ -757,8 +765,24 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                 </div>
             ) : (
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[600px] h-[calc(100vh-220px)] relative z-0">
+                    <div className="absolute top-4 right-4 z-[1000]">
+                        <div className="bg-white rounded-lg shadow-md border border-slate-200 p-1 flex gap-1">
+                            <button 
+                                onClick={() => setMapType('m')}
+                                className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", mapType === 'm' ? "bg-primary text-white" : "text-slate-600 hover:bg-slate-100")}
+                            >
+                                Street
+                            </button>
+                            <button 
+                                onClick={() => setMapType('y')}
+                                className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", mapType === 'y' ? "bg-primary text-white" : "text-slate-600 hover:bg-slate-100")}
+                            >
+                                Satellite
+                            </button>
+                        </div>
+                    </div>
                     <MapContainer center={[-0.366535, 101.556898]} zoom={13} style={{ height: '100%', width: '100%' }}>
-                        <TileLayer url={`https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}`} attribution='&copy; Google Maps' maxZoom={22} />
+                        <TileLayer url={`https://mt1.google.com/vt/lyrs=${mapType}&x={x}&y={y}&z={z}`} attribution='&copy; Google Maps' maxZoom={22} />
                         {registrations.filter(r => {
                             if (view === 'cancelled') return r.status.startsWith('cancel');
                             return r.status !== 'done' && !r.status.startsWith('cancel');

@@ -21,6 +21,7 @@ import 'remote_device_screen.dart';
 import 'change_onu_screen.dart';
 import 'registration_map_screen.dart';
 import 'cable_calculator_screen.dart';
+import 'update_map_user_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -255,6 +256,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             title: const Text('Registration Map'),
                             onTap: () {
                                 Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegistrationMapScreen()));
+                            },
+                        ),
+                        ListTile(
+                            leading: const Icon(Icons.pin_drop),
+                            title: const Text('Update Map User'),
+                            onTap: () {
+                                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const UpdateMapUserScreen()));
                             },
                         ),
                     ],

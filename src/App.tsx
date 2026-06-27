@@ -32,6 +32,8 @@ const MikrotikBackup = lazy(() => import("./pages/MikrotikBackup").then(m => ({ 
 const OfflineOnu = lazy(() => import("./pages/OfflineOnu").then(m => ({ default: m.OfflineOnu })));
 const CableCalculator = lazy(() => import("./pages/CableCalculator").then(m => ({ default: m.CableCalculator })));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy").then(m => ({ default: m.PrivacyPolicy })));
+const MonitoringUser = lazy(() => import("./pages/MonitoringUser").then(m => ({ default: m.MonitoringUser })));
+const UpdateMapUser = lazy(() => import("./pages/UpdateMapUser").then(m => ({ default: m.UpdateMapUser })));
 
 
 const PageLoader = () => (
@@ -84,6 +86,8 @@ function App() {
                       <Route path="/device/offline-onu" element={<OfflineOnu />} />
                       <Route path="/device/cable-calculator" element={<CableCalculator />} />
                       <Route path="/device/backup" element={<MikrotikBackup />} />
+                      <Route path="/device/monitoring-user" element={<MonitoringUser />} />
+                      <Route path="/device/update-map-user" element={<UpdateMapUser />} />
                     </Route>
                   </Route>
 

@@ -345,5 +345,193 @@ export const MikrotikApi = {
             throw new Error(err.error || 'Failed to delete NAT rule');
         }
         return await res.json();
+    },
+
+    // --- Hotspot Management ---
+    async getHotspotServers(serverId: string): Promise<any[]> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/servers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to fetch hotspot servers');
+        }
+        return await res.json();
+    },
+
+    async getHotspotUsers(serverId: string): Promise<any[]> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/users`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to fetch hotspot users');
+        }
+        return await res.json();
+    },
+
+    async addHotspotUser(serverId: string, userData: any): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/users/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, userData })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to add hotspot user');
+        }
+        return await res.json();
+    },
+
+    async updateHotspotUser(serverId: string, id: string, userData: any): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/users/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, id, userData })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to update hotspot user');
+        }
+        return await res.json();
+    },
+
+    async deleteHotspotUser(serverId: string, id: string): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/users/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, id })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to delete hotspot user');
+        }
+        return await res.json();
+    },
+
+    async toggleHotspotUser(serverId: string, id: string, disabled: boolean): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/users/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, id, disabled })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to toggle hotspot user');
+        }
+        return await res.json();
+    },
+
+    async getHotspotActive(serverId: string): Promise<any[]> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/active`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to fetch hotspot active sessions');
+        }
+        return await res.json();
+    },
+
+    async kickHotspotUser(serverId: string, id: string): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/active/kick`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, id })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to kick hotspot user');
+        }
+        return await res.json();
+    },
+
+    async getHotspotProfiles(serverId: string): Promise<any[]> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/profiles`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to fetch hotspot profiles');
+        }
+        return await res.json();
+    },
+
+    async generateHotspotVouchers(serverId: string, vouchers: any[]): Promise<{
+        success: boolean;
+        total: number;
+        createdCount: number;
+        created: any[];
+        errors: any[];
+    }> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/vouchers/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, vouchers })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to generate hotspot vouchers');
+        }
+        return await res.json();
+    },
+
+    async setHotspotUserQuota(serverId: string, params: {
+        username?: string;
+        id?: string;
+        limitBytesTotal?: string;
+        limitUptime?: string;
+        comment?: string;
+        customerId?: string;
+    }): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/users/set-quota`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, ...params })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to set user quota');
+        }
+        return await res.json();
+    },
+
+    async getCustomerVouchers(params?: { customerId?: string; serverId?: string; phone?: string; status?: string }): Promise<any> {
+        const q = new URLSearchParams();
+        if (params?.customerId) q.set('customerId', params.customerId);
+        if (params?.serverId) q.set('serverId', params.serverId);
+        if (params?.phone) q.set('phone', params.phone);
+        if (params?.status) q.set('status', params.status);
+        const res = await fetch(`${META_API_URL}/customer-vouchers?${q.toString()}`);
+        if (!res.ok) throw new Error('Failed to fetch customer vouchers');
+        return await res.json();
+    },
+
+    async getVouchersByCustomerId(customerId: string): Promise<any> {
+        const res = await fetch(`${META_API_URL}/customers/${customerId}/vouchers`);
+        if (!res.ok) throw new Error('Failed to fetch vouchers for customer');
+        return await res.json();
+    },
+
+    async resetHotspotUserCounters(serverId: string, params: { id?: string; username?: string }): Promise<any> {
+        const res = await fetch(`${META_API_URL}/mikrotik/hotspot/users/reset-counters`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serverId, ...params })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to reset user counters');
+        }
+        return await res.json();
     }
 };
+

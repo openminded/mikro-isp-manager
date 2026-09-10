@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/work_provider.dart';
+import '../providers/customer_provider.dart';
 import '../services/api_service.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -72,10 +73,11 @@ class _UpdateMapUserScreenState extends State<UpdateMapUserScreen> {
 
     try {
       final workFn = Provider.of<WorkProvider>(context, listen: false);
-      final customer = workFn.customers.firstWhere((c) => c.id == _selectedCustomer || c.name == _selectedCustomer);
+      final custFn = Provider.of<CustomerProvider>(context, listen: false);
+      final customer = custFn.customers.firstWhere((c) => c.id == _selectedCustomer || c.name == _selectedCustomer);
       
       final api = ApiService();
-      final customerId = customer.crmId ?? customer.id ?? customer.name;
+      final customerId = customer.id;
       
       final mapsUrl = 'https://maps.google.com/?q=${_currentPosition!.latitude},${_currentPosition!.longitude}';
 
@@ -86,15 +88,6 @@ class _UpdateMapUserScreenState extends State<UpdateMapUserScreen> {
       };
 
       await api.put('/customers/$customerId', body);
-
-      // Try updating registration too if present
-      if (customer.registrationId != null) {
-          try {
-              await api.put('/registrations/${customer.registrationId}', {'mapsUrl': mapsUrl});
-          } catch(e) {
-              // ignore
-          }
-      }
 
       if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location saved successfully')));
@@ -115,10 +108,11 @@ class _UpdateMapUserScreenState extends State<UpdateMapUserScreen> {
   @override
   Widget build(BuildContext context) {
     final workFn = Provider.of<WorkProvider>(context);
+    final custFn = Provider.of<CustomerProvider>(context);
     final servers = workFn.servers;
     
     // Filter customers
-    final serverCustomers = workFn.customers.where((c) => c.serverId == _selectedServer && !(c.disabled ?? false)).toList();
+    final serverCustomers = custFn.customers.where((c) => c.serverId == _selectedServer && !(c.disabled ?? false)).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Update Map User')),

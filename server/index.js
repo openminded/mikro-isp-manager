@@ -6,14 +6,14 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory, RemoteDevice, OnuChangeLog } from './models/index.js';
+import { initDB, Server, Invoice, Payment, Customer, InvoiceHistory, RemoteDevice, OnuChangeLog, CustomerVoucher } from './models/index.js';
 import { Sequelize, Op } from 'sequelize';
 import archiver from 'archiver';
 import AdmZip from 'adm-zip';
 import PDFDocument from 'pdfkit';
 
 const { RouterOSAPI } = routeros;
-const APP_VERSION = '1.0.3-BULK-DELETE-PAYMENTS';
+const APP_VERSION = '1.0.6-MULTI-ACCOUNT-OPTIMIZED-PROD';
 
 
 
@@ -255,15 +255,19 @@ if (CACHE.customers && typeof CACHE.customers === 'object') {
     }
 }
 
-// Health Check & Version
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        version: APP_VERSION, 
-        time: new Date().toISOString(),
-        db: 'connected'
-    });
+// Health Check & Version Endpoints
+const getHealthInfo = () => ({
+    status: 'ok',
+    version: APP_VERSION,
+    updatedAt: '2026-09-11 02:45 WIB',
+    features: ['multiple-vouchers-fix', 'cid-comment-matching', 'custom-server-url'],
+    time: new Date().toISOString(),
+    db: 'connected'
 });
+
+app.get('/api/health', (req, res) => res.json(getHealthInfo()));
+app.get('/api/version', (req, res) => res.json(getHealthInfo()));
+app.get('/version', (req, res) => res.json(getHealthInfo()));
 
 
 // [DEBUG] Explicit Customers Route (Priority)
@@ -276,9 +280,25 @@ app.get('/api/customers', async (req, res) => {
         const sqlCustomers = await Customer.findAll();
         
         const sqlMap = new Map();
+        const nameMap = new Map();
+        const phonePasswordMap = new Map();
+
         sqlCustomers.forEach(c => {
+            const json = c.toJSON();
             const key = `${String(c.server_id).toLowerCase()}-${String(c.mikrotik_name).toLowerCase().trim()}`;
-            sqlMap.set(key, c.toJSON());
+            sqlMap.set(key, json);
+            if (c.mikrotik_name) {
+                nameMap.set(String(c.mikrotik_name).toLowerCase().trim(), json);
+            }
+            if (c.phone_number && c.password) {
+                const clean = c.phone_number.replace(/\D/g, '');
+                if (clean) {
+                    phonePasswordMap.set(clean, c.password);
+                    if (clean.length >= 8) {
+                        phonePasswordMap.set(clean.slice(-8), c.password);
+                    }
+                }
+            }
         });
 
         const mergedList = [];
@@ -299,7 +319,8 @@ app.get('/api/customers', async (req, res) => {
 
             for (const secret of cacheData) {
                 const key = `${String(server.id).toLowerCase()}-${String(secret.name).toLowerCase().trim()}`;
-                const sqlC = sqlMap.get(key);
+                const nameKey = String(secret.name).toLowerCase().trim();
+                const sqlC = sqlMap.get(key) || nameMap.get(nameKey);
                 processedKeys.add(key);
                 
                 let lat = null, long = null;
@@ -307,6 +328,20 @@ app.get('/api/customers', async (req, res) => {
                     const parts = sqlC.coordinates.split(',');
                     lat = parts[0].trim();
                     long = parts[1].trim();
+                }
+
+                // Resolve effective appPassword (check SQL record password -> phonePasswordMap -> default 'nusantara!')
+                let effectivePassword = sqlC?.password;
+                if (!effectivePassword) {
+                    const phoneToTest = (sqlC?.phone_number || secret.comment || '').replace(/\D/g, '');
+                    if (phoneToTest && phoneToTest.length >= 6) {
+                        for (const [pKey, pVal] of phonePasswordMap.entries()) {
+                            if (phoneToTest.endsWith(pKey) || pKey.endsWith(phoneToTest)) {
+                                effectivePassword = pVal;
+                                break;
+                            }
+                        }
+                    }
                 }
 
                 mergedList.push({
@@ -331,6 +366,8 @@ app.get('/api/customers', async (req, res) => {
                     signalLevel: sqlC ? (sqlC.signalLevel || '') : '',
                     sub_area_id: sqlC ? (sqlC.sub_area_id || '') : '',
                     photos: sqlC ? (sqlC.photos || []) : [],
+                    appPassword: effectivePassword || 'nusantara!',
+                    crmId: sqlC ? sqlC.id : null,
                     disabled: secret.disabled === 'true' || secret.disabled === 'yes' || secret.disabled === true
                 });
             }
@@ -458,7 +495,7 @@ app.post('/api/mikrotik/sync', async (req, res) => {
 
     try {
         await client.connect();
-        const data = await client.write(command);
+        let data = await client.write(command);
         await client.close();
 
         // Save to cache
@@ -961,6 +998,546 @@ app.delete('/api/mikrotik/nat', async (req, res) => {
     }
 });
 
+// --- Mikrotik Hotspot Management ---
+
+// Helper: Connect to MikroTik and run command(s)
+const runMikrotikCommand = async (serverId, commands) => {
+    const server = await Server.findByPk(serverId);
+    if (!server) throw new Error('Server not found');
+
+    const portNumber = server.port ? parseInt(server.port, 10) : 8728;
+    console.log(`[Hotspot API] Connecting to ${server.name} (${server.ip}:${portNumber})...`);
+
+    const client = new RouterOSAPI({
+        host: server.ip,
+        port: portNumber,
+        user: server.username,
+        password: server.password,
+        keepalive: false,
+        timeout: 3
+    });
+    client.on('error', (err) => console.error(`[Hotspot] Client Error (${server.ip}:${portNumber}):`, err.message));
+
+    try {
+        await client.connect();
+        const data = await client.write(commands);
+        return data;
+    } finally {
+        try { await client.close(); } catch (e) {}
+    }
+};
+
+// Get Hotspot Servers
+app.post('/api/mikrotik/hotspot/servers', async (req, res) => {
+    const { serverId } = req.body;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const data = await runMikrotikCommand(serverId, ['/ip/hotspot/print']);
+        res.json(Array.isArray(data) ? data : []);
+    } catch (e) {
+        console.error('[Hotspot Servers]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get Hotspot Users
+app.post('/api/mikrotik/hotspot/users', async (req, res) => {
+    const { serverId } = req.body;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const data = await runMikrotikCommand(serverId, ['/ip/hotspot/user/print']);
+        res.json(Array.isArray(data) ? data : []);
+    } catch (e) {
+        console.error('[Hotspot Users]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add Hotspot User
+app.post('/api/mikrotik/hotspot/users/add', async (req, res) => {
+    const { serverId, userData } = req.body;
+    if (!serverId || !userData) return res.status(400).json({ error: 'Missing serverId or userData' });
+
+    try {
+        const command = ['/ip/hotspot/user/add'];
+        Object.keys(userData).forEach(key => {
+            if (userData[key] !== undefined && userData[key] !== null && userData[key] !== '') {
+                command.push(`=${key}=${userData[key]}`);
+            }
+        });
+        const data = await runMikrotikCommand(serverId, command);
+        await logActivity(req, 'HOTSPOT_USER_ADD', { serverId, user: userData.name });
+        res.json({ success: true, data });
+    } catch (e) {
+        console.error('[Hotspot User Add]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update Hotspot User
+app.post('/api/mikrotik/hotspot/users/update', async (req, res) => {
+    const { serverId, id, userData } = req.body;
+    if (!serverId || !id) return res.status(400).json({ error: 'Missing serverId or id' });
+
+    try {
+        const command = ['/ip/hotspot/user/set', `=.id=${id}`];
+        Object.keys(userData).forEach(key => {
+            if (userData[key] !== undefined && userData[key] !== null) {
+                command.push(`=${key}=${userData[key]}`);
+            }
+        });
+        const data = await runMikrotikCommand(serverId, command);
+        await logActivity(req, 'HOTSPOT_USER_UPDATE', { serverId, id, user: userData.name });
+        res.json({ success: true, data });
+    } catch (e) {
+        console.error('[Hotspot User Update]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete Hotspot User
+app.post('/api/mikrotik/hotspot/users/delete', async (req, res) => {
+    const { serverId, id, username } = req.body;
+    if (!serverId || !id) return res.status(400).json({ error: 'Missing serverId or id' });
+
+    try {
+        const data = await runMikrotikCommand(serverId, ['/ip/hotspot/user/remove', `=.id=${id}`]);
+        if (username) {
+            await CustomerVoucher.update({ status: 'expired' }, { where: { voucher_code: username } }).catch(() => {});
+        }
+        await logActivity(req, 'HOTSPOT_USER_DELETE', { serverId, id, username });
+        res.json({ success: true, data });
+    } catch (e) {
+        console.error('[Hotspot User Delete]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Toggle (Enable/Disable) Hotspot User
+app.post('/api/mikrotik/hotspot/users/toggle', async (req, res) => {
+    const { serverId, id, disabled } = req.body;
+    if (!serverId || !id) return res.status(400).json({ error: 'Missing serverId or id' });
+
+    try {
+        const data = await runMikrotikCommand(serverId, [
+            '/ip/hotspot/user/set',
+            `=.id=${id}`,
+            `=disabled=${disabled ? 'yes' : 'no'}`
+        ]);
+        await logActivity(req, 'HOTSPOT_USER_TOGGLE', { serverId, id, disabled });
+        res.json({ success: true, data });
+    } catch (e) {
+        console.error('[Hotspot User Toggle]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get Hotspot Active Sessions
+app.post('/api/mikrotik/hotspot/active', async (req, res) => {
+    const { serverId } = req.body;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const data = await runMikrotikCommand(serverId, ['/ip/hotspot/active/print']);
+        res.json(Array.isArray(data) ? data : []);
+    } catch (e) {
+        console.error('[Hotspot Active]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Kick/Disconnect Hotspot Active User
+app.post('/api/mikrotik/hotspot/active/kick', async (req, res) => {
+    const { serverId, id } = req.body;
+    if (!serverId || !id) return res.status(400).json({ error: 'Missing serverId or id' });
+
+    try {
+        const data = await runMikrotikCommand(serverId, ['/ip/hotspot/active/remove', `=.id=${id}`]);
+        await logActivity(req, 'HOTSPOT_USER_KICK', { serverId, id });
+        res.json({ success: true, data });
+    } catch (e) {
+        console.error('[Hotspot Kick]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Get Hotspot User Profiles
+app.post('/api/mikrotik/hotspot/profiles', async (req, res) => {
+    const { serverId } = req.body;
+    if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+    try {
+        const data = await runMikrotikCommand(serverId, ['/ip/hotspot/user/profile/print']);
+        res.json(Array.isArray(data) ? data : []);
+    } catch (e) {
+        console.error('[Hotspot Profiles]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Batch Generate Hotspot Vouchers
+app.post('/api/mikrotik/hotspot/vouchers/generate', async (req, res) => {
+    const { serverId, vouchers } = req.body;
+    if (!serverId || !Array.isArray(vouchers) || vouchers.length === 0) {
+        return res.status(400).json({ error: 'Missing serverId or vouchers array' });
+    }
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) throw new Error('Server not found');
+
+        const portNumber = server.port ? parseInt(server.port, 10) : 8728;
+        const client = new RouterOSAPI({
+            host: server.ip,
+            port: portNumber,
+            user: server.username,
+            password: server.password,
+            keepalive: false,
+            timeout: 30
+        });
+        await client.connect();
+
+        const created = [];
+        const errors = [];
+
+        // Whitelist of valid mikrotik /ip/hotspot/user parameters
+        const MIKROTIK_USER_PARAMS = new Set([
+            'name', 'password', 'profile', 'server', 
+            'limit-bytes-total', 'limit-bytes-in', 'limit-bytes-out',
+            'limit-uptime', 'comment', 'disabled', 'email', 'routes'
+        ]);
+
+        for (const v of vouchers) {
+            try {
+                // Ensure customer is resolved and matched to the Customers table
+                let matchedCustomerId = null;
+                let customerRecord = null;
+
+                // 1. Try finding customer by provided UUID
+                if (v.customerId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.customerId)) {
+                    customerRecord = await Customer.findByPk(v.customerId);
+                    if (customerRecord) matchedCustomerId = customerRecord.id;
+                }
+
+                // 2. If not found, try finding by mikrotik_name (PPPoE / customer username) on this server
+                if (!matchedCustomerId && v.customerUsername) {
+                    customerRecord = await Customer.findOne({
+                        where: {
+                            server_id: server.id,
+                            mikrotik_name: v.customerUsername
+                        }
+                    });
+                    if (customerRecord) matchedCustomerId = customerRecord.id;
+                }
+
+                // 3. If not found, try finding by phone number if provided
+                if (!matchedCustomerId && v.customerPhone && v.customerPhone.trim().length > 5) {
+                    customerRecord = await Customer.findOne({
+                        where: {
+                            server_id: server.id,
+                            phone_number: v.customerPhone.trim()
+                        }
+                    });
+                    if (customerRecord) matchedCustomerId = customerRecord.id;
+                }
+
+                // 4. If customer is from an active user but doesn't exist yet in the Customers table, auto-create
+                if (!matchedCustomerId && v.customerUsername) {
+                    try {
+                        const newCust = await Customer.create({
+                            server_id: server.id,
+                            mikrotik_name: v.customerUsername,
+                            name: v.customerName || v.customerUsername,
+                            real_name: v.customerName || v.customerUsername,
+                            phone_number: v.customerPhone || null,
+                            profile: v.profile || 'default',
+                            status: 'active'
+                        });
+                        customerRecord = newCust;
+                        matchedCustomerId = newCust.id;
+                    } catch (custCreateErr) {
+                        console.warn('[Auto Create Customer Warning]', custCreateErr.message);
+                    }
+                }
+
+                // Append [CID:uuid] to router comment so MikroTik and DB are always cross-referenceable
+                let mikrotikComment = v.comment || '';
+                if (matchedCustomerId && !mikrotikComment.includes(`[CID:${matchedCustomerId}]`)) {
+                    mikrotikComment = `[CID:${matchedCustomerId}] ${mikrotikComment}`.trim();
+                }
+
+                const command = ['/ip/hotspot/user/add'];
+                Object.keys(v).forEach(k => {
+                    if (k === 'comment') {
+                        if (mikrotikComment) command.push(`=comment=${mikrotikComment}`);
+                    } else if (MIKROTIK_USER_PARAMS.has(k) && v[k] !== undefined && v[k] !== null && v[k] !== '') {
+                        command.push(`=${k}=${v[k]}`);
+                    }
+                });
+                if (!v.comment && mikrotikComment) {
+                    command.push(`=comment=${mikrotikComment}`);
+                }
+
+                await client.write(command);
+
+                // Save to CustomerVoucher database for client-side access & future customer portal
+                try {
+                    const savedVoucher = await CustomerVoucher.create({
+                        customer_id: matchedCustomerId || null,
+                        customer_name: v.customerName || customerRecord?.name || customerRecord?.real_name || (v.comment ? v.comment.replace(/^\[.*?\]\s*/, '') : null),
+                        customer_username: v.customerUsername || customerRecord?.mikrotik_name || null,
+                        customer_phone: v.customerPhone || customerRecord?.phone_number || null,
+                        sub_area_name: v.subAreaName || null,
+                        server_id: server.id,
+                        server_name: server.name,
+                        voucher_code: v.name,
+                        voucher_password: v.password || null,
+                        profile: v.profile || 'default',
+                        quota_gb: Number(v.quotaGb) || (v['limit-bytes-total'] ? Math.round(Number(v['limit-bytes-total']) / 1073741824) : 0),
+                        validity: v.validity || v['limit-uptime'] || '30d',
+                        status: 'active',
+                        notes: mikrotikComment || null
+                    });
+                    created.push({ ...v, customerId: matchedCustomerId, dbId: savedVoucher.id });
+                } catch (dbErr) {
+                    console.error('[Hotspot Vouchers DB Save Error]', dbErr.message);
+                    created.push({ ...v, customerId: matchedCustomerId });
+                }
+            } catch (err) {
+                errors.push({ voucher: v.name, customerName: v.customerName, error: err.message });
+            }
+        }
+
+        await client.close();
+
+        await logActivity(req, 'HOTSPOT_VOUCHERS_GENERATE', {
+            serverId,
+            count: created.length,
+            errorsCount: errors.length
+        });
+
+        res.json({
+            success: true,
+            total: vouchers.length,
+            createdCount: created.length,
+            created,
+            errors
+        });
+    } catch (e) {
+        console.error('[Hotspot Vouchers Generate]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Query Customer Vouchers (Accessible by Client Portal & Admin)
+app.get('/api/customer-vouchers', async (req, res) => {
+    try {
+        const { customerId, serverId, phone, status } = req.query;
+        const whereClause = {};
+
+        if (customerId) whereClause.customer_id = customerId;
+        if (serverId) whereClause.server_id = serverId;
+        if (phone) whereClause.customer_phone = phone;
+        if (status) whereClause.status = status;
+
+        const vouchers = await CustomerVoucher.findAll({
+            where: whereClause,
+            include: [{
+                model: Customer,
+                attributes: ['id', 'name', 'real_name', 'mikrotik_name', 'phone_number', 'profile', 'address', 'sub_area_id'],
+                required: false
+            }],
+            order: [['createdAt', 'DESC']],
+            limit: 200
+        });
+
+        res.json(vouchers);
+    } catch (e) {
+        console.error('[Get Customer Vouchers Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Query Vouchers for Specific Customer ID / Username / Phone (Future Client Portal Ready)
+app.get('/api/customers/:id/vouchers', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Try finding the customer first if id matches UUID, mikrotik_name, or phone
+        let targetCustomer = null;
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+            targetCustomer = await Customer.findByPk(id);
+        } else {
+            targetCustomer = await Customer.findOne({
+                where: {
+                    [Op.or]: [
+                        { mikrotik_name: id },
+                        { phone_number: id }
+                    ]
+                }
+            });
+        }
+
+        const orConditions = [
+            { customer_id: id },
+            { customer_username: id }
+        ];
+
+        if (targetCustomer) {
+            orConditions.push({ customer_id: targetCustomer.id });
+            if (targetCustomer.mikrotik_name) {
+                orConditions.push({ customer_username: targetCustomer.mikrotik_name });
+            }
+            if (targetCustomer.phone_number) {
+                orConditions.push({ customer_phone: targetCustomer.phone_number });
+            }
+        }
+
+        const vouchers = await CustomerVoucher.findAll({
+            where: {
+                [Op.or]: orConditions
+            },
+            include: [{
+                model: Customer,
+                attributes: ['id', 'name', 'real_name', 'mikrotik_name', 'phone_number', 'profile'],
+                required: false
+            }],
+            order: [['createdAt', 'DESC']]
+        });
+
+        res.json({
+            success: true,
+            customer: targetCustomer ? {
+                id: targetCustomer.id,
+                name: targetCustomer.name,
+                real_name: targetCustomer.real_name,
+                username: targetCustomer.mikrotik_name,
+                phone: targetCustomer.phone_number
+            } : null,
+            total: vouchers.length,
+            vouchers
+        });
+    } catch (e) {
+        console.error('[Get Customer ID Vouchers Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update or Inject Quota for Active/Existing User
+app.post('/api/mikrotik/hotspot/users/set-quota', async (req, res) => {
+    const { serverId, username, id, customerId, limitBytesTotal, limitUptime, comment } = req.body;
+    if (!serverId || (!id && !username)) {
+        return res.status(400).json({ error: 'Missing serverId and user identifier (id or username)' });
+    }
+
+    try {
+        const server = await Server.findByPk(serverId);
+        if (!server) throw new Error('Server not found');
+
+        const client = new RouterOSAPI({
+            host: server.ip,
+            port: server.port || 8728,
+            user: server.username,
+            password: server.password,
+            keepalive: false,
+            timeout: 20
+        });
+        await client.connect();
+
+        let targetId = id;
+        let targetUsername = username;
+        if (!targetId && username) {
+            const findUser = await client.write(['/ip/hotspot/user/print', `?name=${username}`]);
+            if (Array.isArray(findUser) && findUser.length > 0) {
+                targetId = findUser[0]['.id'];
+                targetUsername = findUser[0]['name'] || username;
+            } else {
+                await client.close();
+                return res.status(404).json({ error: `User hotspot '${username}' tidak ditemukan di router` });
+            }
+        }
+
+        // Resolve customer from DB
+        let customerRecord = null;
+        if (customerId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(customerId)) {
+            customerRecord = await Customer.findByPk(customerId);
+        }
+        if (!customerRecord && targetUsername) {
+            customerRecord = await Customer.findOne({
+                where: { server_id: server.id, mikrotik_name: targetUsername }
+            });
+        }
+        // Auto-create Customer entry if user is on router but not yet in DB
+        if (!customerRecord && targetUsername) {
+            try {
+                customerRecord = await Customer.create({
+                    server_id: server.id,
+                    mikrotik_name: targetUsername,
+                    name: targetUsername,
+                    real_name: targetUsername,
+                    status: 'active'
+                });
+            } catch (ignored) {}
+        }
+
+        let updatedComment = comment || '';
+        if (customerRecord && !updatedComment.includes(`[CID:${customerRecord.id}]`)) {
+            updatedComment = `[CID:${customerRecord.id}] ${updatedComment}`.trim();
+        }
+
+        const command = ['/ip/hotspot/user/set', `=.id=${targetId}`];
+        if (limitBytesTotal) command.push(`=limit-bytes-total=${limitBytesTotal}`);
+        if (limitUptime) command.push(`=limit-uptime=${limitUptime}`);
+        if (updatedComment) command.push(`=comment=${updatedComment}`);
+
+        const result = await client.write(command);
+
+        // Optionally reset counter so new quota starts fresh
+        try {
+            await client.write(['/ip/hotspot/user/reset-counters', `=.id=${targetId}`]);
+        } catch (ignored) {}
+
+        await client.close();
+
+        // Record in CustomerVoucher history
+        if (customerRecord || targetUsername) {
+            try {
+                const quotaGb = limitBytesTotal ? Math.round(Number(limitBytesTotal) / 1073741824) : 0;
+                await CustomerVoucher.create({
+                    customer_id: customerRecord?.id || null,
+                    customer_name: customerRecord?.name || customerRecord?.real_name || targetUsername,
+                    customer_username: targetUsername,
+                    customer_phone: customerRecord?.phone_number || null,
+                    server_id: server.id,
+                    server_name: server.name,
+                    voucher_code: targetUsername,
+                    quota_gb: quotaGb,
+                    validity: limitUptime || '30d',
+                    status: 'active',
+                    notes: updatedComment || 'Injeksi Kuota User Aktif'
+                });
+            } catch (recErr) {
+                console.warn('[CustomerVoucher Injected Record Error]', recErr.message);
+            }
+        }
+
+        await logActivity(req, 'HOTSPOT_USER_SET_QUOTA', {
+            serverId,
+            username: targetUsername || targetId,
+            customerId: customerRecord?.id,
+            limitBytesTotal,
+            limitUptime
+        });
+
+        res.json({ success: true, customerId: customerRecord?.id, data: result });
+    } catch (e) {
+        console.error('[Hotspot Set Quota]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- Mikrotik Backup / Restore ---
 
 // List backup files on Mikrotik
@@ -1300,6 +1877,45 @@ app.put('/api/mikrotik/secrets', async (req, res) => {
         await client.write(cmd);
         await client.close();
 
+        // If profile was changed from 'BELUM AKTIF' to any active package, automatically record activationDate
+        if (profile !== undefined) {
+            const oldProfile = existing[0]['profile'] || '';
+            const isOldBelumAktif = oldProfile.toLowerCase().trim() === 'belum aktif';
+            const isNewActive = profile.toLowerCase().trim() !== 'belum aktif';
+
+            if (isOldBelumAktif && isNewActive) {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const cleanName = String(name).toLowerCase().trim();
+                console.log(`[Activation] Customer ${name} profile changed from "${oldProfile}" to "${profile}". Setting activationDate to ${todayStr}.`);
+
+                const sqlCustomer = await Customer.findOne({
+                    where: { server_id: serverId, mikrotik_name: cleanName }
+                });
+
+                if (sqlCustomer) {
+                    await sqlCustomer.update({
+                        profile: profile,
+                        activationDate: todayStr
+                    });
+                }
+
+                // Update JSON cache as well
+                const db = getDB();
+                const key = `${String(serverId).toLowerCase()}-${cleanName}`;
+                if (db[key]) {
+                    db[key].activationDate = todayStr;
+                    saveDB(db);
+                }
+            } else if (profile) {
+                // Keep profile attribute synced in SQL Customer
+                const cleanName = String(name).toLowerCase().trim();
+                await Customer.update(
+                    { profile: profile },
+                    { where: { server_id: serverId, mikrotik_name: cleanName } }
+                );
+            }
+        }
+
         res.json({ success: true, message: 'Secret updated successfully' });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -1525,8 +2141,10 @@ app.put('/api/customers/:id', async (req, res) => {
             return res.status(404).json({ error: 'Customer not found (SQL Lookup Failed)' });
         }
 
+        const appPassword = req.body.appPassword || req.body.app_password;
+
         // Update SQL fields
-        await customer.update({
+        const updateData = {
             // Explicitly separate Mikrotik account and Real Name
             real_name: realName ?? customer.real_name, 
             phone_number: whatsapp ?? customer.phone_number,
@@ -1540,7 +2158,34 @@ app.put('/api/customers/:id', async (req, res) => {
             ssidName: ssidName ?? customer.ssidName,
             ssidPassword: ssidPassword ?? customer.ssidPassword,
             signalLevel: signalLevel ?? customer.signalLevel
-        });
+        };
+
+        if (appPassword) {
+            updateData.password = appPassword;
+            updateData.must_change_password = false;
+        }
+
+        await customer.update(updateData);
+
+        // Sync password across all accounts sharing the same phone number if appPassword was updated
+        if (appPassword && customer.phone_number) {
+            const cleanPhone = customer.phone_number.replace(/\D/g, '');
+            const phoneSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+            await Customer.update({
+                password: appPassword,
+                must_change_password: false
+            }, {
+                where: {
+                    [Op.or]: [
+                        { phone_number: customer.phone_number },
+                        ...(phoneSuffix ? [
+                            { phone_number: { [Op.like]: `%${phoneSuffix}` } },
+                            { phone_number: cleanPhone }
+                        ] : [])
+                    ]
+                }
+            }).catch(e => console.error('[Password Sync Error]', e));
+        }
 
         // Also update JSON metadata (customers.json) for immediate frontend consistency
         const db = getDB();
@@ -3908,6 +4553,870 @@ app.get('/api/auth/me', (req, res) => {
     }
 });
 
+// --- Customer Portal (GigaNusa App) Auth & API ---
+
+// Customer Login via Phone Number & Password
+app.post('/api/customer-auth/login', async (req, res) => {
+    try {
+        let { phone, password } = req.body;
+        if (!phone || !password) {
+            return res.status(400).json({ error: 'Nomor HP dan kata sandi wajib diisi' });
+        }
+
+        phone = String(phone).trim();
+        const inputPassword = String(password).trim();
+
+        // Normalize phone variations (08... -> 628... or match endsWith)
+        const cleanPhone = phone.replace(/\D/g, '');
+        const phoneRegex = cleanPhone.startsWith('62') 
+            ? cleanPhone.substring(2) 
+            : cleanPhone.startsWith('0') 
+                ? cleanPhone.substring(1) 
+                : cleanPhone;
+
+        const whereConditions = [
+            { phone_number: phone },
+            { mikrotik_name: phone }
+        ];
+        if (cleanPhone && cleanPhone.length >= 6) {
+            whereConditions.push({ phone_number: cleanPhone });
+        }
+        if (phoneRegex && phoneRegex.length >= 6) {
+            whereConditions.push({ phone_number: { [Op.like]: `%${phoneRegex}` } });
+        }
+
+        const candidateCustomers = await Customer.findAll({
+            where: {
+                [Op.or]: whereConditions
+            }
+        });
+
+        if (!candidateCustomers || candidateCustomers.length === 0) {
+            console.log(`[CUSTOMER LOGIN FAIL] Phone/User "${phone}" (clean: ${cleanPhone}) not found in DB`);
+            return res.status(401).json({ error: 'Nomor HP atau Username tidak terdaftar sebagai pelanggan' });
+        }
+
+        // Find candidate(s) with matching password
+        const passwordMatches = candidateCustomers.filter(c => {
+            const pwd = (c.password || 'nusantara!').trim();
+            return pwd === inputPassword;
+        });
+
+        if (passwordMatches.length === 0) {
+            console.log(`[CUSTOMER LOGIN PWD FAIL] Found ${candidateCustomers.length} candidate accounts for "${phone}", but none matched input password "${inputPassword}"`);
+            return res.status(401).json({ error: 'Kata sandi salah. Sandi default: nusantara!' });
+        }
+
+        const { selectedCustomerId } = req.body;
+
+        let customer = null;
+        if (selectedCustomerId) {
+            customer = passwordMatches.find(c => String(c.id) === String(selectedCustomerId));
+        }
+
+        if (!customer) {
+            if (passwordMatches.length > 1) {
+                const servers = await Server.findAll();
+                const serverMap = new Map(servers.map(s => [s.id, s.name]));
+
+                const accountOptions = passwordMatches.map(c => ({
+                    id: c.id,
+                    name: c.mikrotik_name || c.name || 'Pelanggan',
+                    real_name: c.real_name || c.name || 'Pelanggan',
+                    phone_number: c.phone_number || phone,
+                    server_id: c.server_id,
+                    server_name: serverMap.get(c.server_id) || 'Router Server',
+                    profile: c.profile || 'Reguler',
+                    address: c.address || '',
+                    status: c.status || 'active'
+                }));
+
+                console.log(`[CUSTOMER LOGIN MULTI] Found ${accountOptions.length} matching accounts for ${phone}. Prompting user to select.`);
+                return res.json({
+                    success: false,
+                    multipleAccounts: true,
+                    message: 'Nomor HP Anda terdaftar di beberapa lokasi/server. Silakan pilih akun yang ingin diakses:',
+                    accounts: accountOptions
+                });
+            } else {
+                customer = passwordMatches[0];
+            }
+        }
+
+        console.log(`[CUSTOMER LOGIN SUCCESS] Matched Customer ID: ${customer.id}, Name: ${customer.name || customer.real_name}, Server ID: ${customer.server_id}`);
+
+        // Generate Customer Token / Session
+        const token = 'cust_' + crypto.randomUUID();
+        const sessions = getSessionsDB();
+        sessions[token] = {
+            customerId: customer.id,
+            phone: customer.phone_number,
+            name: customer.real_name || customer.name || 'Pelanggan',
+            role: 'customer',
+            createdAt: new Date().toISOString()
+        };
+        saveSessionsDB(sessions);
+
+        // Sanitize customer data (STRICT: NO MikroTik password / router technical info)
+        const safeCustomer = {
+            id: customer.id,
+            name: customer.name || 'Pelanggan',
+            real_name: customer.real_name || customer.name || 'Pelanggan',
+            phone_number: customer.phone_number,
+            address: customer.address || '',
+            profile: customer.profile || 'Reguler',
+            status: customer.status || 'active',
+            activationDate: customer.activationDate || null,
+            sub_area_id: customer.sub_area_id || null,
+            mustChangePassword: customer.must_change_password !== false
+        };
+
+        logActivity(req, 'CUSTOMER_LOGIN', `Customer ${safeCustomer.name} (${customer.phone_number}) logged in`);
+
+        res.json({
+            success: true,
+            token,
+            customer: safeCustomer,
+            mustChangePassword: customer.must_change_password !== false
+        });
+    } catch (error) {
+        console.error('[Customer Auth Error]', error);
+        res.status(500).json({ error: 'Terjadi kesalahan sistem saat login: ' + error.message });
+    }
+});
+
+// Customer Force Change Password
+app.post('/api/customer-auth/change-password', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        const { customerId, oldPassword, newPassword } = req.body;
+
+        if (!newPassword || newPassword.length < 4) {
+            return res.status(400).json({ error: 'Kata sandi baru minimal 4 karakter' });
+        }
+
+        let targetCustomer = null;
+        if (customerId) {
+            targetCustomer = await Customer.findByPk(customerId);
+        } else if (authHeader) {
+            const token = authHeader.split(' ')[1];
+            const sessions = getSessionsDB();
+            const session = sessions[token];
+            if (session && session.customerId) {
+                targetCustomer = await Customer.findByPk(session.customerId);
+            }
+        }
+
+        if (!targetCustomer) {
+            return res.status(404).json({ error: 'Data pelanggan tidak ditemukan' });
+        }
+
+        // Verify old password if provided
+        const currentPassword = targetCustomer.password || 'nusantara!';
+        if (oldPassword && oldPassword !== currentPassword) {
+            return res.status(400).json({ error: 'Kata sandi saat ini tidak cocok' });
+        }
+
+        // Prevent setting to the default password again
+        if (newPassword === 'nusantara!') {
+            return res.status(400).json({ error: 'Kata sandi baru tidak boleh menggunakan kata sandi bawaan (nusantara!)' });
+        }
+
+        await targetCustomer.update({
+            password: newPassword,
+            must_change_password: false
+        });
+
+        // Sync password across all accounts sharing the same phone number
+        if (targetCustomer.phone_number) {
+            const cleanPhone = targetCustomer.phone_number.replace(/\D/g, '');
+            const phoneSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+            await Customer.update({
+                password: newPassword,
+                must_change_password: false
+            }, {
+                where: {
+                    [Op.or]: [
+                        { phone_number: targetCustomer.phone_number },
+                        ...(phoneSuffix ? [
+                            { phone_number: { [Op.like]: `%${phoneSuffix}` } },
+                            { phone_number: cleanPhone }
+                        ] : [])
+                    ]
+                }
+            }).catch(e => console.error('[Password Sync Error]', e));
+        }
+
+        logActivity(req, 'CUSTOMER_CHANGE_PWD', `Customer ${targetCustomer.id} changed password successfully`);
+
+        res.json({
+            success: true,
+            message: 'Kata sandi berhasil diperbarui'
+        });
+    } catch (error) {
+        console.error('[Customer Change Password Error]', error);
+        res.status(500).json({ error: 'Gagal memperbarui sandi: ' + error.message });
+    }
+});
+
+// Customer Dashboard API (Aggregates Profile, Invoices, Vouchers)
+function parseMikrotikDuration(str) {
+    if (!str || typeof str !== 'string') return 0;
+    let seconds = 0;
+    const dMatch = str.match(/(\d+)d/);
+    if (dMatch) seconds += parseInt(dMatch[1], 10) * 86400;
+    const hMatch = str.match(/(\d+)h/);
+    if (hMatch) seconds += parseInt(hMatch[1], 10) * 3600;
+    const mMatch = str.match(/(\d+)m/);
+    if (mMatch) seconds += parseInt(mMatch[1], 10) * 60;
+    const sMatch = str.match(/(\d+)s/);
+    if (sMatch) seconds += parseInt(sMatch[1], 10);
+    const timeMatch = str.match(/(\d{2}):(\d{2}):(\d{2})/);
+    if (timeMatch) {
+        seconds += parseInt(timeMatch[1], 10) * 3600 + parseInt(timeMatch[2], 10) * 60 + parseInt(timeMatch[3], 10);
+    }
+    return seconds;
+}
+
+app.get('/api/customer-portal/dashboard', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        const { customerId } = req.query;
+
+        let targetId = customerId;
+        if (!targetId && authHeader) {
+            const token = authHeader.split(' ')[1];
+            const sessions = getSessionsDB();
+            const session = sessions[token];
+            if (session) targetId = session.customerId;
+        }
+
+        if (!targetId) {
+            return res.status(401).json({ error: 'Unauthorized: customerId or token required' });
+        }
+
+        const customer = await Customer.findByPk(targetId, {
+            include: [{ model: Server }]
+        });
+        if (!customer) {
+            return res.status(404).json({ error: 'Pelanggan tidak ditemukan' });
+        }
+
+        // --- Live Package & Status Sync ---
+        // Ensure customer.profile reflects the latest package from Mikrotik cache or router
+        let currentProfile = customer.profile || 'Standard';
+        let currentStatus = customer.status || 'active';
+
+        try {
+            if (customer.server_id && customer.mikrotik_name) {
+                // 1. First check sync_cache file for this server
+                const cachePath = getCachePath(customer.server_id, 'secrets');
+                if (fs.existsSync(cachePath)) {
+                    try {
+                        const cacheRaw = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+                        const secretsList = Array.isArray(cacheRaw) ? cacheRaw : (cacheRaw.data || []);
+                        const foundSecret = secretsList.find(s => 
+                            String(s.name).toLowerCase().trim() === String(customer.mikrotik_name).toLowerCase().trim()
+                        );
+                        if (foundSecret) {
+                            if (foundSecret.profile) currentProfile = foundSecret.profile;
+                            if (foundSecret.disabled === true || foundSecret.disabled === 'true') {
+                                currentStatus = 'disabled';
+                            } else {
+                                currentStatus = 'active';
+                            }
+                        }
+                    } catch (errCache) { }
+                }
+
+                // If profile changed, update Customer record in database
+                if (currentProfile !== customer.profile || currentStatus !== customer.status) {
+                    await customer.update({
+                        profile: currentProfile,
+                        status: currentStatus
+                    });
+                }
+            }
+        } catch (syncErr) {
+            console.warn('[Dashboard] Live profile sync warning:', syncErr.message);
+        }
+
+        // Resolve Sub Area Name from CACHE.subAreas
+        const subAreas = CACHE.subAreas || [];
+        const subAreaObj = subAreas.find(s => s.id === customer.sub_area_id);
+        const subAreaName = subAreaObj ? subAreaObj.name : (customer.sub_area_id || '');
+        const serverName = customer.Server ? customer.Server.name : 'Server Utama';
+
+        // Format installation address: "Nama Server, Sub Area (Alamat)"
+        const formattedAddress = [
+            serverName,
+            subAreaName,
+            customer.address
+        ].filter(Boolean).join(' - ');
+
+        // 1. Sanitized profile (Strict: No Mikrotik secret info, display real_name as primary)
+        const profile = {
+            id: customer.id,
+            name: customer.real_name || customer.name || 'Pelanggan',
+            real_name: customer.real_name || customer.name || 'Pelanggan',
+            account_name: customer.name || customer.real_name || 'Pelanggan',
+            phone_number: customer.phone_number,
+            address: formattedAddress || customer.address || 'Sesuai registrasi',
+            raw_address: customer.address || '',
+            server_name: serverName,
+            sub_area_name: subAreaName,
+            profile: currentProfile,
+            status: currentStatus,
+            activationDate: customer.activationDate || null,
+            sub_area_id: customer.sub_area_id || null,
+            mustChangePassword: customer.must_change_password !== false
+        };
+
+        // 2. Invoices & Payments History
+        const invoices = await Invoice.findAll({
+            where: { customer_id: targetId },
+            include: [{
+                model: Payment,
+                required: false
+            }],
+            order: [['due_date', 'DESC']],
+            limit: 50
+        });
+
+        // 3. Customer Vouchers with live login_url (Filter out expired/deleted vouchers)
+        const rawVouchers = await CustomerVoucher.findAll({
+            where: {
+                status: { [Op.notIn]: ['expired', 'deleted'] },
+                [Op.or]: [
+                    { customer_id: targetId },
+                    { notes: { [Op.like]: `%[CID:${targetId}]%` } },
+                    ...(customer.phone_number ? [
+                        { customer_phone: customer.phone_number },
+                        { customer_phone: { [Op.like]: `%${customer.phone_number.replace(/\D/g, '').slice(-8)}%` } }
+                    ] : []),
+                    ...(customer.mikrotik_name ? [{ customer_username: customer.mikrotik_name }] : [])
+                ]
+            },
+            order: [['createdAt', 'DESC']],
+            limit: 50
+        });
+
+        // Determine base hotspot login URL for this customer's server
+        let baseHotspotUrl = customer.Server?.hotspot_login_url;
+        if (!baseHotspotUrl) {
+            // Hotspot captive portal is accessed locally inside the router's hotspot network (e.g. login.giganusa.net or 172.16.0.1)
+            baseHotspotUrl = 'http://login.giganusa.net/login';
+        }
+        if (!baseHotspotUrl.endsWith('/login') && !baseHotspotUrl.includes('?')) {
+            baseHotspotUrl = baseHotspotUrl.replace(/\/+$/, '') + '/login';
+        }
+
+        // --- Helper function to run RouterOS commands on a specific server ---
+        async function runMikrotikCommand(serverId, command) {
+            const serverObj = await Server.findByPk(serverId);
+            if (!serverObj) throw new Error('Server not found');
+            const client = new RouterOSAPI({
+                host: serverObj.ip,
+                port: serverObj.port || 8728,
+                user: serverObj.username,
+                password: serverObj.password,
+                timeout: 2
+            });
+            client.on('error', () => {});
+            await client.connect();
+            const resData = await client.write(command);
+            await client.close();
+            return resData;
+        }
+
+        // In-memory cache for live MikroTik hotspot queries (60-second TTL)
+        if (!global.MIKROTIK_HOTSPOT_CACHE) {
+            global.MIKROTIK_HOTSPOT_CACHE = {};
+        }
+
+        async function getMikrotikHotspotData(serverId) {
+            const now = Date.now();
+            const cached = global.MIKROTIK_HOTSPOT_CACHE[serverId];
+            if (cached && (now - cached.timestamp < 60000)) {
+                return cached;
+            }
+
+            try {
+                // Wrap in 2.5s timeout Promise to prevent hanging if router IP is offline/unreachable
+                const fetchPromise = Promise.all([
+                    runMikrotikCommand(serverId, ['/ip/hotspot/user/print']),
+                    runMikrotikCommand(serverId, ['/ip/hotspot/active/print']),
+                    runMikrotikCommand(serverId, ['/ip/dhcp-server/lease/print']).catch(() => [])
+                ]);
+
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Mikrotik socket query timeout')), 2500)
+                );
+
+                const [usersData, activeData, leasesData] = await Promise.race([fetchPromise, timeoutPromise]);
+
+                const result = {
+                    timestamp: now,
+                    users: Array.isArray(usersData) ? usersData : (cached?.users || []),
+                    active: Array.isArray(activeData) ? activeData : (cached?.active || []),
+                    leases: Array.isArray(leasesData) ? leasesData : (cached?.leases || [])
+                };
+                global.MIKROTIK_HOTSPOT_CACHE[serverId] = result;
+                return result;
+            } catch (err) {
+                console.warn(`[Dashboard] Hotspot user data fetch warning for server ${serverId}:`, err.message);
+                if (cached) return cached;
+                return { timestamp: now, users: [], active: [], leases: [] };
+            }
+        }
+
+        // --- Fetch live hotspot user data from MikroTik for usage stats ---
+        const serverIdsToQuery = new Set();
+        if (customer.server_id) serverIdsToQuery.add(customer.server_id);
+        for (const v of rawVouchers) {
+            if (v.server_id) serverIdsToQuery.add(v.server_id);
+        }
+
+        let hotspotUsers = [];
+        let hotspotActiveUsers = [];
+        let dhcpLeases = [];
+
+        if (serverIdsToQuery.size > 0) {
+            await Promise.all(Array.from(serverIdsToQuery).map(async (sId) => {
+                const data = await getMikrotikHotspotData(sId);
+                if (data.users) hotspotUsers.push(...data.users);
+                if (data.active) hotspotActiveUsers.push(...data.active);
+                if (data.leases) dhcpLeases.push(...data.leases);
+            }));
+        }
+
+        // Index hotspot users and active sessions by username (name) for O(1) lookup
+        const hotspotUserMap = {};
+        for (const hu of hotspotUsers) {
+            if (hu.name) hotspotUserMap[hu.name.toLowerCase().trim()] = hu;
+        }
+        const hotspotActiveMap = {};
+        for (const ha of hotspotActiveUsers) {
+            if (ha.user) hotspotActiveMap[ha.user.toLowerCase().trim()] = ha;
+        }
+
+        // Index DHCP leases by MAC address for device hostname lookup
+        const dhcpByMac = {};
+        for (const lease of dhcpLeases) {
+            if (lease['mac-address']) {
+                dhcpByMac[lease['mac-address'].toUpperCase().trim()] = lease;
+            }
+        }
+
+        // Build live vouchers list by cross-referencing DB vouchers and live MikroTik hotspot users
+        const liveVouchersMap = {};
+
+        // 1. Process DB vouchers (always include all DB vouchers for this customer)
+        for (const v of rawVouchers) {
+            const vJson = v.toJSON();
+            const voucherKey = (vJson.voucher_code || '').toLowerCase().trim();
+            const mapKey = String(vJson.id || voucherKey || Math.random()).toLowerCase().trim();
+            if (!mapKey) continue;
+
+            const hsUser = (voucherKey ? hotspotUserMap[voucherKey] : null) || hotspotUsers.find(hu => 
+                (voucherKey && hu.name && hu.name.toLowerCase().trim() === voucherKey) ||
+                (voucherKey && hu.comment && hu.comment.toLowerCase().includes(voucherKey))
+            );
+
+            liveVouchersMap[mapKey] = { vJson, hsUser };
+        }
+
+        // 2. Auto-discover live MikroTik hotspot users tagged with [CID:targetId], phone, or username
+        const lowerTargetId = String(targetId).toLowerCase().trim();
+        const cleanPhone = (customer.phone_number || '').replace(/\D/g, '');
+        const phoneSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+        const custMikrotikName = (customer.mikrotik_name || '').toLowerCase().trim();
+
+        for (const hu of hotspotUsers) {
+            if (!hu.name) continue;
+            const huComment = (hu.comment || '').toLowerCase();
+            const huName = hu.name.toLowerCase().trim();
+
+            const isCidMatch = huComment.includes(`[cid:${lowerTargetId}]`);
+            const isPhoneMatch = phoneSuffix.length >= 6 && (huComment.includes(phoneSuffix) || huName.includes(phoneSuffix));
+            const isUsernameMatch = custMikrotikName && custMikrotikName.length >= 3 && (huName === custMikrotikName || huComment.includes(custMikrotikName));
+
+            if (isCidMatch || isPhoneMatch || isUsernameMatch) {
+                const huKey = huName;
+                // Check if this hotspot user code is already present in DB vouchers map
+                const alreadyMapped = Object.values(liveVouchersMap).some(({ vJson }) => 
+                    (vJson.voucher_code || '').toLowerCase().trim() === huKey
+                );
+
+                if (!alreadyMapped) {
+                    let quotaGb = 1;
+                    const qm = (hu.comment || '').match(/Kuota\s+(\d+)\s*GB/i);
+                    if (qm) {
+                        quotaGb = parseInt(qm[1], 10);
+                    } else if (hu['limit-bytes-total']) {
+                        const bytes = parseInt(hu['limit-bytes-total'], 10);
+                        if (bytes > 0) quotaGb = Math.max(1, Math.round(bytes / 1073741824));
+                    }
+
+                    const synthV = {
+                        id: hu['.id'] || huKey,
+                        customer_id: targetId,
+                        voucher_code: hu.name,
+                        voucher_password: hu.password || hu.name,
+                        profile: hu.profile || 'default',
+                        quota_gb: quotaGb,
+                        validity: hu['limit-uptime'] || '30d',
+                        status: (hu.disabled === 'true' || hu.disabled === true || hu.disabled === 'yes') ? 'disabled' : 'active',
+                        notes: hu.comment || null
+                    };
+                    liveVouchersMap[`synth_${hu['.id'] || huKey}`] = { vJson: synthV, hsUser: hu };
+                }
+            }
+        }
+
+        const vouchers = Object.values(liveVouchersMap).map(({ vJson, hsUser }) => {
+            // Build dynamic 1-click activation link
+            let autoLoginUrl = vJson.login_url;
+            if (!autoLoginUrl && vJson.voucher_code) {
+                const u = encodeURIComponent(vJson.voucher_code);
+                const p = vJson.voucher_password ? encodeURIComponent(vJson.voucher_password) : '';
+                autoLoginUrl = `${baseHotspotUrl}?username=${u}${p ? `&password=${p}` : ''}`;
+            }
+
+            const voucherKey = (vJson.voucher_code || '').toLowerCase().trim();
+            const hsActive = hotspotActiveMap[voucherKey];
+
+            // Usage data from hotspot user table + active session
+            const usageData = {};
+            
+            // 1. Calculate bytes from user accounting (past finished sessions)
+            const bIn = hsUser ? (parseInt(hsUser['bytes-in'] || '0', 10) || 0) : 0;
+            const bOut = hsUser ? (parseInt(hsUser['bytes-out'] || '0', 10) || 0) : 0;
+
+            // 2. Calculate bytes from live active session (if online right now)
+            let activeBIn = 0;
+            let activeBOut = 0;
+            if (hsActive) {
+                activeBIn = parseInt(hsActive['bytes-in'] || '0', 10) || 0;
+                activeBOut = parseInt(hsActive['bytes-out'] || '0', 10) || 0;
+            }
+
+            // CUMULATIVE TRAFFIC = (Past sessions) + (Current active session)
+            const totalBytesIn = bIn + activeBIn;
+            const totalBytesOut = bOut + activeBOut;
+            const totalUsed = totalBytesIn + totalBytesOut;
+
+            // Determine quota & direction limits
+            const limitTotal = hsUser ? (parseInt(hsUser['limit-bytes-total'] || '0', 10) || 0) : 0;
+            const limitIn = hsUser ? (parseInt(hsUser['limit-bytes-in'] || '0', 10) || 0) : 0;
+            const limitOut = hsUser ? (parseInt(hsUser['limit-bytes-out'] || '0', 10) || 0) : 0;
+            const limitUptime = hsUser ? (hsUser['limit-uptime'] || '') : '';
+            const fallbackLimit = (vJson.quota_gb ? (parseInt(vJson.quota_gb, 10) * 1073741824) : 0);
+            const effectiveLimitTotal = limitTotal || fallbackLimit;
+
+            if (hsUser || hsActive || effectiveLimitTotal > 0) {
+                usageData.bytes_in = String(totalBytesIn);
+                usageData.bytes_out = String(totalBytesOut);
+                usageData.uptime = hsUser ? (hsUser['uptime'] || '0s') : '0s';
+                usageData.limit_bytes_total = String(effectiveLimitTotal);
+                usageData.limit_uptime = limitUptime;
+                
+                // Expiration / Exhaustion checks across all MikroTik Hotspot limit types:
+                // 1. Total bytes limit reached (or within 10MB)
+                const isTotalLimitReached = (effectiveLimitTotal > 0 && (totalUsed >= effectiveLimitTotal || (effectiveLimitTotal - totalUsed) <= 10485760));
+                // 2. Limit Bytes In (Download limit) reached
+                const isInLimitReached = (limitIn > 0 && totalBytesIn >= limitIn);
+                // 3. Limit Bytes Out (Upload limit) reached
+                const isOutLimitReached = (limitOut > 0 && totalBytesOut >= limitOut);
+                // 4. Limit Uptime reached
+                const uptimeSec = hsUser ? parseMikrotikDuration(hsUser['uptime']) : 0;
+                const limitUptimeSec = parseMikrotikDuration(limitUptime);
+                const isUptimeLimitReached = (limitUptimeSec > 0 && uptimeSec >= limitUptimeSec);
+
+                const isLimitReached = isTotalLimitReached || isInLimitReached || isOutLimitReached || isUptimeLimitReached;
+
+                // 5. User is disabled in MikroTik router
+                const isDisabledInMikrotik = hsUser ? (hsUser['disabled'] === 'true' || hsUser['disabled'] === true || hsUser['disabled'] === 'yes') : false;
+                // 6. User comment contains [EXHAUSTED] or [EXPIRED]
+                const isCommentExhausted = hsUser?.comment && (hsUser.comment.toLowerCase().includes('exhausted') || hsUser.comment.toLowerCase().includes('expired'));
+
+                usageData.is_quota_exhausted = isLimitReached || isCommentExhausted;
+                usageData.disabled = isDisabledInMikrotik || isLimitReached || isCommentExhausted;
+            }
+
+            // Active session data (enriched with DHCP hostname)
+            if (hsActive) {
+                usageData.is_online = true;
+                usageData.session_uptime = hsActive['uptime'] || '';
+                usageData.session_bytes_in = hsActive['bytes-in'] || '0';
+                usageData.session_bytes_out = hsActive['bytes-out'] || '0';
+                usageData.ip_address = hsActive['address'] || '';
+                usageData.mac_address = hsActive['mac-address'] || '';
+                usageData.login_by = hsActive['login-by'] || '';
+                usageData.hotspot_server = hsActive['server'] || '';
+                usageData.idle_time = hsActive['idle-time'] || '';
+
+                // Session total data
+                const sIn = parseInt(hsActive['bytes-in'] || '0', 10) || 0;
+                const sOut = parseInt(hsActive['bytes-out'] || '0', 10) || 0;
+                usageData.session_total_bytes = String(sIn + sOut);
+
+                // Lookup device hostname from DHCP lease by MAC address
+                const activeMac = (hsActive['mac-address'] || '').toUpperCase().trim();
+                const dhcpLease = activeMac ? dhcpByMac[activeMac] : null;
+                if (dhcpLease) {
+                    usageData.device_hostname = dhcpLease['host-name'] || '';
+                    usageData.dhcp_server = dhcpLease['server'] || '';
+                    usageData.dhcp_status = dhcpLease['status'] || '';
+                    usageData.dhcp_last_seen = dhcpLease['last-seen'] || '';
+                    usageData.dhcp_active_address = dhcpLease['active-address'] || '';
+                } else {
+                    usageData.device_hostname = '';
+                }
+            } else {
+                usageData.is_online = false;
+            }
+
+            let finalStatus = (vJson.status || 'active').toLowerCase();
+            if (usageData.disabled) {
+                finalStatus = 'disabled';
+            }
+
+            return {
+                ...vJson,
+                status: finalStatus,
+                login_url: autoLoginUrl,
+                server_hotspot_url: baseHotspotUrl,
+                usage: usageData
+            };
+        });
+
+        res.json({
+            success: true,
+            customer: profile,
+            invoices,
+            vouchers
+        });
+    } catch (error) {
+        console.error('[Customer Portal Dashboard Error]', error);
+        res.status(500).json({ error: 'Gagal mengambil data dashboard: ' + error.message });
+    }
+});
+
+// Reset Hotspot User Counters (bytes-in, bytes-out, uptime -> 0 and enable user)
+app.post('/api/mikrotik/hotspot/users/reset-counters', async (req, res) => {
+    try {
+        const { serverId, id, username } = req.body;
+        if (!serverId || (!id && !username)) {
+            return res.status(400).json({ error: 'serverId and id or username required' });
+        }
+
+        const server = await Server.findByPk(serverId);
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+
+        const client = new RouterOSAPI({
+            host: server.ip,
+            port: server.port || 8728,
+            user: server.username,
+            password: server.password,
+            timeout: 10
+        });
+        client.on('error', () => {});
+        await client.connect();
+
+        let targetId = id;
+        let targetName = username;
+
+        if (!targetId && targetName) {
+            const users = await client.write(['/ip/hotspot/user/print', `?name=${targetName}`]);
+            if (Array.isArray(users) && users.length > 0) {
+                targetId = users[0]['.id'];
+            }
+        }
+
+        if (targetId) {
+            await client.write(['/ip/hotspot/user/reset-counters', `=.id=${targetId}`]);
+            // Re-enable user in MikroTik
+            await client.write(['/ip/hotspot/user/set', `=.id=${targetId}`, '=disabled=no']);
+        } else if (targetName) {
+            await client.write(['/ip/hotspot/user/reset-counters', `=numbers=${targetName}`]);
+        }
+
+        await client.close();
+
+        // Also update SQL CustomerVoucher status if linked
+        if (targetName) {
+            await CustomerVoucher.update(
+                { status: 'active' },
+                { where: { voucher_code: targetName } }
+            );
+        }
+
+        logActivity(req, 'RESET_HOTSPOT_COUNTERS', `Reset counters & re-enabled user ${targetName || targetId} on ${server.name}`);
+        res.json({ success: true, message: `Counter kuota & uptime user ${targetName || ''} berhasil di-reset ke 0!` });
+    } catch (error) {
+        console.error('[Reset Hotspot Counters Error]', error);
+        res.status(500).json({ error: 'Gagal reset counter: ' + error.message });
+    }
+});
+
+// Check Live WiFi Status on-demand (PPP Active check, strictly on-demand)
+app.get('/api/customer-portal/wifi-status', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        const { customerId } = req.query;
+
+        let targetId = customerId;
+        if (!targetId && authHeader) {
+            const token = authHeader.split(' ')[1];
+            const sessions = getSessionsDB();
+            const session = sessions[token];
+            if (session) targetId = session.customerId;
+        }
+
+        if (!targetId) {
+            return res.status(401).json({ error: 'Unauthorized: customerId or token required' });
+        }
+
+        const customer = await Customer.findByPk(targetId, {
+            include: [{ model: Server }]
+        });
+        if (!customer) {
+            return res.status(404).json({ error: 'Pelanggan tidak ditemukan' });
+        }
+
+        const server = customer.Server;
+        const mikrotikUsername = customer.mikrotik_name;
+
+        if (!server || !mikrotikUsername) {
+            return res.json({
+                success: true,
+                connected: false,
+                status: 'offline',
+                message: 'Tidak Aktif'
+            });
+        }
+
+        let isConnected = false;
+        let uptime = null;
+        let callerId = null;
+        let bytesIn = 0;
+        let bytesOut = 0;
+
+        const formatBytes = (bytes) => {
+            if (!bytes || isNaN(bytes) || bytes <= 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let val = Number(bytes);
+            let idx = 0;
+            while (val >= 1024 && idx < units.length - 1) {
+                val /= 1024;
+                idx++;
+            }
+            return `${val.toFixed(val < 10 && idx > 0 ? 2 : 1)} ${units[idx]}`;
+        };
+
+        const formatUptime = (rawUptime) => {
+            if (!rawUptime) return '-';
+            // Translate MikroTik notation: e.g. 1w2d3h4m5s to readable Indonesian text
+            let str = String(rawUptime);
+            str = str.replace(/w/g, 'mgg ').replace(/d/g, 'h ').replace(/h/g, 'j ').replace(/m/g, 'm ').replace(/s/g, 'd');
+            return str.trim();
+        };
+
+        // Try querying RouterOS directly with a short timeout
+        let client = null;
+        try {
+            client = new RouterOSAPI({
+                host: server.ip,
+                port: server.port || 8728,
+                user: server.username,
+                password: server.password,
+                keepalive: false,
+                timeout: 2
+            });
+
+            client.on('error', () => {});
+
+            const connectPromise = (async () => {
+                await client.connect();
+                return await client.write(['/ppp/active/print', `?name=${mikrotikUsername}`]);
+            })();
+
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('PPP status query timeout')), 2000)
+            );
+
+            const actives = await Promise.race([connectPromise, timeoutPromise]);
+
+            if (Array.isArray(actives) && actives.length > 0) {
+                isConnected = true;
+                const rec = actives[0];
+                uptime = rec.uptime || null;
+                callerId = rec['caller-id'] || null;
+                bytesIn = Number(rec['bytes-in'] || rec['limit-bytes-in'] || 0);
+                bytesOut = Number(rec['bytes-out'] || rec['limit-bytes-out'] || 0);
+
+                // Also try to query specific interface traffic if available (e.g. <pppoe-username>)
+                try {
+                    const ifaces = await client.write(['/interface/print', `?name=<pppoe-${mikrotikUsername}>`]);
+                    if (Array.isArray(ifaces) && ifaces.length > 0) {
+                        const iface = ifaces[0];
+                        if (iface['rx-byte']) bytesIn = Number(iface['rx-byte']);
+                        if (iface['tx-byte']) bytesOut = Number(iface['tx-byte']);
+                    }
+                } catch (_) {}
+            }
+        } catch (routerErr) {
+            console.log(`[WiFi Status] Router direct query error:`, routerErr.message);
+        } finally {
+            if (client) {
+                try { await client.close(); } catch (_) {}
+            }
+        }
+
+        // Fallback: check active_ppp cache if router direct query did not find connection
+        if (!isConnected) {
+            const cachePath = getCachePath(server.id, 'active_ppp');
+            if (fs.existsSync(cachePath)) {
+                try {
+                    const cacheRaw = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+                    const activeList = Array.isArray(cacheRaw) ? cacheRaw : (cacheRaw.data || []);
+                    const found = activeList.find(a => 
+                        String(a.name).toLowerCase().trim() === String(mikrotikUsername).toLowerCase().trim()
+                    );
+                    if (found) {
+                        isConnected = true;
+                        uptime = found.uptime || null;
+                        bytesIn = Number(found['bytes-in'] || 0);
+                        bytesOut = Number(found['bytes-out'] || 0);
+                    }
+                } catch (eCache) { }
+            }
+        }
+
+        const totalBytes = (bytesIn || 0) + (bytesOut || 0);
+        const usageFormatted = totalBytes > 0 ? formatBytes(totalBytes) : (isConnected ? 'Aktif' : '0 B');
+        const uptimeFormatted = uptime ? formatUptime(uptime) : (isConnected ? 'Aktif' : '-');
+
+        res.json({
+            success: true,
+            connected: isConnected,
+            status: isConnected ? 'online' : 'offline',
+            label: isConnected ? 'Terhubung' : 'Tidak Aktif',
+            uptime: uptimeFormatted,
+            rawUptime: uptime || null,
+            totalBytes,
+            usage: usageFormatted,
+            bytesIn: formatBytes(bytesIn),
+            bytesOut: formatBytes(bytesOut),
+            checkedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        });
+    } catch (e) {
+        console.error('[WiFi Status Error]', e);
+        res.status(500).json({ error: 'Gagal mengecek status WiFi: ' + e.message });
+    }
+});
+
 // Get Logging Config
 app.get('/api/logs/config', (req, res) => {
     res.json(CACHE.loggingConfig || {});
@@ -4103,6 +5612,15 @@ const DIST_PATH = fs.existsSync(path.join(__dirname, '../dist'))
     : fs.existsSync(path.join(__dirname, 'dist'))
         ? path.join(__dirname, 'dist')
         : path.join(__dirname, '../public_html');
+
+// Serve GigaNusa Customer Portal App
+const CUSTOMER_APP_PREVIEW = path.join(__dirname, '../customer_app/preview.html');
+app.get('/customer', (req, res) => {
+    if (fs.existsSync(CUSTOMER_APP_PREVIEW)) {
+        return res.sendFile(CUSTOMER_APP_PREVIEW);
+    }
+    res.status(404).send('Customer App preview not found');
+});
 
 if (fs.existsSync(DIST_PATH)) {
     console.log(`[Frontend] Serving static files from: ${path.resolve(DIST_PATH)}`);

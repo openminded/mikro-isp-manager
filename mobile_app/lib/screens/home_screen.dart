@@ -22,6 +22,7 @@ import 'change_onu_screen.dart';
 import 'registration_map_screen.dart';
 import 'cable_calculator_screen.dart';
 import 'update_map_user_screen.dart';
+import 'blocked_user_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -266,6 +267,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             },
                         ),
                     ],
+                ),
+                ListTile(
+                    leading: const Icon(Icons.block),
+                    title: const Text('Blocked User'),
+                    onTap: () {
+                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BlockedUserScreen()));
+                    },
                 ),
                 if (user?.role == 'admin' || user?.role == 'superadmin')
                 ListTile(

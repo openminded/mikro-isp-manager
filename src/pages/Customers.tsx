@@ -3,10 +3,48 @@ import axios from 'axios';
 import { useServers, type MikrotikServer } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
 import { useData } from '@/context/DataContext';
-import { type Customer } from '@/types';
-import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud, Map as MapIcon, MapPin, Trash2 } from 'lucide-react';
+import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud, Map as MapIcon, MapPin, Trash2, Ticket, Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
+import { HotspotVoucherModal } from '@/components/hotspot/HotspotVoucherModal';
 import { cn } from '@/lib/utils';
+import type { Customer } from '@/types';
+
+function AppPasswordCell({ password }: { password?: string }) {
+    const [show, setShow] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const pwd = password || 'nusantara!';
+
+    const handleCopy = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(pwd);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <div className="flex items-center gap-1 font-mono text-xs">
+            <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-medium select-all">
+                {show ? pwd : '••••••••'}
+            </span>
+            <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShow(!show); }}
+                className="p-1 text-slate-400 hover:text-slate-700 transition-colors rounded hover:bg-slate-100"
+                title={show ? "Sembunyikan Kata Sandi App" : "Tampilkan Kata Sandi App"}
+            >
+                {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+            <button
+                type="button"
+                onClick={handleCopy}
+                className="p-1 text-slate-400 hover:text-emerald-600 transition-colors rounded hover:bg-slate-100"
+                title="Salin Sandi Aplikasi"
+            >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+        </div>
+    );
+}
 
 export function Customers() {
     const { servers } = useServers();
@@ -36,6 +74,10 @@ export function Customers() {
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+    const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
+    const [viewingVouchersCustomer, setViewingVouchersCustomer] = useState<Customer | null>(null);
+    const [customerVouchersList, setCustomerVouchersList] = useState<any[]>([]);
+    const [loadingVouchers, setLoadingVouchers] = useState(false);
 
     // ... (rest of helper functions)
 
@@ -135,8 +177,8 @@ export function Customers() {
             if (!sortConfig) return 0;
             const { key, direction } = sortConfig;
 
-            let aValue: any = a[key as keyof Customer];
-            let bValue: any = b[key as keyof Customer];
+            let aValue: any = (a as any)[key];
+            let bValue: any = (b as any)[key];
 
             // Handle specific keys if needed, e.g., if undefined
             if (aValue === undefined) aValue = '';
@@ -216,6 +258,7 @@ export function Customers() {
                     serverId: targetServerId,
                     name: data.name,
                     realName: data.realName,
+                    appPassword: data.appPassword,
                     whatsapp: data.whatsapp,
                     address: data.address,
                     sub_area_id: data.sub_area_id,
@@ -353,6 +396,15 @@ export function Customers() {
                     </button>
 
                     <button
+                        onClick={() => setIsVoucherModalOpen(true)}
+                        className="p-2 md:px-4 md:py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all flex items-center gap-2 shadow-md shadow-orange-500/20 font-medium text-sm"
+                        title="Generate Voucher Kuota Hotspot untuk Pelanggan"
+                    >
+                        <Ticket className="w-5 h-5" />
+                        <span className="hidden md:inline font-medium">Generate Voucher</span>
+                    </button>
+
+                    <button
                         onClick={handleSync}
                         disabled={syncLoading}
                         className="p-2 md:px-4 md:py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
@@ -445,6 +497,14 @@ export function Customers() {
                     </div>
                     <div className="flex items-center gap-2">
                         <button
+                            onClick={() => setIsVoucherModalOpen(true)}
+                            className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
+                            title="Generate voucher kuota untuk pelanggan yang dipilih"
+                        >
+                            <Ticket className="w-4 h-4" />
+                            Generate Voucher ({selectedCrmIds.size})
+                        </button>
+                        <button
                             onClick={() => setSelectedCrmIds(new Set())}
                             className="px-3 py-1.5 text-sm text-slate-300 hover:text-white transition-colors"
                         >
@@ -483,6 +543,7 @@ export function Customers() {
                                 {[
                                     { label: 'Username', key: 'name' },
                                     { label: 'Real Name', key: 'realName' },
+                                    { label: 'Sandi App', key: 'appPassword' },
                                     { label: 'Customer', key: 'comment' },
                                     { label: 'Profile', key: 'profile' },
                                     { label: 'WhatsApp', key: 'whatsapp' },
@@ -538,6 +599,9 @@ export function Customers() {
                                             ) : (
                                                 <span className="text-slate-400 italic text-xs">Unlinked</span>
                                             )}
+                                        </td>
+                                        <td className="px-6 py-3">
+                                            <AppPasswordCell password={customer.appPassword} />
                                         </td>
                                         <td className="px-6 py-3 text-slate-600">{customer.comment || '-'}</td>
                                         <td className="px-6 py-3">
@@ -646,6 +710,26 @@ export function Customers() {
                                                     <MapIcon className="w-4 h-4" />
                                                 </button>
                                                 <button
+                                                    onClick={async () => {
+                                                        setViewingVouchersCustomer(customer);
+                                                        setLoadingVouchers(true);
+                                                        try {
+                                                            const targetKey = customer.crmId || customer.id || customer.name;
+                                                            const res = await MikrotikApi.getVouchersByCustomerId(targetKey);
+                                                            setCustomerVouchersList(res.vouchers || (Array.isArray(res) ? res : []));
+                                                        } catch (err) {
+                                                            console.error('Failed to fetch customer vouchers:', err);
+                                                            setCustomerVouchersList([]);
+                                                        } finally {
+                                                            setLoadingVouchers(false);
+                                                        }
+                                                    }}
+                                                    className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                                                    title="Lihat Voucher Kuota Pelanggan"
+                                                >
+                                                    <Ticket className="w-4 h-4" />
+                                                </button>
+                                                <button
                                                     onClick={() => handleEdit(customer)}
                                                     className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
                                                     title="Edit Customer & CRM Data"
@@ -721,8 +805,142 @@ export function Customers() {
                 initialData={editingCustomer}
                 servers={servers}
                 isLoading={saving}
-
             />
+
+            <HotspotVoucherModal
+                isOpen={isVoucherModalOpen}
+                onClose={() => setIsVoucherModalOpen(false)}
+                serverId={serverFilter !== 'all' ? serverFilter : undefined}
+                initialSelectedCustomerIds={Array.from(selectedCrmIds)}
+                onSuccess={() => {
+                    setSyncStatus({ type: 'success', message: 'Voucher kuota berhasil diproses di router MikroTik dan tersimpan ke pelanggan' });
+                    setSelectedCrmIds(new Set());
+                    setTimeout(() => setSyncStatus(null), 4000);
+                }}
+            />
+
+            {/* Customer Linked Vouchers History Modal */}
+            {viewingVouchersCustomer && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[85vh] overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-amber-500 text-white rounded-xl shadow-md shadow-amber-500/20">
+                                    <Ticket className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-slate-800">
+                                        Voucher Dimiliki: {viewingVouchersCustomer.realName || viewingVouchersCustomer.comment || viewingVouchersCustomer.name}
+                                    </h3>
+                                    <p className="text-xs text-slate-500">
+                                        Username: <span className="font-mono font-medium text-slate-700">{viewingVouchersCustomer.name}</span>
+                                        {viewingVouchersCustomer.crmId && (
+                                            <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-mono text-[10px]">
+                                                ID: {viewingVouchersCustomer.crmId}
+                                            </span>
+                                        )}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setViewingVouchersCustomer(null)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                            {loadingVouchers ? (
+                                <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+                                    <RefreshCw className="w-6 h-6 animate-spin text-amber-500" />
+                                    <p className="text-xs">Memuat daftar voucher pelanggan...</p>
+                                </div>
+                            ) : customerVouchersList.length === 0 ? (
+                                <div className="py-12 text-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50">
+                                    <Ticket className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                                    <p className="text-sm font-semibold text-slate-700">Belum Ada Voucher</p>
+                                    <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+                                        Pelanggan ini belum memiliki voucher kuota hotspot yang diterbitkan atas ID miliknya.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2.5">
+                                    <div className="flex items-center justify-between text-xs text-slate-500 px-1">
+                                        <span>Total: <strong className="text-slate-700">{customerVouchersList.length}</strong> Voucher</span>
+                                        <span>Tersambung ke ID Database Pelanggan</span>
+                                    </div>
+                                    {customerVouchersList.map((vc, idx) => (
+                                        <div
+                                            key={vc.id || idx}
+                                            className="p-4 rounded-xl border border-slate-200 bg-white hover:border-amber-300 hover:shadow-sm transition-all flex items-center justify-between gap-4"
+                                        >
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-mono font-bold text-sm text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                                                        {vc.voucher_code}
+                                                    </span>
+                                                    {vc.voucher_password && vc.voucher_password !== vc.voucher_code && (
+                                                        <span className="text-xs text-slate-500 font-mono">
+                                                            Pass: {vc.voucher_password}
+                                                        </span>
+                                                    )}
+                                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                                        {vc.quota_gb} GB
+                                                    </span>
+                                                    <span className={cn(
+                                                        "px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                                                        vc.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                                                    )}>
+                                                        {vc.status || 'active'}
+                                                    </span>
+                                                </div>
+                                                <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-3">
+                                                    <span>Masa Aktif: {vc.validity || '30d'}</span>
+                                                    <span>•</span>
+                                                    <span>Server: {vc.server_name || viewingVouchersCustomer.serverName}</span>
+                                                    {vc.createdAt && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span>{new Date(vc.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                                {vc.notes && (
+                                                    <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">
+                                                        {vc.notes}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(vc.voucher_code);
+                                                    alert(`Kode voucher ${vc.voucher_code} disalin ke clipboard!`);
+                                                }}
+                                                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-800 transition-colors whitespace-nowrap"
+                                            >
+                                                Salin Kode
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                            <p className="text-[11px] text-slate-500">
+                                Siap diakses di aplikasi mobile pelanggan / client portal via endpoint <code className="font-mono text-slate-700">/api/customers/:id/vouchers</code>
+                            </p>
+                            <button
+                                onClick={() => setViewingVouchersCustomer(null)}
+                                className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors"
+                            >
+                                Tutup
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }
@@ -741,6 +959,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         name: '',
         realName: '',
         password: '',
+        appPassword: 'nusantara!',
         comment: '',
         profile: 'default',
         "remote-address": '',
@@ -758,6 +977,8 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         ssidPassword: '',
         signalLevel: ''
     });
+
+    const [showAppPwd, setShowAppPwd] = useState(false);
 
     const [uploading, setUploading] = useState(false);
     const [availableProfiles, setAvailableProfiles] = useState<any[]>([]);
@@ -814,6 +1035,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 name: initialData.name,
                 realName: initialData.realName || '',
                 password: initialData.password || '',
+                appPassword: initialData.appPassword || 'nusantara!',
                 comment: initialData.comment || '',
                 profile: initialData.profile,
                 "remote-address": initialData["remote-address"] || '',
@@ -835,6 +1057,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 name: '',
                 realName: '',
                 password: '',
+                appPassword: 'nusantara!',
                 comment: '',
                 profile: 'default',
                 "remote-address": '',
@@ -901,6 +1124,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
             name: formData.name,
             realName: formData.realName,
             password: formData.password,
+            appPassword: formData.appPassword,
             comment: formData.comment,
             profile: formData.profile,
             "remote-address": formData["remote-address"] || undefined,
@@ -1059,6 +1283,29 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                                 value={formData.realName} onChange={e => setFormData({ ...formData, realName: e.target.value })}
                                             />
                                             <p className="text-xs text-slate-400">Updates linked registration data</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                                <span>Sandi Aplikasi Customer (App Login)</span>
+                                                <span className="text-xs text-amber-600 font-normal">Default: nusantara!</span>
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type={showAppPwd ? "text" : "password"}
+                                                    className="w-full pl-3 pr-10 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono text-sm"
+                                                    placeholder="nusantara!"
+                                                    value={formData.appPassword}
+                                                    onChange={e => setFormData({ ...formData, appPassword: e.target.value })}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowAppPwd(!showAppPwd)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                                >
+                                                    {showAppPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                </button>
+                                            </div>
+                                            <p className="text-xs text-slate-400">Kata sandi untuk login pelanggan di Aplikasi Mobile / Portal Client.</p>
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium text-slate-700">No. KTP</label>

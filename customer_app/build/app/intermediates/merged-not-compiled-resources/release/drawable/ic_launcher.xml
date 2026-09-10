@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#C93B3B"
+        android:pathData="M0,0h108v108h-108z"/>
+    <!-- Stylized Wi-Fi waves -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,68a7,7 0 1,0 0.1,0zM35.6,50.4a26,26 0 0,1 36.8,0l-5,5a19,19 0 0,0 -26.8,0zM23.3,38.1a43,43 0 0,1 61.4,0l-5,5a36,36 0 0,0 -51.4,0z"/>
+</vector>

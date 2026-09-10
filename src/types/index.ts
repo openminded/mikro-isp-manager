@@ -2,6 +2,7 @@ export interface Customer {
     id: string; // Mikrotik ID (*1)
     name: string; // Username
     password?: string;
+    appPassword?: string; // Sandi Aplikasi Customer (default: nusantara!)
     service: string;
     profile: string;
     "remote-address"?: string;

@@ -11,6 +11,7 @@ export interface MikrotikServer {
     installation_costs?: { name: string; price: number }[];
     lat?: number;
     lng?: number;
+    hotspot_login_url?: string;
 }
 
 interface ServerContextType {

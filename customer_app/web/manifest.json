@@ -1,0 +1,18 @@
+{
+    "name": "GigaNusa - Portal Pelanggan",
+    "short_name": "GigaNusa",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#5B50D6",
+    "theme_color": "#5B50D6",
+    "description": "Aplikasi Pelanggan WiFi & Hotspot GigaNusa",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "favicon.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        }
+    ]
+}

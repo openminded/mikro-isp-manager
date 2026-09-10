@@ -34,6 +34,7 @@ const CableCalculator = lazy(() => import("./pages/CableCalculator").then(m => (
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy").then(m => ({ default: m.PrivacyPolicy })));
 const MonitoringUser = lazy(() => import("./pages/MonitoringUser").then(m => ({ default: m.MonitoringUser })));
 const UpdateMapUser = lazy(() => import("./pages/UpdateMapUser").then(m => ({ default: m.UpdateMapUser })));
+const HotspotManager = lazy(() => import("./pages/HotspotManager").then(m => ({ default: m.HotspotManager })));
 
 
 const PageLoader = () => (
@@ -88,6 +89,8 @@ function App() {
                       <Route path="/device/backup" element={<MikrotikBackup />} />
                       <Route path="/device/monitoring-user" element={<MonitoringUser />} />
                       <Route path="/device/update-map-user" element={<UpdateMapUser />} />
+                      <Route path="/hotspot" element={<HotspotManager />} />
+                      <Route path="/device/hotspot" element={<HotspotManager />} />
                     </Route>
                   </Route>
 

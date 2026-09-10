@@ -16,7 +16,8 @@ export const Server = sequelize.define('Server', {
     isOnline: { type: DataTypes.BOOLEAN, defaultValue: false },
     installation_costs: { type: DataTypes.JSON, defaultValue: [] }, // List of { name, price }
     lat: { type: DataTypes.DECIMAL(10, 6), allowNull: true },
-    lng: { type: DataTypes.DECIMAL(10, 6), allowNull: true }
+    lng: { type: DataTypes.DECIMAL(10, 6), allowNull: true },
+    hotspot_login_url: { type: DataTypes.STRING, allowNull: true } // e.g. "http://hotspot.net/login" or "http://10.10.10.1/login"
 });
 
 export const Customer = sequelize.define('Customer', {
@@ -43,7 +44,10 @@ export const Customer = sequelize.define('Customer', {
     installationDate: { type: DataTypes.DATEONLY, allowNull: true },
     ssidName: { type: DataTypes.STRING, allowNull: true },
     ssidPassword: { type: DataTypes.STRING, allowNull: true },
-    signalLevel: { type: DataTypes.STRING, allowNull: true } // Redaman
+    signalLevel: { type: DataTypes.STRING, allowNull: true }, // Redaman
+    // Consumer portal credentials
+    password: { type: DataTypes.STRING, defaultValue: 'nusantara!' },
+    must_change_password: { type: DataTypes.BOOLEAN, defaultValue: true }
 });
 
 export const Invoice = sequelize.define('Invoice', {
@@ -99,10 +103,35 @@ export const OnuChangeLog = sequelize.define('OnuChangeLog', {
     timestamp: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 });
 
+export const CustomerVoucher = sequelize.define('CustomerVoucher', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    customer_id: { type: DataTypes.UUID, allowNull: true },
+    customer_name: { type: DataTypes.STRING, allowNull: true },
+    customer_username: { type: DataTypes.STRING, allowNull: true },
+    customer_phone: { type: DataTypes.STRING, allowNull: true },
+    sub_area_name: { type: DataTypes.STRING, allowNull: true },
+    server_id: { type: DataTypes.UUID, allowNull: false },
+    server_name: { type: DataTypes.STRING, allowNull: true },
+    voucher_code: { type: DataTypes.STRING, allowNull: false },
+    voucher_password: { type: DataTypes.STRING, allowNull: true },
+    profile: { type: DataTypes.STRING, defaultValue: 'default' },
+    quota_gb: { type: DataTypes.INTEGER, allowNull: false },
+    validity: { type: DataTypes.STRING, defaultValue: '30d' },
+    status: { type: DataTypes.STRING, defaultValue: 'active' }, // active, used, expired
+    login_url: { type: DataTypes.STRING, allowNull: true }, // Automatic 1-click login URL
+    notes: { type: DataTypes.STRING, allowNull: true }
+});
+
 // --- Associations ---
 
 Server.hasMany(Customer, { foreignKey: 'server_id', onDelete: 'CASCADE' });
 Customer.belongsTo(Server, { foreignKey: 'server_id' });
+
+Server.hasMany(CustomerVoucher, { foreignKey: 'server_id', onDelete: 'CASCADE' });
+CustomerVoucher.belongsTo(Server, { foreignKey: 'server_id' });
+
+Customer.hasMany(CustomerVoucher, { foreignKey: 'customer_id', onDelete: 'CASCADE' });
+CustomerVoucher.belongsTo(Customer, { foreignKey: 'customer_id' });
 
 Server.hasMany(Invoice, { foreignKey: 'server_id', onDelete: 'CASCADE' });
 Invoice.belongsTo(Server, { foreignKey: 'server_id' });
@@ -233,6 +262,24 @@ export const initDB = async () => {
             });
         }
 
+        if (!tableInfo.password) {
+            console.log('[Database] Adding missing column password to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'password', {
+                type: DataTypes.STRING,
+                allowNull: true,
+                defaultValue: 'nusantara!'
+            });
+        }
+
+        if (!tableInfo.must_change_password) {
+            console.log('[Database] Adding missing column must_change_password to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'must_change_password', {
+                type: DataTypes.BOOLEAN,
+                allowNull: true,
+                defaultValue: true
+            });
+        }
+
         const serverTableInfo = await sequelize.getQueryInterface().describeTable('Servers');
         if (!serverTableInfo.lat) {
             console.log('[Database] Adding missing column lat to Servers...');
@@ -258,6 +305,23 @@ export const initDB = async () => {
             });
         }
 
+        if (!serverTableInfo.hotspot_login_url) {
+            console.log('[Database] Adding missing column hotspot_login_url to Servers...');
+            await sequelize.getQueryInterface().addColumn('Servers', 'hotspot_login_url', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+
+        const voucherTableInfo = await sequelize.getQueryInterface().describeTable('CustomerVouchers').catch(() => ({}));
+        if (voucherTableInfo && !voucherTableInfo.login_url) {
+            console.log('[Database] Adding missing column login_url to CustomerVouchers...');
+            await sequelize.getQueryInterface().addColumn('CustomerVouchers', 'login_url', {
+                type: DataTypes.STRING,
+                allowNull: true
+            }).catch(() => {});
+        }
+
         // [MIGRATION-V3] Standardize all existing mikrotik_names to lowercase for consistency
         // This is critical for Linux-based production servers like aaPanel.
         console.log('[Database] Running mikrotik_name standardization (V3)...');
@@ -272,11 +336,19 @@ export const initDB = async () => {
         }
         console.log('[Database] Standardization complete.');
 
+        // Ensure Database Indexes for High-Concurrency Performance
+        await sequelize.query('CREATE INDEX IF NOT EXISTS idx_customers_phone ON Customers(phone_number);').catch(() => {});
+        await sequelize.query('CREATE INDEX IF NOT EXISTS idx_customers_mikrotik_name ON Customers(mikrotik_name);').catch(() => {});
+        await sequelize.query('CREATE INDEX IF NOT EXISTS idx_vouchers_customer_id ON CustomerVouchers(customer_id);').catch(() => {});
+        await sequelize.query('CREATE INDEX IF NOT EXISTS idx_vouchers_customer_phone ON CustomerVouchers(customer_phone);').catch(() => {});
+        await sequelize.query('CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON Invoices(customer_id);').catch(() => {});
+
         console.log('[Database] Models synchronized.');
         
         // Ensure RemoteDevices table exists
         await RemoteDevice.sync();
         await OnuChangeLog.sync();
+        await CustomerVoucher.sync();
     } catch (error) {
         console.error('[Database] Unable to connect or sync:', error);
     }

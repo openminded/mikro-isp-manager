@@ -536,6 +536,110 @@ export function Finance() {
         }
     };
 
+    const handleExportCSV = async () => {
+        if (activeTab === 'analytics') {
+            alert('Export CSV is only available for invoice and payment lists.');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            const params = new URLSearchParams();
+            params.append('page', '1');
+            params.append('limit', '999999'); // fetch all matching records
+            if (search) params.append('search', search);
+            if (period) params.append('period', period);
+            if (filterServerId) params.append('serverId', filterServerId);
+            if (filterSubAreaId) params.append('subAreaId', filterSubAreaId);
+            if (filterPaymentDate) params.append('paymentDate', filterPaymentDate);
+            if (sortConfig) {
+                params.append('sortBy', sortConfig.key);
+                params.append('order', sortConfig.direction.toUpperCase());
+            }
+
+            let endpoint = '';
+            
+            if (activeTab === 'recap') {
+                endpoint = `/api/billing/payments?${params.toString()}`;
+            } else {
+                let status = 'UNPAID';
+                if (activeTab === 'history') status = 'PAID';
+                if (activeTab === 'invalid') status = 'INVALID';
+                params.append('status', status);
+                endpoint = `/api/billing/invoices?${params.toString()}`;
+            }
+
+            const res = await fetch(endpoint);
+            const result = await res.json();
+            const dataToExport = result.data || (Array.isArray(result) ? result : []);
+
+            if (dataToExport.length === 0) {
+                alert('No data to export.');
+                setIsLoading(false);
+                return;
+            }
+
+            const headers = ['ID', 'Customer', 'Server', 'Period', 'Amount', 'Status', 'Due Date'];
+            if (activeTab === 'recap') {
+                headers.push('Payment Method', 'Payment Date');
+            }
+
+            const escapeCSV = (str: any) => {
+                if (str === null || str === undefined) return '""';
+                const s = String(str);
+                if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+                    return `"${s.replace(/"/g, '""')}"`;
+                }
+                return s;
+            };
+
+            const csvRows = [headers.join(',')];
+
+            for (const item of dataToExport) {
+                const customerName = item.Customer?.name || item.Invoice?.Customer?.name || 'Unknown';
+                const serverName = item.Customer?.Server?.name || item.Invoice?.Customer?.Server?.name || 'Unknown';
+                const periodStr = item.period || item.Invoice?.period || '';
+                const amount = item.amount || 0;
+                const status = item.status || 'N/A';
+                const dueDate = item.due_date ? new Date(item.due_date).toLocaleDateString('id-ID') : '';
+                
+                let row = [
+                    escapeCSV(item.id),
+                    escapeCSV(customerName),
+                    escapeCSV(serverName),
+                    escapeCSV(periodStr),
+                    escapeCSV(amount),
+                    escapeCSV(status),
+                    escapeCSV(dueDate)
+                ];
+
+                if (activeTab === 'recap') {
+                    const method = item.PaymentMethod?.name || item.method || 'Unknown';
+                    const paymentDate = item.payment_date ? new Date(item.payment_date).toLocaleDateString('id-ID') : '';
+                    row.push(escapeCSV(method), escapeCSV(paymentDate));
+                }
+
+                csvRows.push(row.join(','));
+            }
+
+            const csvString = csvRows.join('\n');
+            const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `export_${activeTab}_${new Date().getTime()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+        } catch (error) {
+            console.error('Export failed', error);
+            alert('Failed to export CSV');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     return (
         <div className="p-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -579,8 +683,12 @@ export function Finance() {
                         <CheckCircle className="w-4 h-4" />
                         Generate Invoices
                     </button>
-                    <button className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2">
-                        <Download className="w-4 h-4" />
+                    <button 
+                        onClick={handleExportCSV}
+                        disabled={isLoading}
+                        className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50"
+                    >
+                        {isLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <Download className="w-4 h-4" />}
                         Export
                     </button>
                 </div>

@@ -1,0 +1,101 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.giganusa.customer"
+4    android:versionCode="1"
+5    android:versionName="1.0.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="21"
+9        android:targetSdkVersion="34" />
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:2:5-66
+11-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:2:22-64
+12
+13    <permission
+13-->[androidx.core:core:1.10.1] C:\Users\zk\.gradle\caches\transforms-3\9e83bca2c4c53528f2dae79bd2918cf5\transformed\core-1.10.1\AndroidManifest.xml:22:5-24:47
+14        android:name="com.giganusa.customer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+14-->[androidx.core:core:1.10.1] C:\Users\zk\.gradle\caches\transforms-3\9e83bca2c4c53528f2dae79bd2918cf5\transformed\core-1.10.1\AndroidManifest.xml:23:9-81
+15        android:protectionLevel="signature" />
+15-->[androidx.core:core:1.10.1] C:\Users\zk\.gradle\caches\transforms-3\9e83bca2c4c53528f2dae79bd2918cf5\transformed\core-1.10.1\AndroidManifest.xml:24:9-44
+16
+17    <uses-permission android:name="com.giganusa.customer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+17-->[androidx.core:core:1.10.1] C:\Users\zk\.gradle\caches\transforms-3\9e83bca2c4c53528f2dae79bd2918cf5\transformed\core-1.10.1\AndroidManifest.xml:26:5-97
+17-->[androidx.core:core:1.10.1] C:\Users\zk\.gradle\caches\transforms-3\9e83bca2c4c53528f2dae79bd2918cf5\transformed\core-1.10.1\AndroidManifest.xml:26:22-94
+18
+19    <application
+20        android:name="android.app.Application"
+20-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:5:9-42
+21        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+21-->[androidx.core:core:1.10.1] C:\Users\zk\.gradle\caches\transforms-3\9e83bca2c4c53528f2dae79bd2918cf5\transformed\core-1.10.1\AndroidManifest.xml:28:18-86
+22        android:extractNativeLibs="true"
+23        android:icon="@drawable/ic_launcher"
+23-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:6:9-45
+24        android:label="GigaNusa" >
+24-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:4:9-33
+25        <activity
+25-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:7:9-23:20
+26            android:name="com.giganusa.customer.MainActivity"
+26-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:8:13-41
+27            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+27-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:12:13-163
+28            android:exported="true"
+28-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:9:13-36
+29            android:hardwareAccelerated="true"
+29-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:13:13-47
+30            android:launchMode="singleTop"
+30-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:10:13-43
+31            android:theme="@style/LaunchTheme"
+31-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:11:13-47
+32            android:windowSoftInputMode="adjustResize" >
+32-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:14:13-55
+33            <meta-data
+33-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:15:13-18:17
+34                android:name="io.flutter.embedding.android.NormalTheme"
+34-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:16:15-70
+35                android:resource="@style/NormalTheme" />
+35-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:17:15-52
+36
+37            <intent-filter>
+37-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:19:13-22:29
+38                <action android:name="android.intent.action.MAIN" />
+38-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:20:17-68
+38-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:20:25-66
+39
+40                <category android:name="android.intent.category.LAUNCHER" />
+40-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:21:17-76
+40-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:21:27-74
+41            </intent-filter>
+42        </activity>
+43
+44        <meta-data
+44-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:24:9-26:33
+45            android:name="flutterEmbedding"
+45-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:25:13-44
+46            android:value="2" />
+46-->C:\Users\zk\Downloads\App\new-isp\customer_app\android\app\src\main\AndroidManifest.xml:26:13-30
+47
+48        <activity
+48-->[:url_launcher_android] C:\Users\zk\Downloads\App\new-isp\customer_app\build\url_launcher_android\intermediates\merged_manifest\release\processReleaseManifest\AndroidManifest.xml:8:9-11:74
+49            android:name="io.flutter.plugins.urllauncher.WebViewActivity"
+49-->[:url_launcher_android] C:\Users\zk\Downloads\App\new-isp\customer_app\build\url_launcher_android\intermediates\merged_manifest\release\processReleaseManifest\AndroidManifest.xml:9:13-74
+50            android:exported="false"
+50-->[:url_launcher_android] C:\Users\zk\Downloads\App\new-isp\customer_app\build\url_launcher_android\intermediates\merged_manifest\release\processReleaseManifest\AndroidManifest.xml:10:13-37
+51            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+51-->[:url_launcher_android] C:\Users\zk\Downloads\App\new-isp\customer_app\build\url_launcher_android\intermediates\merged_manifest\release\processReleaseManifest\AndroidManifest.xml:11:13-71
+52
+53        <uses-library
+53-->[androidx.window:window:1.0.0-beta04] C:\Users\zk\.gradle\caches\transforms-3\72dee9ecd0f23502fa661f3d1cb5628e\transformed\jetified-window-1.0.0-beta04\AndroidManifest.xml:25:9-27:40
+54            android:name="androidx.window.extensions"
+54-->[androidx.window:window:1.0.0-beta04] C:\Users\zk\.gradle\caches\transforms-3\72dee9ecd0f23502fa661f3d1cb5628e\transformed\jetified-window-1.0.0-beta04\AndroidManifest.xml:26:13-54
+55            android:required="false" />
+55-->[androidx.window:window:1.0.0-beta04] C:\Users\zk\.gradle\caches\transforms-3\72dee9ecd0f23502fa661f3d1cb5628e\transformed\jetified-window-1.0.0-beta04\AndroidManifest.xml:27:13-37
+56        <uses-library
+56-->[androidx.window:window:1.0.0-beta04] C:\Users\zk\.gradle\caches\transforms-3\72dee9ecd0f23502fa661f3d1cb5628e\transformed\jetified-window-1.0.0-beta04\AndroidManifest.xml:28:9-30:40
+57            android:name="androidx.window.sidecar"
+57-->[androidx.window:window:1.0.0-beta04] C:\Users\zk\.gradle\caches\transforms-3\72dee9ecd0f23502fa661f3d1cb5628e\transformed\jetified-window-1.0.0-beta04\AndroidManifest.xml:29:13-51
+58            android:required="false" />
+58-->[androidx.window:window:1.0.0-beta04] C:\Users\zk\.gradle\caches\transforms-3\72dee9ecd0f23502fa661f3d1cb5628e\transformed\jetified-window-1.0.0-beta04\AndroidManifest.xml:30:13-37
+59    </application>
+60
+61</manifest>

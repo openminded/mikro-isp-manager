@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, CreditCard, Monitor, RefreshCw, HardDrive, MonitorOff, Calculator, MapPin } from "lucide-react";
+import { useState, useEffect } from 'react';
+import { LayoutDashboard, Server, Settings, Users, Layers, Database, ChevronDown, ChevronRight, Network, ClipboardList, Wrench, Briefcase, BadgeCheck, CheckCircle, AlertTriangle, ScrollText, Map, CreditCard, Monitor, RefreshCw, HardDrive, MonitorOff, Calculator, MapPin, Wifi } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +15,7 @@ const navigation = [
         section: "Client Services",
         items: [
             { name: "Customers", href: "/customers", icon: Users },
+            { name: "Hotspot", href: "/hotspot", icon: Wifi },
             {
                 name: "Registration",
                 icon: ClipboardList,
@@ -96,6 +97,18 @@ export function Sidebar({ className, onClose }: SidebarProps) {
     const [openMenus, setOpenMenus] = useState<string[]>(['Data Master', 'Working Order']);
     const { user, logout } = useAuth();
     const isTech = user?.role === 'technician';
+
+    useEffect(() => {
+        navigation.forEach(group => {
+            group.items.forEach(item => {
+                if ('children' in item && item.children) {
+                    if (item.children.some(child => location.pathname === child.href)) {
+                        setOpenMenus(prev => prev.includes(item.name) ? prev : [...prev, item.name]);
+                    }
+                }
+            });
+        });
+    }, [location.pathname]);
 
     const toggleMenu = (name: string) => {
         setOpenMenus(prev =>
@@ -237,7 +250,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
                 </button>
                 <div className="mt-4 px-3 text-[10px] text-slate-400 font-medium flex justify-between items-center">
                     <span>App Version</span>
-                    <span>v1.0.1+2</span>
+                    <span>v1.0.4</span>
                 </div>
             </div>
         </div>

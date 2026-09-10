@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>GigaNusa - Aplikasi Pelanggan WiFi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary-purple: #5B50D6;
+      --primary-red: #E53935;
+      --primary-red-hover: #D32F2F;
+      --slate-arch: #323746;
+      --text-dark: #1E293B;
+      --text-muted: #64748B;
+      --bg-canvas: #483CB8;
+      --app-bg: #F8FAFC;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background-color: var(--bg-canvas);
+      background-image: radial-gradient(circle at 50% 10%, #6D62E8 0%, #483CB8 70%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+      overflow-x: hidden;
+    }
+    .preview-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      width: 100%;
+    }
+    .device-badge {
+      background: rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(10px);
+      color: white;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .mobile-frame {
+      width: 100%;
+      max-width: 412px;
+      height: 840px;
+      max-height: 90vh;
+      background: #FFFFFF;
+      border-radius: 40px;
+      box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4), 0 0 0 10px rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* Logo & Branding */
+    .logo-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 10px;
+      margin-bottom: 24px;
+      position: relative;
+    }
+    .logo-svg {
+      width: 110px;
+      height: 110px;
+    }
+    .brand-title {
+      font-weight: 900;
+      font-size: 22px;
+      letter-spacing: 3.5px;
+      color: #C93B3B;
+      margin-top: 14px;
+    }
+    .brand-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-weight: 500;
+    }
+    .brand-subtitle span {
+      color: var(--primary-red);
+      font-weight: 700;
+    }
+
+    /* Inputs */
+    .form-group {
+      margin-bottom: 18px;
+    }
+    .form-label {
+      font-size: 11px;
+      font-weight: 800;
+      color: #475569;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .input-box {
+      display: flex;
+      align-items: center;
+      border: 1.5px solid #E2E8F0;
+      border-radius: 14px;
+      padding: 4px 14px;
+      background: #FFFFFF;
+      transition: all 0.2s;
+    }
+    .input-box.highlight {
+      border-color: #F43F5E;
+    }
+    .input-box:focus-within {
+      border-color: var(--primary-red);
+      box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.14);
+    }
+    .input-box svg {
+      width: 20px;
+      height: 20px;
+      margin-right: 10px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .input-box.highlight svg {
+      color: #F43F5E;
+    }
+    .input-box input {
+      border: none;
+      outline: none;
+      width: 100%;
+      font-size: 14px;
+      color: var(--text-dark);
+      font-weight: 600;
+      padding: 11px 0;
+      background: transparent;
+    }
+
+    /* Buttons */
+    .btn-masuk {
+      width: 100%;
+      background: var(--primary-red);
+      color: white;
+      border: none;
+      border-radius: 16px;
+      padding: 16px;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 10px 24px rgba(229, 57, 53, 0.35);
+      transition: all 0.2s;
+      margin-top: 10px;
+    }
+    .btn-masuk:active {
+      transform: scale(0.98);
+      background: var(--primary-red-hover);
+    }
+
+    /* Views */
+    .view {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .view.active {
+      display: flex;
+    }
+
+    /* Header */
+    .app-header {
+      background: var(--primary-purple);
+      color: white;
+      padding: 18px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .app-header h1 {
+      font-size: 17px;
+      font-weight: 900;
+      letter-spacing: 1.2px;
+    }
+
+    /* Content Area */
+    .content-area {
+      flex: 1;
+      padding: 18px;
+      overflow-y: auto;
+      background: var(--app-bg);
+    }
+
+    /* Card Components */
+    .hero-card {
+      background: linear-gradient(135deg, #5B50D6 0%, #3B30A5 100%);
+      color: white;
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 12px 28px rgba(91, 80, 214, 0.35);
+      margin-bottom: 20px;
+    }
+    .badge-status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 800;
+      background: #10B981;
+      color: white;
+    }
+    .info-card {
+      background: white;
+      border-radius: 18px;
+      padding: 16px;
+      border: 1px solid #E2E8F0;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+    }
+    .info-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .info-row:last-child {
+      margin-bottom: 0;
+    }
+    .info-label {
+      font-size: 11px;
+      color: #94A3B8;
+      font-weight: 600;
+    }
+    .info-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-dark);
+      margin-top: 2px;
+    }
+
+    /* Voucher Cards */
+    .voucher-ticket {
+      background: white;
+      border-radius: 16px;
+      border: 1.5px solid #FCA5A5;
+      margin-bottom: 14px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+    .voucher-head {
+      background: #FFF1F2;
+      padding: 10px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 800;
+      color: #991B1B;
+      font-size: 14px;
+    }
+    .voucher-body {
+      padding: 14px;
+    }
+    .voucher-code-box {
+      background: #F1F5F9;
+      padding: 10px 14px;
+      border-radius: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: monospace;
+      font-size: 16px;
+      font-weight: 800;
+      color: #0F172A;
+      cursor: pointer;
+    }
+
+    /* Bottom Nav */
+    .bottom-nav {
+      background: white;
+      border-top: 1px solid #E2E8F0;
+      display: flex;
+      justify-content: space-around;
+      padding: 10px 0;
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      color: #94A3B8;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      padding: 4px 12px;
+    }
+    .nav-item.active {
+      color: var(--primary-red);
+      font-weight: 800;
+    }
+    .nav-item svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    .toast {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1E293B;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 24px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+      z-index: 100;
+      display: none;
+      animation: fadeIn 0.2s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translate(-50%, -10px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="preview-container">
+    <div class="device-badge">
+      <span>📱</span> Flutter Web Preview • GigaNusa Mobile
+    </div>
+
+    <div class="mobile-frame">
+      <div id="toast" class="toast">Notifikasi</div>
+
+      <!-- 1. LOGIN SCREEN (Matches screenshot exactly) -->
+      <div id="view-login" class="view active" style="padding: 32px 24px;">
+        <div class="logo-container">
+          <!-- Logo Arch + Circle -->
+          <svg class="logo-svg" viewBox="0 0 500 500">
+            <circle cx="280" cy="230" r="140" fill="#FFA4A2" opacity="0.35" filter="blur(20px)" />
+            <path d="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z" fill="#323746" />
+            <circle cx="250" cy="275" r="90" fill="#FF333A" />
+          </svg>
+          <div class="brand-title">GIGANUSA</div>
+          <div class="brand-subtitle">Selamat Datang di <span>Portal Hotspot</span></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nama Pengguna / No. Handphone</label>
+          <div class="input-box highlight">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+            <input type="text" id="login-phone" placeholder="Masukkan nomor HP terdaftar..." />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Kata Sandi</label>
+          <div class="input-box">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+            <input type="password" id="login-password" placeholder="Default: nusantara!" />
+          </div>
+        </div>
+
+        <button class="btn-masuk" onclick="handleLogin()">
+          <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20" style="color: #FFD54F;"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"></path></svg>
+          MASUK
+        </button>
+
+        <div style="margin-top: 24px; text-align: center; font-size: 12px; color: #64748B;">
+          <div>© 2026 Dikelola oleh <strong>GigaNusa</strong></div>
+          <div style="margin-top: 6px; font-size: 11px; color: #94A3B8;">⚡ Kecepatan Tinggi • 🛡️ Koneksi Aman • 📶 Stabil 24 Jam</div>
+        </div>
+      </div>
+
+      <!-- 2. FORCE CHANGE PASSWORD SCREEN -->
+      <div id="view-force-pwd" class="view" style="padding: 32px 24px;">
+        <div class="logo-container">
+          <div class="brand-title">GIGANUSA</div>
+          <div style="font-size: 14px; font-weight: 700; color: #DC2626; margin-top: 6px;">Keamanan Akun Pelanggan</div>
+        </div>
+
+        <div style="background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 14px; padding: 14px; font-size: 12px; color: #991B1B; font-weight: 600; margin-bottom: 20px;">
+          Demi menjaga keamanan akun Anda, silakan ganti kata sandi bawaan (<strong>nusantara!</strong>) sebelum melanjutkan ke aplikasi.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Kata Sandi Saat Ini</label>
+          <div class="input-box">
+            <input type="password" id="old-pwd" value="nusantara!" readonly />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Kata Sandi Baru</label>
+          <div class="input-box highlight">
+            <input type="password" id="new-pwd" placeholder="Minimal 5 karakter..." />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Ulangi Kata Sandi Baru</label>
+          <div class="input-box">
+            <input type="password" id="confirm-pwd" placeholder="Konfirmasi kata sandi..." />
+          </div>
+        </div>
+
+        <button class="btn-masuk" onclick="handleChangePassword()">
+          SIMPAN & MASUK
+        </button>
+      </div>
+
+      <!-- 3. MAIN DASHBOARD SCREEN -->
+      <div id="view-main" class="view">
+        <div id="main-header" class="app-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>
+            <h1>GIGA NUSA</h1>
+          </div>
+          <button onclick="refreshData()" style="background: none; border: none; color: white; cursor: pointer;">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          </button>
+        </div>
+
+        <div class="content-area">
+          
+          <!-- TAB 1: Beranda -->
+          <div id="tab-home" class="tab-pane">
+            <div id="main-hero-card" class="hero-card">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                  <div style="font-size: 13px; opacity: 0.85;">Halo,</div>
+                  <div id="dash-customer-name" style="font-size: 20px; font-weight: 800; margin-top: 2px;">Pelanggan</div>
+                </div>
+                <span id="dash-status-badge" class="badge-status">● AKTIF</span>
+              </div>
+              <div id="dash-blocked-banner" style="display: none; margin-top: 14px; background: #FEF2F2; border: 1px solid #F87171; border-radius: 12px; padding: 10px 12px; color: #991B1B; font-size: 11.5px; font-weight: 700;">
+                ⚠️ Layanan terblokir sementara dikarenakan belum melakukan pembayaran tagihan.
+              </div>
+              <div style="margin-top: 16px; background: rgba(255,255,255,0.15); border-radius: 14px; padding: 14px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <span style="font-size: 24px;">⚡</span>
+                  <div style="flex: 1;">
+                    <div style="font-size: 11px; opacity: 0.8;">Paket Layanan</div>
+                    <div id="dash-package" style="font-size: 16px; font-weight: 800;">10 Mbps Dedicated</div>
+                  </div>
+                </div>
+
+                <div style="height: 1px; background: rgba(255,255,255,0.15); margin: 12px 0 10px 0;"></div>
+
+                <!-- Status WiFi (PPP Active) - On Demand only -->
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span id="wifi-icon" style="font-size: 16px;">📶</span>
+                    <div>
+                      <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 11px; opacity: 0.85;">Status WiFi:</span>
+                        <span id="wifi-status-badge" style="font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.2); color: #FFFFFF; border: 1px solid rgba(255,255,255,0.3);">Belum dicek</span>
+                      </div>
+                      <div id="wifi-checked-time" style="font-size: 9.5px; opacity: 0.7; margin-top: 1px; display: none;">Dicek pukul 00:00:00</div>
+                    </div>
+                  </div>
+
+                  <button id="btn-reload-wifi" onclick="checkWifiStatus()" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.35); color: white; border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s;">
+                    <span id="wifi-btn-icon">🔄</span>
+                    <span id="wifi-btn-text">Cek Status</span>
+                  </button>
+                </div>
+
+                <!-- Info Pemakaian & Uptime (Muncul setelah tombol Cek Status ditekan) -->
+                <div id="wifi-metrics-box" style="display: none; margin-top: 10px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 8px 12px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="flex: 1; display: flex; align-items: center; gap: 6px;">
+                      <span style="font-size: 15px;">📊</span>
+                      <div>
+                        <div style="font-size: 9.5px; opacity: 0.7;">Total Pemakaian</div>
+                        <div id="wifi-usage-val" style="font-size: 12px; font-weight: 800; color: #67E8F9;">-</div>
+                      </div>
+                    </div>
+                    <div style="width: 1px; height: 26px; background: rgba(255,255,255,0.2); margin: 0 10px;"></div>
+                    <div style="flex: 1; display: flex; align-items: center; gap: 6px;">
+                      <span style="font-size: 15px;">⏱️</span>
+                      <div>
+                        <div style="font-size: 9.5px; opacity: 0.7;">Uptime WiFi</div>
+                        <div id="wifi-uptime-val" style="font-size: 12px; font-weight: 800; color: #FDE047;">-</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="font-weight: 800; font-size: 15px; color: #1E293B; margin-bottom: 12px;">Informasi Pelanggan</div>
+            <div class="info-card">
+              <div class="info-row">
+                <div style="width: 32px; font-size: 18px;">👤</div>
+                <div>
+                  <div class="info-label">Nama Pelanggan</div>
+                  <div id="dash-nama" class="info-val">-</div>
+                </div>
+              </div>
+              <hr style="border: none; border-top: 1px solid #F1F5F9; margin: 10px 0;">
+              <div class="info-row">
+                <div style="width: 32px; font-size: 18px;">📱</div>
+                <div>
+                  <div class="info-label">Nomor Handphone</div>
+                  <div id="dash-phone" class="info-val">-</div>
+                </div>
+              </div>
+              <hr style="border: none; border-top: 1px solid #F1F5F9; margin: 10px 0;">
+              <div class="info-row">
+                <div style="width: 32px; font-size: 18px;">📍</div>
+                <div>
+                  <div class="info-label">Alamat Pemasangan (Server & Sub Area)</div>
+                  <div id="dash-address" class="info-val">-</div>
+                </div>
+              </div>
+              <hr style="border: none; border-top: 1px solid #F1F5F9; margin: 10px 0;">
+              <div class="info-row">
+                <div style="width: 32px; font-size: 18px;">📅</div>
+                <div>
+                  <div class="info-label">Tanggal Aktivasi</div>
+                  <div id="dash-activation" class="info-val">-</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: Voucher Kuota -->
+          <div id="tab-vouchers" class="tab-pane" style="display: none;">
+            <div style="font-weight: 800; font-size: 16px; color: #1E293B; margin-bottom: 14px;">Voucher Kuota Hotspot</div>
+            <div id="voucher-list-container"></div>
+          </div>
+
+          <!-- TAB 3: Tagihan / Billing -->
+          <div id="tab-invoices" class="tab-pane" style="display: none;">
+            <div style="font-weight: 800; font-size: 16px; color: #1E293B; margin-bottom: 14px;">Riwayat Pembayaran & Tagihan</div>
+            <div id="invoice-list-container"></div>
+          </div>
+
+          <!-- TAB 4: Akun Saya -->
+          <div id="tab-profile" class="tab-pane" style="display: none;">
+            <div class="info-card" style="text-align: center; padding: 24px;">
+              <div style="width: 64px; height: 64px; border-radius: 50%; background: #EFF6FF; color: #3B82F6; font-size: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px;">👤</div>
+              <div id="prof-name" style="font-weight: 800; font-size: 18px; color: #1E293B;">-</div>
+              <div id="prof-phone" style="color: #64748B; font-size: 14px; margin-top: 2px;">-</div>
+            </div>
+
+            <button onclick="handleLogout()" style="width: 100%; padding: 14px; border: 1.5px solid #FCA5A5; color: #DC2626; font-weight: 800; border-radius: 14px; background: white; cursor: pointer; margin-top: 20px;">
+              Keluar dari Akun
+            </button>
+          </div>
+
+        </div>
+
+        <!-- Bottom Navigation -->
+        <div class="bottom-nav">
+          <div class="nav-item active" onclick="switchTab('home', this)">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+            Beranda
+          </div>
+          <div class="nav-item" onclick="switchTab('vouchers', this)">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path></svg>
+            Voucher
+          </div>
+          <div class="nav-item" onclick="switchTab('invoices', this)">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"></path></svg>
+            Tagihan
+          </div>
+          <div class="nav-item" onclick="switchTab('profile', this)">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+            Akun
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 2500);
+    }
+
+    let state = {
+      token: localStorage.getItem('giga_token') || null,
+      customer: JSON.parse(localStorage.getItem('giga_customer') || 'null'),
+      vouchers: JSON.parse(localStorage.getItem('giga_vouchers_cache') || '[]'),
+      invoices: JSON.parse(localStorage.getItem('giga_invoices_cache') || '[]')
+    };
+
+    function showView(viewId) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById(viewId).classList.add('active');
+    }
+
+    function switchTab(tabKey, el) {
+      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+      document.getElementById('tab-' + tabKey).style.display = 'block';
+      el.classList.add('active');
+    }
+
+    async function handleLogin() {
+      const phone = document.getElementById('login-phone').value.trim();
+      const password = document.getElementById('login-password').value.trim();
+
+      if (!phone || !password) {
+        showToast('Nomor HP dan kata sandi wajib diisi');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/customer-auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, password })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          state.token = data.token;
+          state.customer = data.customer;
+          localStorage.setItem('giga_token', data.token);
+          localStorage.setItem('giga_customer', JSON.stringify(data.customer));
+
+          if (data.mustChangePassword) {
+            showView('view-force-pwd');
+            showToast('Wajib ganti sandi awal');
+          } else {
+            showView('view-main');
+            refreshData();
+          }
+        } else {
+          showToast(data.error || 'Login gagal.');
+        }
+      } catch (err) {
+        showToast('Koneksi gagal: ' + err.message);
+      }
+    }
+
+    async function handleChangePassword() {
+      const oldPassword = document.getElementById('old-pwd').value.trim();
+      const newPassword = document.getElementById('new-pwd').value.trim();
+      const confirmPassword = document.getElementById('confirm-pwd').value.trim();
+
+      if (!newPassword || newPassword.length < 5) {
+        showToast('Kata sandi baru minimal 5 karakter');
+        return;
+      }
+      if (newPassword === 'nusantara!') {
+        showToast('Sandi baru tidak boleh default (nusantara!)');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        showToast('Konfirmasi kata sandi tidak cocok');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/customer-auth/change-password', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + state.token
+          },
+          body: JSON.stringify({
+            customerId: state.customer.id,
+            oldPassword,
+            newPassword
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast('Kata sandi berhasil disimpan!');
+          state.customer.mustChangePassword = false;
+          localStorage.setItem('giga_customer', JSON.stringify(state.customer));
+          showView('view-main');
+          refreshData();
+        } else {
+          showToast(data.error || 'Gagal mengubah sandi');
+        }
+      } catch (err) {
+        showToast('Error: ' + err.message);
+      }
+    }
+
+    async function refreshData() {
+      if (!state.customer) return;
+      try {
+        const res = await fetch('/api/customer-portal/dashboard?customerId=' + state.customer.id, {
+          headers: { 'Authorization': 'Bearer ' + state.token }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          state.customer = data.customer;
+          state.vouchers = data.vouchers || [];
+          state.invoices = data.invoices || [];
+          localStorage.setItem('giga_vouchers_cache', JSON.stringify(state.vouchers));
+          localStorage.setItem('giga_invoices_cache', JSON.stringify(state.invoices));
+
+          document.getElementById('dash-customer-name').innerText = state.customer.real_name || state.customer.name;
+          document.getElementById('dash-package').innerText = state.customer.profile || 'Standard';
+          document.getElementById('dash-nama').innerText = state.customer.real_name || state.customer.name || '-';
+          document.getElementById('dash-phone').innerText = state.customer.phone_number || '-';
+          document.getElementById('dash-address').innerText = state.customer.address || 'Sesuai registrasi';
+          document.getElementById('dash-activation').innerText = state.customer.activationDate || 'Aktif';
+
+          const badge = document.getElementById('dash-status-badge');
+          const banner = document.getElementById('dash-blocked-banner');
+          const header = document.getElementById('main-header');
+          const heroCard = document.getElementById('main-hero-card');
+          const status = (state.customer.status || 'active').toLowerCase();
+          const hasUnpaid = (state.invoices || []).some(i => i.status === 'UNPAID');
+          const isBlockedOrUnpaid = status === 'disabled' || status === 'isolated' || hasUnpaid;
+
+          if (isBlockedOrUnpaid) {
+            // Apply Red Theme
+            if (header) header.style.background = '#DC2626';
+            if (heroCard) {
+              heroCard.style.background = 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)';
+              heroCard.style.boxShadow = '0 12px 28px rgba(220, 38, 38, 0.4)';
+            }
+          } else {
+            // Restore Default Purple Theme
+            if (header) header.style.background = '#5B50D6';
+            if (heroCard) {
+              heroCard.style.background = 'linear-gradient(135deg, #5B50D6 0%, #3B30A5 100%)';
+              heroCard.style.boxShadow = '0 12px 28px rgba(91, 80, 214, 0.35)';
+            }
+          }
+
+          if (status === 'disabled') {
+            badge.innerText = '● TERBLOKIR';
+            badge.style.background = '#DC2626';
+            if (banner) banner.style.display = 'block';
+          } else if (status === 'isolated') {
+            badge.innerText = '● TERISOLIR';
+            badge.style.background = '#DC2626';
+            if (banner) banner.style.display = 'block';
+          } else if (hasUnpaid) {
+            badge.innerText = '● MENUNGGU BAYAR';
+            badge.style.background = '#EA580C';
+            if (banner) {
+              banner.style.display = 'block';
+              banner.innerText = '⚠️ Anda memiliki tagihan yang belum dibayar. Mohon segera selesaikan pembayaran.';
+            }
+          } else {
+            badge.innerText = '● AKTIF';
+            badge.style.background = '#10B981';
+            if (banner) banner.style.display = 'none';
+          }
+
+          document.getElementById('prof-name').innerText = state.customer.real_name || state.customer.name;
+          document.getElementById('prof-phone').innerText = state.customer.phone_number || '-';
+
+          renderVouchers();
+          renderInvoices();
+        }
+      } catch (err) {
+        console.error('Refresh error', err);
+      }
+    }
+
+    // Cek Status WiFi On-Demand (HANYA ketika tombol ditekan, tidak saat buka beranda)
+    async function checkWifiStatus() {
+      if (!state.customer) return;
+      const btn = document.getElementById('btn-reload-wifi');
+      const btnIcon = document.getElementById('wifi-btn-icon');
+      const btnText = document.getElementById('wifi-btn-text');
+      const badge = document.getElementById('wifi-status-badge');
+      const timeDiv = document.getElementById('wifi-checked-time');
+      const wifiIcon = document.getElementById('wifi-icon');
+
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btnText.innerText = 'Mengecek...';
+      btnIcon.innerText = '⏳';
+
+      try {
+        const res = await fetch('/api/customer-portal/wifi-status?customerId=' + state.customer.id, {
+          headers: { 'Authorization': 'Bearer ' + state.token }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          const isOnline = data.connected === true || data.status === 'online';
+          if (isOnline) {
+            badge.innerText = '● Terhubung';
+            badge.style.background = 'rgba(22, 163, 74, 0.4)';
+            badge.style.borderColor = '#4ADE80';
+            badge.style.color = '#86EFAC';
+            wifiIcon.innerText = '📶';
+            showToast('WiFi Anda Terhubung aktif');
+          } else {
+            badge.innerText = '● Tidak Aktif';
+            badge.style.background = 'rgba(220, 38, 38, 0.4)';
+            badge.style.borderColor = '#F87171';
+            badge.style.color = '#FCA5A5';
+            wifiIcon.innerText = '📴';
+            showToast('WiFi Tidak Terhubung / Offline');
+          }
+
+          const metricsBox = document.getElementById('wifi-metrics-box');
+          const usageVal = document.getElementById('wifi-usage-val');
+          const uptimeVal = document.getElementById('wifi-uptime-val');
+          if (metricsBox) {
+            metricsBox.style.display = 'block';
+            if (usageVal) usageVal.innerText = data.usage || (isOnline ? 'Aktif' : '0 B');
+            if (uptimeVal) uptimeVal.innerText = data.uptime || (isOnline ? 'Aktif' : '-');
+          }
+
+          if (data.checkedAt) {
+            timeDiv.innerText = 'Dicek pukul ' + data.checkedAt;
+            timeDiv.style.display = 'block';
+          }
+        } else {
+          badge.innerText = '● Tidak Aktif';
+          badge.style.background = 'rgba(220, 38, 38, 0.4)';
+          badge.style.borderColor = '#F87171';
+          badge.style.color = '#FCA5A5';
+          wifiIcon.innerText = '📴';
+          showToast(data.error || 'Gagal mengecek status WiFi');
+        }
+      } catch (err) {
+        badge.innerText = '● Tidak Aktif';
+        badge.style.background = 'rgba(220, 38, 38, 0.4)';
+        badge.style.borderColor = '#F87171';
+        badge.style.color = '#FCA5A5';
+        showToast('Koneksi pengecekan gagal');
+      } finally {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btnText.innerText = 'Cek Status';
+        btnIcon.innerText = '🔄';
+      }
+    }
+
+    function renderVouchers() {
+      const c = document.getElementById('voucher-list-container');
+      if (!state.vouchers || state.vouchers.length === 0) {
+        c.innerHTML = '<div style="text-align: center; color: #94A3B8; padding: 40px 20px;">Belum ada voucher kuota yang diterbitkan.</div>';
+        return;
+      }
+      c.innerHTML = state.vouchers.map(v => {
+        const isActive = (v.status || 'active').toLowerCase() === 'active';
+        return `
+        <div class="voucher-ticket">
+          <div class="voucher-head">
+            <span>⚡ ${v.quota_gb} GB Hotspot</span>
+            <span style="font-size: 11px; background: ${isActive ? '#DCFCE7' : '#E2E8F0'}; color: ${isActive ? '#166534' : '#64748B'}; padding: 2px 8px; border-radius: 6px;">${(v.status || 'active').toUpperCase()}</span>
+          </div>
+          <div class="voucher-body">
+            <div style="font-size: 10px; color: #64748B; font-weight: 700; margin-bottom: 4px;">KODE VOUCHER (KLIK UNTUK SALIN)</div>
+            <div class="voucher-code-box" onclick="navigator.clipboard.writeText('${v.voucher_code}'); showToast('Kode disalin: ${v.voucher_code}')">
+              <span>${v.voucher_code}</span>
+              <span style="font-size: 12px; color: #E53935;">📋 Salin</span>
+            </div>
+            ${v.voucher_password ? `<div style="font-size: 11.5px; color: #475569; margin-top: 6px;">Password: <strong>${v.voucher_password}</strong></div>` : ''}
+            <div style="font-size: 11px; color: #64748B; margin-top: 8px;">Masa Aktif: ${v.validity || '30d'}</div>
+
+            ${isActive ? `
+            <button onclick="activateVoucher('${v.voucher_code}', '${v.login_url || ''}')" style="width: 100%; margin-top: 12px; background: linear-gradient(135deg, #E53935, #B91C1C); color: white; border: none; padding: 10px; border-radius: 10px; font-weight: 800; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(229,57,53,0.3);">
+              <span>📶</span> AKTIFKAN KE WIFI OTOMATIS
+            </button>` : ''}
+          </div>
+        </div>
+      `}).join('');
+    }
+
+    async function activateVoucher(code, url) {
+      if (!url) {
+        navigator.clipboard.writeText(code);
+        showToast('Kode voucher ' + code + ' disalin! Masukkan ke portal WiFi.');
+        return;
+      }
+      showToast('Mengaktivasi voucher ' + code + ' ke WiFi Hotspot...');
+      
+      // Auto-copy kode
+      try { navigator.clipboard.writeText(code); } catch(_) {}
+
+      try {
+        // Panggil login URL hotspot di background
+        fetch(url, { mode: 'no-cors' }).catch(() => {});
+      } catch (e) {}
+
+      // Tampilkan popup instruksi/konfirmasi
+      setTimeout(() => {
+        alert('Aktivasi dikirim ke Gateway Hotspot!\n\nLink Login:\n' + url + '\n\nPastikan perangkat Anda terhubung ke WiFi Hotspot agar akses internet aktif seketika tanpa perlu input manual.');
+      }, 300);
+    }
+
+    function renderInvoices() {
+      const c = document.getElementById('invoice-list-container');
+      if (state.invoices.length === 0) {
+        c.innerHTML = '<div style="text-align: center; color: #94A3B8; padding: 40px 20px;">Belum ada riwayat tagihan.</div>';
+        return;
+      }
+      c.innerHTML = state.invoices.map(inv => {
+        const isPaid = inv.status === 'PAID';
+        const formattedAmount = 'Rp ' + Number(inv.amount).toLocaleString('id-ID');
+        return `
+          <div class="info-card" style="border-left: 4px solid ${isPaid ? '#10B981' : '#EF4444'};">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="font-weight: 800; font-size: 15px;">Periode: ${inv.period}</div>
+              <span class="badge-status" style="background: ${isPaid ? '#10B981' : '#EF4444'};">${isPaid ? 'LUNAS' : 'BELUM BAYAR'}</span>
+            </div>
+            <div style="margin-top: 10px; display: flex; justify-content: space-between;">
+              <div>
+                <div class="info-label">Tagihan</div>
+                <div style="font-size: 16px; font-weight: 900; color: ${isPaid ? '#1E293B' : '#E53935'};">${formattedAmount}</div>
+              </div>
+              <div style="text-align: right;">
+                <div class="info-label">Jatuh Tempo</div>
+                <div style="font-size: 12px; font-weight: 700; color: #475569;">${inv.due_date}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('giga_token');
+      localStorage.removeItem('giga_customer');
+      state.token = null;
+      state.customer = null;
+      showView('view-login');
+      showToast('Berhasil keluar');
+    }
+
+    // Check existing session
+    if (state.token && state.customer) {
+      if (state.customer.mustChangePassword) {
+        showView('view-force-pwd');
+      } else {
+        showView('view-main');
+        refreshData();
+      }
+    }
+  </script>
+</body>
+</html>

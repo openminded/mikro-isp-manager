@@ -2395,9 +2395,11 @@ androidx.viewpager.widget.ViewPager$SavedState
 androidx.viewpager.widget.ViewPager$SimpleOnPageChangeListener
 androidx.viewpager.widget.ViewPager$ViewPositionComparator
 androidx.viewpager.widget.ViewPager
-com.giganusa.customer.R$drawable
-com.giganusa.customer.R$style
-com.giganusa.customer.R
+com.ayd.giganusa.R$drawable
+com.ayd.giganusa.R$mipmap
+com.ayd.giganusa.R$style
+com.ayd.giganusa.R
+com.giganusa.customer.MainActivity
 com.google.common.util.concurrent.ListenableFuture
 io.flutter.BuildConfig
 io.flutter.FlutterInjector$Builder:

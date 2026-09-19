@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2, Printer, AlertTriangle, Eye, EyeOff, Zap, Search } from "lucide-react";
+import { Download, CheckCircle, Upload, X, Filter, Layers, Ban, History, Pencil, ArrowUpDown, Trash2, Printer, AlertTriangle, Eye, EyeOff, Zap, Search, QrCode } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Mock Data for dev (replace with API calls later)
@@ -1926,6 +1926,34 @@ export function Finance() {
                                     <CheckCircle className="w-4 h-4" />
                                     Confirm Payment
                                 </button>
+
+                                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            if (!selectedInvoice) return;
+                                            try {
+                                                const res = await fetch('/api/billing/sumopod/create-payment', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ invoiceId: selectedInvoice.id, paymentMethod: 'QRIS' })
+                                                });
+                                                const data = await res.json();
+                                                if (res.ok && data.success && data.payment_link_url) {
+                                                    window.open(data.payment_link_url, '_blank');
+                                                } else {
+                                                    alert(data.error || 'Gagal membuat tautan pembayaran QRIS SumoPod');
+                                                }
+                                            } catch (err: any) {
+                                                alert('Error: ' + err.message);
+                                            }
+                                        }}
+                                        className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm"
+                                    >
+                                        <QrCode className="w-4 h-4" />
+                                        Buat Tautan QRIS SumoPod Online
+                                    </button>
+                                </div>
                             </form>
                         </div>
                     </div>

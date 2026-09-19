@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.giganusa.customer.app-mergeReleaseResources-10:/values/values.xml",
+            "outputFile": "com.ayd.giganusa.app-mergeReleaseResources-10:/values/values.xml",
             "map": [
                 {
                     "source": "C:\\Users\\zk\\.gradle\\caches\\transforms-3\\72dee9ecd0f23502fa661f3d1cb5628e\\transformed\\jetified-window-1.0.0-beta04\\res\\values\\values.xml",

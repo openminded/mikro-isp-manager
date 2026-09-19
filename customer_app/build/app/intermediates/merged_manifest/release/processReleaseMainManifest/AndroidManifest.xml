@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.giganusa.customer"
-    android:versionCode="1"
-    android:versionName="1.0.0" >
+    package="com.ayd.giganusa"
+    android:versionCode="2"
+    android:versionName="1.0.1" >
 
     <uses-sdk
         android:minSdkVersion="21"
-        android:targetSdkVersion="34" />
+        android:targetSdkVersion="36" />
 
     <uses-permission android:name="android.permission.INTERNET" />
 
     <permission
-        android:name="com.giganusa.customer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        android:name="com.ayd.giganusa.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         android:protectionLevel="signature" />
 
-    <uses-permission android:name="com.giganusa.customer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+    <uses-permission android:name="com.ayd.giganusa.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
     <application
         android:name="android.app.Application"
@@ -23,7 +23,7 @@
         android:icon="@drawable/ic_launcher"
         android:label="GigaNusa" >
         <activity
-            android:name="com.giganusa.customer.MainActivity"
+            android:name="com.ayd.giganusa.MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:exported="true"
             android:hardwareAccelerated="true"

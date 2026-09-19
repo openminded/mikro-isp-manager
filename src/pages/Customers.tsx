@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useServers, type MikrotikServer } from '@/context/ServerContext';
 import { MikrotikApi } from '@/services/mikrotikApi';
 import { useData } from '@/context/DataContext';
-import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud, Map as MapIcon, MapPin, Trash2, Ticket, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { Search, Plus, AlertCircle, RefreshCw, CheckCircle2, Pencil, Lock, Unlock, Save, ChevronLeft, ChevronRight, DownloadCloud, Map as MapIcon, MapPin, Trash2, Ticket, Eye, EyeOff, Copy, Check, Smartphone } from 'lucide-react';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { HotspotVoucherModal } from '@/components/hotspot/HotspotVoucherModal';
 import { cn } from '@/lib/utils';
@@ -63,9 +63,13 @@ export function Customers() {
 
     const [syncLoading, setSyncLoading] = useState(false);
 
+    // Helper to get unique item key
+    const getCustomerKey = (c: Customer) => `${c.serverId}:${c.name}`;
+
     // Bulk Selection State
-    const [selectedCrmIds, setSelectedCrmIds] = useState<Set<string>>(new Set());
+    const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
     const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+    const [isBulkAppUpdating, setIsBulkAppUpdating] = useState(false);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -79,14 +83,12 @@ export function Customers() {
     const [customerVouchersList, setCustomerVouchersList] = useState<any[]>([]);
     const [loadingVouchers, setLoadingVouchers] = useState(false);
 
-    // ... (rest of helper functions)
-
     const handleSync = async () => {
         if (!confirm('This will fetch live data from all routers and update the local cache. Continue?')) return;
 
         setSyncLoading(true);
         setSyncStatus(null);
-        setSelectedCrmIds(new Set()); // clear selection on sync
+        setSelectedKeys(new Set()); // clear selection on sync
         try {
             await Promise.all(servers.map(server => MikrotikApi.syncSecrets(server)));
             setSyncStatus({ type: 'success', message: 'Data synced successfully' });
@@ -101,21 +103,24 @@ export function Customers() {
     };
 
     const handleBulkDelete = async () => {
-        const ids = Array.from(selectedCrmIds);
-        if (ids.length === 0) return;
-        if (!confirm(`Hapus ${ids.length} data customer dari database aplikasi? Data di Mikrotik TIDAK akan terhapus.`)) return;
+        const selectedCustomers = customers.filter(c => selectedKeys.has(getCustomerKey(c)));
+        const crmIds = selectedCustomers.map(c => c.crmId).filter(Boolean) as string[];
+        if (crmIds.length === 0) {
+            return alert("Tidak ada pelanggan terpilih yang tersimpan di database aplikasi.");
+        }
+        if (!confirm(`Hapus ${crmIds.length} data customer dari database aplikasi? Data di Mikrotik TIDAK akan terhapus.`)) return;
 
         setIsBulkDeleting(true);
         try {
             const res = await fetch('/api/customers/bulk-delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ customerIds: ids })
+                body: JSON.stringify({ customerIds: crmIds })
             });
             const result = await res.json();
             if (result.success) {
                 setSyncStatus({ type: 'success', message: result.message });
-                setSelectedCrmIds(new Set());
+                setSelectedKeys(new Set());
                 refreshCustomers(true);
             } else {
                 setSyncStatus({ type: 'error', message: result.error || 'Bulk delete failed' });
@@ -128,22 +133,57 @@ export function Customers() {
         }
     };
 
-    const handleSelectAll = (checked: boolean) => {
-        if (checked) {
-            const ids = paginatedCustomers
-                .filter(c => c.crmId)
-                .map(c => c.crmId as string);
-            setSelectedCrmIds(new Set(ids));
-        } else {
-            setSelectedCrmIds(new Set());
+    const handleBulkAppAccess = async (enable: boolean) => {
+        const selectedCustomers = customers.filter(c => selectedKeys.has(getCustomerKey(c)));
+        if (selectedCustomers.length === 0) return;
+
+        const actionText = enable ? 'Mengaktifkan' : 'Menonaktifkan';
+        if (!confirm(`${actionText} akses aplikasi Consumer App untuk ${selectedCustomers.length} pelanggan terpilih?`)) return;
+
+        setIsBulkAppUpdating(true);
+        try {
+            const userStr = localStorage.getItem('user');
+            const userObj = userStr ? JSON.parse(userStr) : { role: 'superadmin' };
+
+            const res = await axios.post('/api/customers/bulk-app-access', {
+                customers: selectedCustomers.map(c => ({
+                    crmId: c.crmId,
+                    serverId: c.serverId,
+                    name: c.name
+                })),
+                is_app_enabled: enable,
+                user: userObj
+            });
+
+            if (res.data.success) {
+                setSyncStatus({ type: 'success', message: res.data.message || `Berhasil ${actionText.toLowerCase()} akses aplikasi.` });
+                setSelectedKeys(new Set());
+                refreshCustomers(true);
+            } else {
+                setSyncStatus({ type: 'error', message: res.data.error || 'Gagal mengubah akses aplikasi.' });
+            }
+        } catch (e: any) {
+            setSyncStatus({ type: 'error', message: `Error: ${e.response?.data?.error || e.message}` });
+        } finally {
+            setIsBulkAppUpdating(false);
+            setTimeout(() => setSyncStatus(null), 4000);
         }
     };
 
-    const handleSelectOne = (crmId: string, checked: boolean) => {
-        const next = new Set(selectedCrmIds);
-        if (checked) next.add(crmId);
-        else next.delete(crmId);
-        setSelectedCrmIds(next);
+    const handleSelectAll = (checked: boolean) => {
+        if (checked) {
+            const keys = paginatedCustomers.map(c => getCustomerKey(c));
+            setSelectedKeys(new Set(keys));
+        } else {
+            setSelectedKeys(new Set());
+        }
+    };
+
+    const handleSelectOne = (key: string, checked: boolean) => {
+        const next = new Set(selectedKeys);
+        if (checked) next.add(key);
+        else next.delete(key);
+        setSelectedKeys(next);
     };
 
     // Calculate unique profiles based on current server filter
@@ -158,9 +198,31 @@ export function Customers() {
     // Combined Filter & Sort Logic
     const filteredAndSortedCustomers = customers
         .filter(c => {
-            const matchesSearch = c.name.toLowerCase().includes(filter.toLowerCase()) ||
-                (c.comment || '').toLowerCase().includes(filter.toLowerCase()) ||
-                c.serverName.toLowerCase().includes(filter.toLowerCase());
+            const searchLower = filter.toLowerCase().trim();
+            const searchDigits = filter.replace(/\D/g, '');
+            const searchPhoneNorm = searchDigits.startsWith('62') ? '0' + searchDigits.slice(2) : searchDigits;
+
+            const customerWaDigits = (c.whatsapp || '').replace(/\D/g, '');
+            const customerWaNorm = customerWaDigits.startsWith('62') ? '0' + customerWaDigits.slice(2) : customerWaDigits;
+
+            const matchesSearch = !searchLower || (
+                c.name.toLowerCase().includes(searchLower) ||
+                (c.realName || '').toLowerCase().includes(searchLower) ||
+                (c.comment || '').toLowerCase().includes(searchLower) ||
+                (c.serverName || '').toLowerCase().includes(searchLower) ||
+                (c.profile || '').toLowerCase().includes(searchLower) ||
+                (c['remote-address'] || '').toLowerCase().includes(searchLower) ||
+                (c.whatsapp || '').toLowerCase().includes(searchLower) ||
+                (searchDigits.length >= 3 && (
+                    customerWaDigits.includes(searchDigits) ||
+                    customerWaNorm.includes(searchPhoneNorm)
+                )) ||
+                (c.appPassword || '').toLowerCase().includes(searchLower) ||
+                (c.address || '').toLowerCase().includes(searchLower) ||
+                (c.ktp || '').toLowerCase().includes(searchLower) ||
+                (c.ssidName || '').toLowerCase().includes(searchLower) ||
+                (c['last-logged-out'] || '').toLowerCase().includes(searchLower)
+            );
 
             const matchesStatus = statusFilter === 'all'
                 ? true
@@ -259,6 +321,7 @@ export function Customers() {
                     name: data.name,
                     realName: data.realName,
                     appPassword: data.appPassword,
+                    is_app_enabled: data.is_app_enabled,
                     whatsapp: data.whatsapp,
                     address: data.address,
                     sub_area_id: data.sub_area_id,
@@ -435,7 +498,7 @@ export function Customers() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                         className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                        placeholder="Search username, name..."
+                        placeholder="Search username, real name, WhatsApp / HP, IP, profile, remark..."
                         value={filter}
                         onChange={e => setFilter(e.target.value)}
                     />
@@ -485,27 +548,45 @@ export function Customers() {
             </div>
 
             {/* Bulk Action Bar */}
-            {selectedCrmIds.size > 0 && (
+            {selectedKeys.size > 0 && (
                 <div className="p-4 bg-slate-900 text-white rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 fade-in duration-200">
                     <div className="flex items-center gap-3">
                         <div className="bg-white/10 px-3 py-1 rounded-md text-sm font-medium">
-                            {selectedCrmIds.size} dipilih
+                            {selectedKeys.size} dipilih
                         </div>
                         <span className="text-sm text-slate-400 border-l border-white/20 pl-3">
-                            Hanya data di aplikasi yang akan dihapus, akun di Mikrotik tidak berubah.
+                            Aksi massal untuk pelanggan yang dipilih.
                         </span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                            onClick={() => handleBulkAppAccess(true)}
+                            disabled={isBulkAppUpdating}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
+                            title="Aktifkan akses login Consumer App untuk pelanggan terpilih"
+                        >
+                            <Smartphone className="w-4 h-4" />
+                            Enable App ({selectedKeys.size})
+                        </button>
+                        <button
+                            onClick={() => handleBulkAppAccess(false)}
+                            disabled={isBulkAppUpdating}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
+                            title="Nonaktifkan akses login Consumer App untuk pelanggan terpilih"
+                        >
+                            <Smartphone className="w-4 h-4 text-slate-400" />
+                            Disable App ({selectedKeys.size})
+                        </button>
                         <button
                             onClick={() => setIsVoucherModalOpen(true)}
                             className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
                             title="Generate voucher kuota untuk pelanggan yang dipilih"
                         >
                             <Ticket className="w-4 h-4" />
-                            Generate Voucher ({selectedCrmIds.size})
+                            Voucher ({selectedKeys.size})
                         </button>
                         <button
-                            onClick={() => setSelectedCrmIds(new Set())}
+                            onClick={() => setSelectedKeys(new Set())}
                             className="px-3 py-1.5 text-sm text-slate-300 hover:text-white transition-colors"
                         >
                             Batal
@@ -519,7 +600,7 @@ export function Customers() {
                                 ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                 : <Trash2 className="w-4 h-4" />
                             }
-                            Hapus dari Aplikasi
+                            Hapus DB
                         </button>
                     </div>
                 </div>
@@ -535,7 +616,7 @@ export function Customers() {
                                     <input
                                         type="checkbox"
                                         className="rounded border-slate-300"
-                                        checked={paginatedCustomers.filter(c => c.crmId).length > 0 && paginatedCustomers.filter(c => c.crmId).every(c => selectedCrmIds.has(c.crmId as string))}
+                                        checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedKeys.has(getCustomerKey(c)))}
                                         onChange={e => handleSelectAll(e.target.checked)}
                                         title="Pilih semua di halaman ini"
                                     />
@@ -544,6 +625,7 @@ export function Customers() {
                                     { label: 'Username', key: 'name' },
                                     { label: 'Real Name', key: 'realName' },
                                     { label: 'Sandi App', key: 'appPassword' },
+                                    { label: 'Akses App', key: 'is_app_enabled' },
                                     { label: 'Customer', key: 'comment' },
                                     { label: 'Profile', key: 'profile' },
                                     { label: 'WhatsApp', key: 'whatsapp' },
@@ -571,24 +653,23 @@ export function Customers() {
                         <tbody className="divide-y divide-slate-100">
                             {filteredAndSortedCustomers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={11} className="px-6 py-8 text-center text-slate-400">
+                                    <td colSpan={12} className="px-6 py-8 text-center text-slate-400">
                                         No customers found matching your filters.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedCustomers.map((customer) => (
-                                    <tr key={`${customer.serverId}-${customer.name}`} className={cn("hover:bg-slate-50/50 group", customer.crmId && selectedCrmIds.has(customer.crmId) && "bg-blue-50/50")}>
+                                paginatedCustomers.map((customer) => {
+                                    const itemKey = getCustomerKey(customer);
+                                    const isSelected = selectedKeys.has(itemKey);
+                                    return (
+                                    <tr key={`${customer.serverId}-${customer.name}`} className={cn("hover:bg-slate-50/50 group", isSelected && "bg-blue-50/50")}>
                                         <td className="px-4 py-3 w-[40px]">
-                                            {customer.crmId ? (
-                                                <input
-                                                    type="checkbox"
-                                                    className="rounded border-slate-300"
-                                                    checked={selectedCrmIds.has(customer.crmId)}
-                                                    onChange={e => handleSelectOne(customer.crmId as string, e.target.checked)}
-                                                />
-                                            ) : (
-                                                <span title="Belum tersimpan di DB aplikasi" className="block w-4 h-4 rounded border border-dashed border-slate-300" />
-                                            )}
+                                            <input
+                                                type="checkbox"
+                                                className="rounded border-slate-300"
+                                                checked={isSelected}
+                                                onChange={e => handleSelectOne(itemKey, e.target.checked)}
+                                            />
                                         </td>
                                         <td className="px-6 py-3 font-medium text-slate-900">
                                             {customer.name}
@@ -602,6 +683,17 @@ export function Customers() {
                                         </td>
                                         <td className="px-6 py-3">
                                             <AppPasswordCell password={customer.appPassword} />
+                                        </td>
+                                        <td className="px-6 py-3">
+                                            {customer.is_app_enabled ? (
+                                                <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200" title="Akses Consumer App Aktif">
+                                                    <Smartphone className="w-3 h-3 text-emerald-600" /> Aktif
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1 text-slate-500 text-xs font-medium bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200" title="Akses Consumer App Nonaktif (Belum Diaktivasi)">
+                                                    <Smartphone className="w-3 h-3 text-slate-400" /> Nonaktif
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="px-6 py-3 text-slate-600">{customer.comment || '-'}</td>
                                         <td className="px-6 py-3">
@@ -739,7 +831,8 @@ export function Customers() {
                                             </div>
                                         </td>
                                     </tr>
-                                ))
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>
@@ -811,10 +904,10 @@ export function Customers() {
                 isOpen={isVoucherModalOpen}
                 onClose={() => setIsVoucherModalOpen(false)}
                 serverId={serverFilter !== 'all' ? serverFilter : undefined}
-                initialSelectedCustomerIds={Array.from(selectedCrmIds)}
+                initialSelectedCustomerIds={customers.filter(c => selectedKeys.has(getCustomerKey(c))).map(c => c.crmId || c.id || c.name)}
                 onSuccess={() => {
                     setSyncStatus({ type: 'success', message: 'Voucher kuota berhasil diproses di router MikroTik dan tersimpan ke pelanggan' });
-                    setSelectedCrmIds(new Set());
+                    setSelectedKeys(new Set());
                     setTimeout(() => setSyncStatus(null), 4000);
                 }}
             />
@@ -960,6 +1053,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         realName: '',
         password: '',
         appPassword: 'nusantara!',
+        is_app_enabled: false,
         comment: '',
         profile: 'default',
         "remote-address": '',
@@ -1036,6 +1130,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 realName: initialData.realName || '',
                 password: initialData.password || '',
                 appPassword: initialData.appPassword || 'nusantara!',
+                is_app_enabled: Boolean(initialData.is_app_enabled),
                 comment: initialData.comment || '',
                 profile: initialData.profile,
                 "remote-address": initialData["remote-address"] || '',
@@ -1058,6 +1153,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 realName: '',
                 password: '',
                 appPassword: 'nusantara!',
+                is_app_enabled: false,
                 comment: '',
                 profile: 'default',
                 "remote-address": '',
@@ -1307,6 +1403,24 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                             </div>
                                             <p className="text-xs text-slate-400">Kata sandi untuk login pelanggan di Aplikasi Mobile / Portal Client.</p>
                                         </div>
+
+                                        {/* App Activation Toggle */}
+                                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+                                            <div className="flex items-center gap-2.5">
+                                                <Smartphone className="w-5 h-5 text-primary" />
+                                                <div>
+                                                    <div className="text-sm font-medium text-slate-800">Aktivasi Akses Consumer App</div>
+                                                    <div className="text-xs text-slate-500">Default: Nonaktif. Jika dinonaktifkan, muncul notifikasi saat login: "Akun anda belum di aktivasi, mohon hubungi admin".</div>
+                                                </div>
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                className="w-5 h-5 accent-primary rounded cursor-pointer"
+                                                checked={formData.is_app_enabled}
+                                                onChange={e => setFormData({ ...formData, is_app_enabled: e.target.checked })}
+                                            />
+                                        </div>
+
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium text-slate-700">No. KTP</label>
                                             <input className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"

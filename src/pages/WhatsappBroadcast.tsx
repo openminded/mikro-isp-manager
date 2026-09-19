@@ -74,9 +74,27 @@ export function WhatsappBroadcast() {
     )).sort();
 
     const filteredCustomers = customers.filter(c => {
-        const matchesSearch = c.name.toLowerCase().includes(filter.toLowerCase()) ||
-            (c.comment || '').toLowerCase().includes(filter.toLowerCase()) ||
-            c.serverName.toLowerCase().includes(filter.toLowerCase());
+        const searchLower = filter.toLowerCase().trim();
+        const searchDigits = filter.replace(/\D/g, '');
+        const searchPhoneNorm = searchDigits.startsWith('62') ? '0' + searchDigits.slice(2) : searchDigits;
+
+        const customerWaDigits = (c.whatsapp || '').replace(/\D/g, '');
+        const customerWaNorm = customerWaDigits.startsWith('62') ? '0' + customerWaDigits.slice(2) : customerWaDigits;
+
+        const matchesSearch = !searchLower || (
+            c.name.toLowerCase().includes(searchLower) ||
+            (c.realName || '').toLowerCase().includes(searchLower) ||
+            (c.comment || '').toLowerCase().includes(searchLower) ||
+            (c.serverName || '').toLowerCase().includes(searchLower) ||
+            (c.profile || '').toLowerCase().includes(searchLower) ||
+            (c['remote-address'] || '').toLowerCase().includes(searchLower) ||
+            (c.whatsapp || '').toLowerCase().includes(searchLower) ||
+            (searchDigits.length >= 3 && (
+                customerWaDigits.includes(searchDigits) ||
+                customerWaNorm.includes(searchPhoneNorm)
+            )) ||
+            (c.address || '').toLowerCase().includes(searchLower)
+        );
 
         const matchesStatus = statusFilter === 'all'
             ? true
@@ -88,7 +106,6 @@ export function WhatsappBroadcast() {
         // Only include customers with WhatsApp numbers
         const hasWhatsapp = !!c.whatsapp;
 
-        return matchesSearch && matchesStatus && matchesServer && matchesProfile && hasWhatsapp;
         return matchesSearch && matchesStatus && matchesServer && matchesProfile && hasWhatsapp;
     });
 
@@ -169,7 +186,7 @@ export function WhatsappBroadcast() {
     };
 
     return (
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
+        <div className="p-6 space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Broadcast Messages</h1>

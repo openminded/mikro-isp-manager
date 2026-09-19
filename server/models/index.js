@@ -47,7 +47,8 @@ export const Customer = sequelize.define('Customer', {
     signalLevel: { type: DataTypes.STRING, allowNull: true }, // Redaman
     // Consumer portal credentials
     password: { type: DataTypes.STRING, defaultValue: 'nusantara!' },
-    must_change_password: { type: DataTypes.BOOLEAN, defaultValue: true }
+    must_change_password: { type: DataTypes.BOOLEAN, defaultValue: true },
+    is_app_enabled: { type: DataTypes.BOOLEAN, defaultValue: false }
 });
 
 export const Invoice = sequelize.define('Invoice', {
@@ -320,6 +321,16 @@ export const initDB = async () => {
                 type: DataTypes.STRING,
                 allowNull: true
             }).catch(() => {});
+        }
+
+        const customerTableInfo = await sequelize.getQueryInterface().describeTable('Customers').catch(() => ({}));
+        if (customerTableInfo && customerTableInfo.is_app_enabled === undefined) {
+            console.log('[Database] Adding missing column is_app_enabled to Customers...');
+            await sequelize.getQueryInterface().addColumn('Customers', 'is_app_enabled', {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: false
+            }).catch((err) => console.error('[Database] Add is_app_enabled column error:', err.message));
         }
 
         // [MIGRATION-V3] Standardize all existing mikrotik_names to lowercase for consistency

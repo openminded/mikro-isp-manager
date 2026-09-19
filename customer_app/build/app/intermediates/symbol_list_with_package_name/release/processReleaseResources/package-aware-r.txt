@@ -1,4 +1,4 @@
-com.giganusa.customer
+com.ayd.giganusa
 attr activityAction
 attr activityName
 attr alpha
@@ -71,6 +71,8 @@ drawable ic_call_answer_video_low
 drawable ic_call_decline
 drawable ic_call_decline_low
 drawable ic_launcher
+drawable ic_launcher_background
+drawable ic_launcher_foreground
 drawable notification_action_background
 drawable notification_bg
 drawable notification_bg_low
@@ -175,6 +177,7 @@ layout notification_template_custom_big
 layout notification_template_icon_group
 layout notification_template_part_chronometer
 layout notification_template_part_time
+mipmap ic_launcher
 string call_notification_answer_action
 string call_notification_answer_video_action
 string call_notification_decline_action

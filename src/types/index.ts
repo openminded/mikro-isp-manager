@@ -30,6 +30,7 @@ export interface Customer {
     ssidPassword?: string;
     signalLevel?: string;
     crmId?: string; // SQL UUID for CRM linking
+    is_app_enabled?: boolean; // Consumer App Activation Status (default: false)
 }
 
 export interface Profile {

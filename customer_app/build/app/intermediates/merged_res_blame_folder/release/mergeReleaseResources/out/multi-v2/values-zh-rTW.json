@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.giganusa.customer.app-mergeReleaseResources-10:/values-zh-rTW/values-zh-rTW.xml",
+            "outputFile": "com.ayd.giganusa.app-mergeReleaseResources-10:/values-zh-rTW/values-zh-rTW.xml",
             "map": [
                 {
                     "source": "C:\\Users\\zk\\.gradle\\caches\\transforms-3\\0653a9aa200ef1bcf1dc0f695f5c4276\\transformed\\browser-1.5.0\\res\\values-zh-rTW\\values-zh-rTW.xml",

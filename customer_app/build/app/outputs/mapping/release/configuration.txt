@@ -109,7 +109,7 @@
 # The proguard configuration file for the following section is C:\Users\zk\Downloads\App\new-isp\customer_app\build\app\intermediates\aapt_proguard_file\release\processReleaseResources\aapt_rules.txt
 -keep class android.app.Application { <init>(); }
 -keep class androidx.core.app.CoreComponentFactory { <init>(); }
--keep class com.giganusa.customer.MainActivity { <init>(); }
+-keep class com.ayd.giganusa.MainActivity { <init>(); }
 -keep class io.flutter.plugins.urllauncher.WebViewActivity { <init>(); }
 -keep class androidx.browser.browseractions.BrowserActionsFallbackMenuView { <init>(android.content.Context, android.util.AttributeSet); }
 

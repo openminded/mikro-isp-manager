@@ -189,7 +189,7 @@ export function SupportTickets() {
     useEffect(() => { setCurrentPage(1); }, [searchTerm, statusFilter, itemsPerPage]);
 
     return (
-        <div className={`p-6 max-w-7xl mx-auto transition-opacity duration-500 ${isAppearing ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`p-6 transition-opacity duration-500 ${isAppearing ? 'opacity-100' : 'opacity-0'}`}>
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Support Tickets</h1>

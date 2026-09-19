@@ -12,7 +12,7 @@
       --primary-purple: #5B50D6;
       --primary-red: #E53935;
       --primary-red-hover: #D32F2F;
-      --slate-arch: #323746;
+      --slate-arch: #333745;
       --text-dark: #1E293B;
       --text-muted: #64748B;
       --bg-canvas: #483CB8;
@@ -360,7 +360,7 @@
           <!-- Logo Arch + Circle -->
           <svg class="logo-svg" viewBox="0 0 500 500">
             <circle cx="280" cy="230" r="140" fill="#FFA4A2" opacity="0.35" filter="blur(20px)" />
-            <path d="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z" fill="#323746" />
+            <path d="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z" fill="#333745" />
             <circle cx="250" cy="275" r="90" fill="#FF333A" />
           </svg>
           <div class="brand-title">GIGANUSA</div>
@@ -938,9 +938,34 @@
                 <div style="font-size: 12px; font-weight: 700; color: #475569;">${inv.due_date}</div>
               </div>
             </div>
+            ${!isPaid ? `
+            <button onclick="payInvoiceSumopod('${inv.id}')" style="width: 100%; margin-top: 12px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; padding: 10px; border-radius: 10px; font-weight: 800; font-size: 13px; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(16,185,129,0.3);">
+              <span>💳</span> BAYAR VIA QRIS OTOMATIS
+            </button>
+            ` : ''}
           </div>
         `;
       }).join('');
+    }
+
+    async function payInvoiceSumopod(invoiceId) {
+      showToast('Membuat tautan pembayaran QRIS...');
+      try {
+        const res = await fetch('/api/billing/sumopod/create-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoiceId })
+        });
+        const data = await res.json();
+        if (res.ok && data.payment_link_url) {
+          showToast('Membuka halaman pembayaran QRIS...');
+          window.open(data.payment_link_url, '_blank');
+        } else {
+          alert(data.error || 'Gagal memproses pembayaran QRIS');
+        }
+      } catch (err) {
+        alert('Error membuat pembayaran: ' + err.message);
+      }
     }
 
     function handleLogout() {

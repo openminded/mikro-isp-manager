@@ -2,7 +2,7 @@ name: giga_nusa
 description: "Aplikasi Pelanggan WiFi & Hotspot GigaNusa"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -26,4 +26,5 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/logo.svg
+    - assets/
+

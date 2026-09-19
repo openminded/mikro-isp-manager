@@ -1,0 +1,8 @@
+# Flutter / Android gitignore
+*.jks
+*.keystore
+key.properties
+.gradle/
+.idea/
+build/
+.dart_tool/

@@ -504,14 +504,40 @@ export const MikrotikApi = {
         return await res.json();
     },
 
-    async getCustomerVouchers(params?: { customerId?: string; serverId?: string; phone?: string; status?: string }): Promise<any> {
+    async getCustomerVouchers(params?: { customerId?: string; serverId?: string; phone?: string; status?: string; limit?: string }): Promise<any> {
         const q = new URLSearchParams();
         if (params?.customerId) q.set('customerId', params.customerId);
         if (params?.serverId) q.set('serverId', params.serverId);
         if (params?.phone) q.set('phone', params.phone);
         if (params?.status) q.set('status', params.status);
+        if (params?.limit) q.set('limit', params.limit);
         const res = await fetch(`${META_API_URL}/customer-vouchers?${q.toString()}`);
         if (!res.ok) throw new Error('Failed to fetch customer vouchers');
+        return await res.json();
+    },
+
+    async syncAllVouchersCache(): Promise<{ success: boolean; totalSynced: number; totalPurged?: number; servers: any[] }> {
+        const res = await fetch(`${META_API_URL}/customer-vouchers/sync-all`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to sync vouchers across all servers');
+        }
+        return await res.json();
+    },
+
+    async deleteBatchCustomerVouchers(voucherIds: string[]): Promise<{ success: boolean; count: number }> {
+        const res = await fetch(`${META_API_URL}/customer-vouchers/delete-batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ voucherIds })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to delete vouchers');
+        }
         return await res.json();
     },
 

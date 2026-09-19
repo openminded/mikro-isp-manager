@@ -7,12 +7,66 @@ import {
     Wifi, Search, RefreshCw, Plus, Pencil, Trash2, Lock, Unlock,
     Users, Activity, Server, Layers, AlertCircle, CheckCircle2,
     Save, X, LogOut, ChevronLeft, ChevronRight, Eye, EyeOff, SearchX,
-    Ticket, RotateCcw, UserCheck
+    Ticket, RotateCcw, UserCheck, Printer, Download, Copy
 } from 'lucide-react';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { HotspotVoucherModal } from '@/components/hotspot/HotspotVoucherModal';
 
-type TabKey = 'users' | 'active' | 'profiles' | 'servers';
+type TabKey = 'users' | 'active' | 'profiles' | 'servers' | 'vouchers';
+
+function printCachedVouchers(vouchers: any[]) {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Cetak Voucher Hotspot Multi-Server</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; color: #1e293b; background: #fff; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+            .voucher-card { border: 2px dashed #cbd5e1; border-radius: 8px; padding: 12px; background: #f8fafc; page-break-inside: avoid; }
+            .header { border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 6px; text-align: center; }
+            .header h2 { margin: 0; font-size: 14px; color: #0f172a; text-transform: uppercase; font-weight: 800; }
+            .server-name { font-size: 9px; color: #64748b; font-weight: 600; }
+            .code-box { background: white; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 6px; margin: 6px 0; text-align: center; }
+            .code-label { font-size: 8px; color: #64748b; text-transform: uppercase; font-weight: bold; }
+            .code-val { font-family: 'Courier New', monospace; font-size: 15px; font-weight: bold; color: #0f172a; letter-spacing: 1px; }
+            .specs { display: flex; justify-content: space-between; font-size: 9px; color: #475569; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #e2e8f0; }
+            @media print { .no-print { display: none; } }
+        </style>
+    </head>
+    <body>
+        <div class="no-print" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; background: #e2e8f0; padding: 12px; border-radius: 8px;">
+            <strong style="font-size: 14px;">Total Voucher: ${vouchers.length} Keping</strong>
+            <button onclick="window.print()" style="background: #ea580c; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer;">Print Sekarang</button>
+        </div>
+        <div class="grid">
+            ${vouchers.map(v => `
+                <div class="voucher-card">
+                    <div class="header">
+                        <h2>VOUCHER HOTSPOT</h2>
+                        <div class="server-name">Server: ${v.Server?.name || v.server_id || 'MikroTik'}</div>
+                    </div>
+                    <div class="code-box">
+                        <div class="code-label">Kode Voucher / Username</div>
+                        <div class="code-val">${v.voucher_code}</div>
+                        ${v.voucher_password ? `<div class="code-label" style="margin-top:4px;">Password</div><div class="code-val" style="font-size:12px;">${v.voucher_password}</div>` : ''}
+                    </div>
+                    <div class="specs">
+                        <span>Paket: <strong>${v.profile_name || 'Standard'}</strong></span>
+                        <span>Status: <strong>${(v.status || 'unused').toUpperCase()}</strong></span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    </body>
+    </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+}
 
 export function HotspotManager() {
     const { servers } = useServers();
@@ -29,6 +83,14 @@ export function HotspotManager() {
     const [activeSessions, setActiveSessions] = useState<any[]>([]);
     const [hotspotProfiles, setHotspotProfiles] = useState<any[]>([]);
     const [hotspotServers, setHotspotServers] = useState<any[]>([]);
+    
+    // Multi-Server Voucher Cache States
+    const [allVouchers, setAllVouchers] = useState<any[]>([]);
+    const [voucherServerFilter, setVoucherServerFilter] = useState<string>('all');
+    const [voucherStatusFilter, setVoucherStatusFilter] = useState<string>('all');
+    const [selectedVoucherIds, setSelectedVoucherIds] = useState<Set<string>>(new Set());
+    const [isSyncingAllVouchers, setIsSyncingAllVouchers] = useState<boolean>(false);
+    const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
     // Search & Pagination
     const [search, setSearch] = useState('');
@@ -75,15 +137,14 @@ export function HotspotManager() {
     };
 
     const fetchData = useCallback(async () => {
-        if (!selectedServerId) return;
         setLoading(true);
         setFetchError(null);
         try {
             switch (activeTab) {
                 case 'users': {
+                    if (!selectedServerId) break;
                     const data = await MikrotikApi.getHotspotUsers(selectedServerId);
                     setHotspotUsers(Array.isArray(data) ? data : []);
-                    // Preload profiles and servers in background for modal dropdowns
                     MikrotikApi.getHotspotProfiles(selectedServerId)
                         .then(p => setHotspotProfiles(Array.isArray(p) ? p : []))
                         .catch(() => {});
@@ -93,18 +154,26 @@ export function HotspotManager() {
                     break;
                 }
                 case 'active': {
+                    if (!selectedServerId) break;
                     const data = await MikrotikApi.getHotspotActive(selectedServerId);
                     setActiveSessions(Array.isArray(data) ? data : []);
                     break;
                 }
                 case 'profiles': {
+                    if (!selectedServerId) break;
                     const data = await MikrotikApi.getHotspotProfiles(selectedServerId);
                     setHotspotProfiles(Array.isArray(data) ? data : []);
                     break;
                 }
                 case 'servers': {
+                    if (!selectedServerId) break;
                     const data = await MikrotikApi.getHotspotServers(selectedServerId);
                     setHotspotServers(Array.isArray(data) ? data : []);
+                    break;
+                }
+                case 'vouchers': {
+                    const data = await MikrotikApi.getCustomerVouchers({ limit: 'all' });
+                    setAllVouchers(Array.isArray(data) ? data : []);
                     break;
                 }
             }
@@ -273,6 +342,89 @@ export function HotspotManager() {
         }
     };
 
+    // Multi-Server Voucher Cache Handlers
+    const handleSyncAllVouchersCache = async () => {
+        setIsSyncingAllVouchers(true);
+        try {
+            const res = await MikrotikApi.syncAllVouchersCache();
+            const purgedCount = res.totalPurged || 0;
+            const purgedMsg = purgedCount > 0 ? ` (${purgedCount} voucher usang otomatis dibersihkan)` : '';
+            showStatus('success', `Berhasil sinkronisasi cache: Total ${res.totalSynced} voucher di-cache${purgedMsg} dari ${res.servers.length} server!`);
+            fetchData();
+        } catch (e: any) {
+            showStatus('error', `Gagal sync cache: ${e.message}`);
+        } finally {
+            setIsSyncingAllVouchers(false);
+        }
+    };
+
+    const handleSelectAllVouchers = (checked: boolean) => {
+        if (checked) {
+            const ids = paginatedData.map((v: any) => v.id);
+            setSelectedVoucherIds(new Set(ids));
+        } else {
+            setSelectedVoucherIds(new Set());
+        }
+    };
+
+    const handleToggleSelectVoucher = (id: string) => {
+        const next = new Set(selectedVoucherIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedVoucherIds(next);
+    };
+
+    const handleDeleteSelectedVouchers = async () => {
+        const ids = Array.from(selectedVoucherIds);
+        if (ids.length === 0) return;
+        if (!confirm(`Yakin ingin menghapus ${ids.length} voucher terpilih dari database & router MikroTik?`)) return;
+        setLoading(true);
+        try {
+            await MikrotikApi.deleteBatchCustomerVouchers(ids);
+            showStatus('success', `${ids.length} voucher berhasil dihapus!`);
+            setSelectedVoucherIds(new Set());
+            fetchData();
+        } catch (e: any) {
+            showStatus('error', `Gagal menghapus voucher: ${e.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handlePrintSelectedVouchers = () => {
+        const ids = Array.from(selectedVoucherIds);
+        const targetList = ids.length > 0 ? allVouchers.filter(v => ids.includes(v.id)) : filteredData;
+        if (targetList.length === 0) {
+            showStatus('error', 'Tidak ada voucher untuk dicetak');
+            return;
+        }
+        printCachedVouchers(targetList);
+    };
+
+    const handleExportVouchersCSV = () => {
+        if (filteredData.length === 0) return;
+        const headers = ['Kode Voucher', 'Password', 'Server', 'Profile', 'Harga', 'Status', 'Pelanggan', 'No HP', 'Tanggal Dibuat'];
+        const rows = filteredData.map(v => [
+            `"${v.voucher_code || ''}"`,
+            `"${v.voucher_password || ''}"`,
+            `"${v.Server?.name || v.server_id || ''}"`,
+            `"${v.profile_name || ''}"`,
+            `"${v.price || 0}"`,
+            `"${v.status || 'unused'}"`,
+            `"${v.Customer?.real_name || v.Customer?.name || v.customer_name || ''}"`,
+            `"${v.customer_phone || v.Customer?.phone_number || ''}"`,
+            `"${v.createdAt ? new Date(v.createdAt).toLocaleString('id-ID') : ''}"`
+        ]);
+        const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute('href', encodedUri);
+        link.setAttribute('download', `voucher_cache_all_servers_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     // Helper to resolve Customer Name from CRM list / tag
     const getCustomerForUser = useCallback((u: any) => {
         if (!u) return null;
@@ -367,6 +519,22 @@ export function HotspotManager() {
                     (s.interface || '').toLowerCase().includes(q) ||
                     (s.profile || '').toLowerCase().includes(q)
                 );
+            case 'vouchers':
+                return (Array.isArray(allVouchers) ? allVouchers : []).filter(v => {
+                    if (voucherServerFilter !== 'all' && v.server_id !== voucherServerFilter) return false;
+                    if (voucherStatusFilter !== 'all' && (v.status || 'unused') !== voucherStatusFilter) return false;
+                    if (q) {
+                        const matchCode = (v.voucher_code || '').toLowerCase().includes(q);
+                        const matchPwd = (v.voucher_password || '').toLowerCase().includes(q);
+                        const matchProfile = (v.profile_name || '').toLowerCase().includes(q);
+                        const matchComment = (v.comment || '').toLowerCase().includes(q);
+                        const matchServer = (v.Server?.name || v.server_id || '').toLowerCase().includes(q);
+                        const matchCustomer = (v.Customer?.real_name || v.Customer?.name || v.customer_name || '').toLowerCase().includes(q);
+                        const matchPhone = (v.customer_phone || v.Customer?.phone_number || '').includes(q);
+                        if (!matchCode && !matchPwd && !matchProfile && !matchComment && !matchServer && !matchCustomer && !matchPhone) return false;
+                    }
+                    return true;
+                });
             default:
                 return [];
         }
@@ -381,6 +549,7 @@ export function HotspotManager() {
         { key: 'active', label: 'Active Sessions', icon: Activity, count: Array.isArray(activeSessions) ? activeSessions.length : 0 },
         { key: 'profiles', label: 'Profiles', icon: Layers, count: Array.isArray(hotspotProfiles) ? hotspotProfiles.length : 0 },
         { key: 'servers', label: 'Hotspot Servers', icon: Server, count: Array.isArray(hotspotServers) ? hotspotServers.length : 0 },
+        { key: 'vouchers', label: 'Cache Voucher Multi-Server', icon: Ticket, count: Array.isArray(allVouchers) ? allVouchers.length : 0 },
     ];
 
     const formatBytes = (bytes: string | number | undefined | null) => {
@@ -393,7 +562,7 @@ export function HotspotManager() {
     };
 
     return (
-        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-4 sm:space-y-6">
+        <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
             {/* Header */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                 <div>
@@ -515,7 +684,7 @@ export function HotspotManager() {
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                 <input
                                     className="w-full pl-10 pr-10 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 transition-all bg-white text-xs"
-                                    placeholder={`Cari ${activeTab === 'users' ? 'user hotspot / pelanggan' : activeTab === 'active' ? 'sesi aktif' : activeTab === 'profiles' ? 'profile' : 'server'}...`}
+                                    placeholder={`Cari ${activeTab === 'users' ? 'user hotspot / pelanggan' : activeTab === 'active' ? 'sesi aktif' : activeTab === 'profiles' ? 'profile' : activeTab === 'vouchers' ? 'kode / paket / server' : 'server'}...`}
                                     value={search}
                                     onChange={e => {
                                         setSearch(e.target.value);
@@ -563,6 +732,61 @@ export function HotspotManager() {
                                             <option key={p['.id'] || p.name} value={p.name}>{p.name}</option>
                                         ))}
                                     </select>
+                                </div>
+                            )}
+
+                            {activeTab === 'vouchers' && (
+                                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                                    {/* Server Filter */}
+                                    <select
+                                        value={voucherServerFilter}
+                                        onChange={e => {
+                                            setVoucherServerFilter(e.target.value);
+                                            setCurrentPage(1);
+                                        }}
+                                        className="flex-1 sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500/20 text-slate-700"
+                                    >
+                                        <option value="all">Semua Server MikroTik</option>
+                                        {servers.map(s => (
+                                            <option key={s.id} value={s.id}>{s.name} ({s.ip})</option>
+                                        ))}
+                                    </select>
+
+                                    {/* Status Filter */}
+                                    <select
+                                        value={voucherStatusFilter}
+                                        onChange={e => {
+                                            setVoucherStatusFilter(e.target.value);
+                                            setCurrentPage(1);
+                                        }}
+                                        className="flex-1 sm:w-auto px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500/20 text-slate-700"
+                                    >
+                                        <option value="all">Semua Status</option>
+                                        <option value="unused">Belum Terpakai</option>
+                                        <option value="active">Sedang Aktif (Online)</option>
+                                        <option value="expired">Expired (Kadaluarsa)</option>
+                                        <option value="used">Sudah Terpakai</option>
+                                    </select>
+
+                                    <button
+                                        onClick={handleSyncAllVouchersCache}
+                                        disabled={isSyncingAllVouchers}
+                                        className="px-3 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50"
+                                        title="Scan & Sync Voucher dari Semua Server Router MikroTik"
+                                    >
+                                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAllVouchers ? 'animate-spin' : ''}`} />
+                                        {isSyncingAllVouchers ? 'Syncing...' : 'Sync All Server'}
+                                    </button>
+
+                                    <button
+                                        onClick={handleExportVouchersCSV}
+                                        disabled={filteredData.length === 0}
+                                        className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold border border-slate-200 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                                        title="Ekspor Data Cache Voucher ke CSV"
+                                    >
+                                        <Download className="w-3.5 h-3.5 text-slate-500" />
+                                        Export CSV
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -994,7 +1218,7 @@ export function HotspotManager() {
                                     </table>
                                 )}
 
-                                {/* SERVERS TAB */}
+                                 {/* SERVERS TAB */}
                                 {activeTab === 'servers' && (
                                     <table className="w-full text-left text-sm min-w-[800px]">
                                         <thead className="bg-slate-50 border-b border-slate-200">
@@ -1072,6 +1296,256 @@ export function HotspotManager() {
                                             })}
                                         </tbody>
                                     </table>
+                                )}
+
+                                {/* VOUCHERS CACHE TAB (MULTI-SERVER) */}
+                                {activeTab === 'vouchers' && (
+                                    <div className="space-y-4">
+                                        {/* Metric Summary Cards */}
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-50 border-b border-slate-200">
+                                            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+                                                <div className="text-xs text-slate-500 font-medium">Total Voucher Cache</div>
+                                                <div className="text-xl font-bold text-slate-900 mt-1">{allVouchers.length}</div>
+                                            </div>
+                                            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+                                                <div className="text-xs text-emerald-600 font-medium flex items-center gap-1.5">
+                                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                                    Belum Dipakai (Unused)
+                                                </div>
+                                                <div className="text-xl font-bold text-emerald-700 mt-1">
+                                                    {allVouchers.filter(v => (v.status || 'unused') === 'unused').length}
+                                                </div>
+                                            </div>
+                                            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+                                                <div className="text-xs text-blue-600 font-medium flex items-center gap-1.5">
+                                                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                                    Sedang Aktif
+                                                </div>
+                                                <div className="text-xl font-bold text-blue-700 mt-1">
+                                                    {allVouchers.filter(v => v.status === 'active').length}
+                                                </div>
+                                            </div>
+                                            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+                                                <div className="text-xs text-amber-600 font-medium flex items-center gap-1.5">
+                                                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                                    Expired / Terpakai
+                                                </div>
+                                                <div className="text-xl font-bold text-amber-700 mt-1">
+                                                    {allVouchers.filter(v => v.status === 'expired' || v.status === 'used').length}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Bulk Action Toolbar for Vouchers */}
+                                        {selectedVoucherIds.size > 0 && (
+                                            <div className="mx-4 p-3 bg-slate-900 text-white rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-200">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="bg-orange-500/20 text-orange-300 border border-orange-500/40 px-3 py-1 rounded-lg text-xs font-bold">
+                                                        {selectedVoucherIds.size} Voucher Terpilih
+                                                    </div>
+                                                    <span className="text-xs text-slate-400 hidden sm:inline">
+                                                        Pilih aksi untuk voucher yang dicentang:
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={handlePrintSelectedVouchers}
+                                                        className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
+                                                    >
+                                                        <Printer className="w-3.5 h-3.5" />
+                                                        Cetak Terpilih
+                                                    </button>
+                                                    <button
+                                                        onClick={handleDeleteSelectedVouchers}
+                                                        disabled={loading}
+                                                        className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                        Hapus Terpilih
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <table className="w-full text-left text-sm min-w-[900px]">
+                                            <thead className="bg-slate-50 border-b border-slate-200">
+                                                <tr>
+                                                    <th className="px-4 py-3 w-10 text-center">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="rounded border-slate-300 text-orange-600 focus:ring-orange-500 cursor-pointer"
+                                                            checked={paginatedData.length > 0 && paginatedData.every((v: any) => selectedVoucherIds.has(v.id))}
+                                                            onChange={e => handleSelectAllVouchers(e.target.checked)}
+                                                        />
+                                                    </th>
+                                                    <th className="px-4 py-3 font-medium text-slate-500">Kode Voucher / Password</th>
+                                                    <th className="px-4 py-3 font-medium text-slate-500">Server MikroTik</th>
+                                                    <th className="px-4 py-3 font-medium text-slate-500">Profile / Paket</th>
+                                                    <th className="px-4 py-3 font-medium text-slate-500">Status</th>
+                                                    <th className="px-4 py-3 font-medium text-slate-500">Pelanggan Terhubung</th>
+                                                    <th className="px-4 py-3 font-medium text-slate-500">Waktu Dibuat</th>
+                                                    <th className="px-4 py-3 font-medium text-slate-500 text-right">Aksi</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {fetchError ? (
+                                                    <tr>
+                                                        <td colSpan={8} className="p-0">
+                                                            <ErrorTableState error={fetchError} onRetry={fetchData} />
+                                                        </td>
+                                                    </tr>
+                                                ) : paginatedData.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={8} className="p-0">
+                                                            <EmptyTableState
+                                                                icon={Ticket}
+                                                                title="Belum Ada Cache Voucher"
+                                                                description="Voucher dari semua server belum di-cache atau tidak ada voucher yang cocok dengan filter."
+                                                                actionButton={
+                                                                    <button
+                                                                        onClick={handleSyncAllVouchersCache}
+                                                                        disabled={isSyncingAllVouchers}
+                                                                        className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+                                                                    >
+                                                                        <RefreshCw className={cn("w-4 h-4", isSyncingAllVouchers && "animate-spin")} />
+                                                                        Scan & Cache Semua Server
+                                                                    </button>
+                                                                }
+                                                                isSearch={!!search.trim()}
+                                                                searchQuery={search}
+                                                                onResetSearch={() => setSearch('')}
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                ) : paginatedData.map((v: any) => {
+                                                    const isSelected = selectedVoucherIds.has(v.id);
+                                                    const serverObj = v.Server || servers.find(s => s.id === v.server_id);
+                                                    const statusVal = (v.status || 'unused').toLowerCase();
+
+                                                    let statusBadgeClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                                                    let statusDotClass = "bg-emerald-500";
+                                                    let statusLabel = "Belum Dipakai";
+
+                                                    if (statusVal === 'active') {
+                                                        statusBadgeClass = "bg-blue-50 text-blue-700 border-blue-200";
+                                                        statusDotClass = "bg-blue-500 animate-pulse";
+                                                        statusLabel = "Sedang Aktif";
+                                                    } else if (statusVal === 'expired') {
+                                                        statusBadgeClass = "bg-red-50 text-red-700 border-red-200";
+                                                        statusDotClass = "bg-red-500";
+                                                        statusLabel = "Kadaluarsa";
+                                                    } else if (statusVal === 'used') {
+                                                        statusBadgeClass = "bg-slate-100 text-slate-600 border-slate-200";
+                                                        statusDotClass = "bg-slate-400";
+                                                        statusLabel = "Terpakai";
+                                                    }
+
+                                                    return (
+                                                        <tr key={v.id} className={cn("hover:bg-slate-50/80 transition-colors group", isSelected && "bg-orange-50/50")}>
+                                                            <td className="px-4 py-3 text-center">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="rounded border-slate-300 text-orange-600 focus:ring-orange-500 cursor-pointer"
+                                                                    checked={isSelected}
+                                                                    onChange={() => handleToggleSelectVoucher(v.id)}
+                                                                />
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="font-mono font-bold text-slate-900 text-sm">
+                                                                        {v.voucher_code}
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            navigator.clipboard.writeText(v.voucher_code);
+                                                                            setCopiedCode(v.voucher_code);
+                                                                            setTimeout(() => setCopiedCode(null), 2000);
+                                                                        }}
+                                                                        className="p-1 text-slate-400 hover:text-orange-600 transition-colors"
+                                                                        title="Salin Kode Voucher"
+                                                                    >
+                                                                        {copiedCode === v.voucher_code ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                                                    </button>
+                                                                </div>
+                                                                {v.voucher_password && (
+                                                                    <div className="text-xs text-slate-500 font-mono mt-0.5">
+                                                                        Pwd: <span className="font-semibold text-slate-700">{v.voucher_password}</span>
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-lg text-slate-700 font-medium text-xs">
+                                                                    <Server className="w-3 h-3 text-slate-500" />
+                                                                    <span>{serverObj?.name || v.server_id || 'MikroTik'}</span>
+                                                                </div>
+                                                                {serverObj?.ip && (
+                                                                    <div className="text-[11px] font-mono text-slate-400 mt-0.5 pl-1">
+                                                                        {serverObj.ip}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="font-medium text-slate-800 text-xs">{v.profile_name || 'default'}</div>
+                                                                {v.price > 0 && (
+                                                                    <div className="text-xs font-semibold text-amber-600 mt-0.5">
+                                                                        Rp {Number(v.price).toLocaleString('id-ID')}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border", statusBadgeClass)}>
+                                                                    <span className={cn("w-1.5 h-1.5 rounded-full", statusDotClass)} />
+                                                                    {statusLabel}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3 text-xs">
+                                                                {v.Customer || v.customer_name ? (
+                                                                    <div>
+                                                                        <div className="font-medium text-slate-900">{v.Customer?.real_name || v.Customer?.name || v.customer_name}</div>
+                                                                        {(v.customer_phone || v.Customer?.phone_number) && (
+                                                                            <div className="text-slate-500 font-mono">{v.customer_phone || v.Customer?.phone_number}</div>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-slate-400 italic">Voucher Bebas (Umum)</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                                                                {v.createdAt ? new Date(v.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-right">
+                                                                <div className="flex items-center justify-end gap-1">
+                                                                    <button
+                                                                        onClick={() => printCachedVouchers([v])}
+                                                                        className="p-1.5 text-slate-600 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                                                                        title="Cetak Voucher Card"
+                                                                    >
+                                                                        <Printer className="w-4 h-4" />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            if (!confirm(`Hapus voucher "${v.voucher_code}"?`)) return;
+                                                                            try {
+                                                                                await MikrotikApi.deleteBatchCustomerVouchers([v.id]);
+                                                                                showStatus('success', `Voucher "${v.voucher_code}" dihapus`);
+                                                                                fetchData();
+                                                                            } catch (e: any) {
+                                                                                showStatus('error', e.message);
+                                                                            }
+                                                                        }}
+                                                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                                        title="Hapus Voucher"
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 )}
                             </div>
 

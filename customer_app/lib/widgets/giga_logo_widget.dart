@@ -1,34 +1,153 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 
+enum GigaLogoLayout { vertical, horizontal, square }
+enum GigaLogoVariant { color, white, dark }
+
 class GigaLogoWidget extends StatelessWidget {
   final double size;
   final bool showText;
   final bool showSubtitle;
+  final GigaLogoLayout layout;
+  final GigaLogoVariant variant;
+  final bool showGlow;
 
   const GigaLogoWidget({
     super.key,
     this.size = 110,
     this.showText = true,
     this.showSubtitle = true,
+    this.layout = GigaLogoLayout.vertical,
+    this.variant = GigaLogoVariant.color,
+    this.showGlow = true,
   });
+
+  /// Factory constructor for App Bar horizontal header logo
+  factory GigaLogoWidget.horizontal({
+    Key? key,
+    double height = 36,
+    GigaLogoVariant variant = GigaLogoVariant.white,
+  }) {
+    return GigaLogoWidget(
+      key: key,
+      size: height,
+      showText: true,
+      showSubtitle: false,
+      layout: GigaLogoLayout.horizontal,
+      variant: variant,
+      showGlow: false,
+    );
+  }
+
+  /// Factory constructor for pure logo icon (1:1 aspect ratio mark)
+  factory GigaLogoWidget.icon({
+    Key? key,
+    double size = 48,
+    GigaLogoVariant variant = GigaLogoVariant.color,
+    bool showGlow = false,
+  }) {
+    return GigaLogoWidget(
+      key: key,
+      size: size,
+      showText: false,
+      showSubtitle: false,
+      layout: GigaLogoLayout.square,
+      variant: variant,
+      showGlow: showGlow,
+    );
+  }
+
+  Color get _archColor {
+    switch (variant) {
+      case GigaLogoVariant.white:
+        return Colors.white;
+      case GigaLogoVariant.dark:
+        return const Color(0xFF1E222D);
+      case GigaLogoVariant.color:
+      default:
+        return const Color(0xFF333745);
+    }
+  }
+
+  Color get _titleColor {
+    switch (variant) {
+      case GigaLogoVariant.white:
+        return Colors.white;
+      case GigaLogoVariant.dark:
+        return const Color(0xFF1E222D);
+      case GigaLogoVariant.color:
+      default:
+        return const Color(0xFF333745);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final mark = CustomPaint(
+      size: Size(size, size),
+      painter: _GigaLogoPainter(
+        archColor: _archColor,
+        sphereColor: const Color(0xFFFF333A),
+        showGlow: showGlow,
+      ),
+    );
+
+    if (layout == GigaLogoLayout.square || (!showText && !showSubtitle)) {
+      return mark;
+    }
+
+    if (layout == GigaLogoLayout.horizontal) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          mark,
+          SizedBox(width: size * 0.35),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'GIGANUSA',
+                style: TextStyle(
+                  color: _titleColor,
+                  fontSize: size * 0.55,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.2,
+                  height: 1.0,
+                ),
+              ),
+              if (showSubtitle) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'PORTAL PELANGGAN',
+                  style: TextStyle(
+                    color: const Color(0xFFFF333A),
+                    fontSize: size * 0.28,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Vertical layout (default 3:4 aspect ratio presentation)
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        CustomPaint(
-          size: Size(size, size),
-          painter: _GigaLogoPainter(),
-        ),
+        mark,
         if (showText) ...[
-          const SizedBox(height: 14),
-          const Text(
+          SizedBox(height: size * 0.12),
+          Text(
             'GIGANUSA',
             style: TextStyle(
-              color: Color(0xFFC93B3B),
-              fontSize: 22,
+              color: _titleColor,
+              fontSize: size * 0.20,
               fontWeight: FontWeight.w900,
               letterSpacing: 3.0,
             ),
@@ -38,19 +157,21 @@ class GigaLogoWidget extends StatelessWidget {
           const SizedBox(height: 4),
           Row(
             mainAxisSize: MainAxisSize.min,
-            children: const [
+            children: [
               Text(
                 'Selamat Datang di ',
                 style: TextStyle(
-                  color: Color(0xFF64748B),
+                  color: variant == GigaLogoVariant.white
+                      ? Colors.white.withOpacity(0.85)
+                      : const Color(0xFF64748B),
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              Text(
+              const Text(
                 'Portal Pelanggan',
                 style: TextStyle(
-                  color: Color(0xFFE53935),
+                  color: Color(0xFFFF333A),
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
@@ -64,30 +185,38 @@ class GigaLogoWidget extends StatelessWidget {
 }
 
 class _GigaLogoPainter extends CustomPainter {
+  final Color archColor;
+  final Color sphereColor;
+  final bool showGlow;
+
+  _GigaLogoPainter({
+    required this.archColor,
+    required this.sphereColor,
+    required this.showGlow,
+  });
+
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
 
-    // Center coordinates
     final cx = w / 2;
     final cy = h / 2;
 
-    // Soft red glow background behind logo like screenshot
-    final glowPaint = Paint()
-      ..color = const Color(0xFFFFA4A2).withOpacity(0.35)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20);
-    canvas.drawCircle(Offset(cx + w * 0.16, cy - h * 0.05), w * 0.28, glowPaint);
+    // Optional ambient glow background
+    if (showGlow) {
+      final glowPaint = Paint()
+        ..color = const Color(0xFFFF8A84).withOpacity(0.32)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18);
+      canvas.drawCircle(Offset(cx + w * 0.15, cy - h * 0.05), w * 0.28, glowPaint);
+    }
 
-    // 1. Draw Arch (slate color #323746)
+    // 1. Draw Arch Symbol (Slate color #333745 or theme variant)
     final archPaint = Paint()
-      ..color = const Color(0xFF333745)
+      ..color = archColor
       ..style = PaintingStyle.fill
       ..isAntiAlias = true;
 
-    // Arch geometry:
-    // Outer arc radius: w * 0.42
-    // Inner arc radius: w * 0.23
     final outerRadius = w * 0.41;
     final innerRadius = w * 0.23;
     final strokeThickness = outerRadius - innerRadius;
@@ -95,46 +224,38 @@ class _GigaLogoPainter extends CustomPainter {
     final archCenterY = h * 0.44;
 
     final archPath = Path();
-    // Outer top arc from left to right
     archPath.addArc(
       Rect.fromCircle(center: Offset(cx, archCenterY), radius: outerRadius),
       pi,
       pi,
     );
-    // Right outer leg down
     archPath.lineTo(cx + outerRadius, legBottom);
-    // Right rounded bottom cap
     archPath.arcToPoint(
       Offset(cx + innerRadius, legBottom),
       radius: Radius.circular(strokeThickness / 2),
       clockwise: true,
     );
-    // Right inner leg up
     archPath.lineTo(cx + innerRadius, archCenterY);
-    // Inner arc back to left
     archPath.arcTo(
       Rect.fromCircle(center: Offset(cx, archCenterY), radius: innerRadius),
       0,
       -pi,
       false,
     );
-    // Left inner leg down
     archPath.lineTo(cx - innerRadius, legBottom);
-    // Left rounded bottom cap
     archPath.arcToPoint(
       Offset(cx - outerRadius, legBottom),
       radius: Radius.circular(strokeThickness / 2),
       clockwise: true,
     );
-    // Left outer leg back up
     archPath.lineTo(cx - outerRadius, archCenterY);
     archPath.close();
 
     canvas.drawPath(archPath, archPaint);
 
-    // 2. Draw Center Circle (Vibrant Red #FF353D)
+    // 2. Draw Inner Red Sphere / Circle (#FF333A)
     final circlePaint = Paint()
-      ..color = const Color(0xFFFF333A)
+      ..color = sphereColor
       ..style = PaintingStyle.fill
       ..isAntiAlias = true;
 
@@ -144,5 +265,9 @@ class _GigaLogoPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GigaLogoPainter oldDelegate) {
+    return oldDelegate.archColor != archColor ||
+        oldDelegate.sphereColor != sphereColor ||
+        oldDelegate.showGlow != showGlow;
+  }
 }

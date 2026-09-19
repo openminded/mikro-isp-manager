@@ -3,8 +3,8 @@
 # min_api: 21
 # common_typos_disable
 # {"id":"com.android.tools.r8.mapping","version":"2.2"}
-# pg_map_id: c25e838
-# pg_map_hash: SHA-256 c25e838bf98b434e774c17deb52c091f7f4016fc91374d1603dc67a6de3be20f
+# pg_map_id: 277fb81
+# pg_map_hash: SHA-256 277fb814e717b296c0293a7adae5b213e5d389110d15dd8b8533a7ae6d56e5fb
 android.support.v4.app.RemoteActionCompatParcelizer -> android.support.v4.app.RemoteActionCompatParcelizer:
 # {"id":"sourceFile","fileName":"RemoteActionCompatParcelizer.java"}
 android.support.v4.graphics.drawable.IconCompatParcelizer -> android.support.v4.graphics.drawable.IconCompatParcelizer:
@@ -1902,22 +1902,22 @@ androidx.window.layout.WindowMetricsCalculatorCompat$$ExternalSyntheticApiModelO
       # {"id":"com.android.tools.r8.synthesized"}
 androidx.window.layout.WindowMetricsCalculatorDecorator -> androidx.window.layout.WindowMetricsCalculatorDecorator:
 # {"id":"sourceFile","fileName":"WindowMetricsCalculator.kt"}
-com.giganusa.customer.MainActivity -> com.giganusa.customer.MainActivity:
+com.ayd.giganusa.MainActivity -> com.ayd.giganusa.MainActivity:
 # {"id":"sourceFile","fileName":"MainActivity.kt"}
     java.lang.String CHANNEL -> f
-    1:4:void $r8$lambda$nkp0p2W8GWKdVQRRc0_1IZoSpzQ(com.giganusa.customer.MainActivity,u.MethodCall,u.MethodChannel$Result):0:0 -> P
+    1:4:void $r8$lambda$u7w_6K4BMjz0PSyDTPQ69nGNdnU(com.ayd.giganusa.MainActivity,u.MethodCall,u.MethodChannel$Result):0:0 -> P
       # {"id":"com.android.tools.r8.synthesized"}
-      # {"id":"com.android.tools.r8.residualsignature","signature":"(Lcom/giganusa/customer/MainActivity;Lu/i;Lu/j$d;)V"}
-    1:91:void configureFlutterEngine$lambda$1(com.giganusa.customer.MainActivity,io.flutter.plugin.common.MethodCall,io.flutter.plugin.common.MethodChannel$Result):0:0 -> Q
-      # {"id":"com.android.tools.r8.residualsignature","signature":"(Lcom/giganusa/customer/MainActivity;Lu/i;Lu/j$d;)V"}
+      # {"id":"com.android.tools.r8.residualsignature","signature":"(Lcom/ayd/giganusa/MainActivity;Lu/i;Lu/j$d;)V"}
+    1:91:void configureFlutterEngine$lambda$1(com.ayd.giganusa.MainActivity,io.flutter.plugin.common.MethodCall,io.flutter.plugin.common.MethodChannel$Result):0:0 -> Q
+      # {"id":"com.android.tools.r8.residualsignature","signature":"(Lcom/ayd/giganusa/MainActivity;Lu/i;Lu/j$d;)V"}
     1:1:void configureFlutterEngine(io.flutter.embedding.engine.FlutterEngine):0:0 -> w
       # {"id":"com.android.tools.r8.residualsignature","signature":"(Lio/flutter/embedding/engine/a;)V"}
-com.giganusa.customer.MainActivity$$ExternalSyntheticLambda0 -> k.a:
+com.ayd.giganusa.MainActivity$$ExternalSyntheticLambda0 -> k.a:
 # {"id":"sourceFile","fileName":"R8$$SyntheticClass"}
 # {"id":"com.android.tools.r8.synthesized"}
-    com.giganusa.customer.MainActivity com.giganusa.customer.MainActivity$$InternalSyntheticLambda$1$f97ab03cf75208c8a0d187235ee0983e431ebe63b8f59dea0ea366c24a6dc5e8$0.f$0 -> a
+    com.ayd.giganusa.MainActivity com.ayd.giganusa.MainActivity$$InternalSyntheticLambda$1$4b1dd20046eea42b730021804f0b9f07cdd60b2bb9db5d9e8c602787437a552b$0.f$0 -> a
       # {"id":"com.android.tools.r8.synthesized"}
-    1:6:void <init>(com.giganusa.customer.MainActivity):0:0 -> <init>
+    1:6:void <init>(com.ayd.giganusa.MainActivity):0:0 -> <init>
       # {"id":"com.android.tools.r8.synthesized"}
     1:6:void onMethodCall(u.MethodCall,u.MethodChannel$Result):0:0 -> a
       # {"id":"com.android.tools.r8.synthesized"}

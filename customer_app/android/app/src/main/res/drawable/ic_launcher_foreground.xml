@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="500"
+    android:viewportHeight="500">
+    <group
+        android:scaleX="0.65"
+        android:scaleY="0.65"
+        android:pivotX="250"
+        android:pivotY="250">
+        <!-- Outer Arch -->
+        <path
+            android:fillColor="#333745"
+            android:pathData="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z"/>
+        <!-- Red Sphere -->
+        <path
+            android:fillColor="#FF333A"
+            android:pathData="M 250 185 A 90 90 0 1 1 249.99 185 Z"/>
+    </group>
+</vector>

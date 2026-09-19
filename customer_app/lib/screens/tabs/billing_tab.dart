@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/customer_provider.dart';
 import '../../models/customer_portal_models.dart';
 
@@ -10,6 +11,67 @@ class BillingTab extends StatelessWidget {
   String _formatCurrency(double amount) {
     final formatter = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
     return formatter.format(amount);
+  }
+
+  Future<void> _payInvoice(BuildContext context, CustomerInvoice invoice) async {
+    final provider = context.read<CustomerProvider>();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Color(0xFF10B981)),
+                SizedBox(height: 16),
+                Text(
+                  'Membuat Tautan QRIS SumoPod...',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final res = await provider.apiService.createSumopodPayment(invoice.id);
+      if (context.mounted) Navigator.of(context).pop();
+
+      final paymentUrl = res['payment_link_url'];
+      if (paymentUrl != null && paymentUrl.toString().isNotEmpty) {
+        final uri = Uri.parse(paymentUrl.toString());
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          await launchUrl(uri, mode: LaunchMode.platformDefault);
+        }
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(res['error'] ?? 'Gagal membuat tautan QRIS'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString().replaceAll('Exception: ', '')}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -158,6 +220,33 @@ class BillingTab extends StatelessWidget {
               ),
             ],
           ),
+          if (!isPaid) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
+                ),
+                onPressed: () => _payInvoice(context, invoice),
+                icon: const Icon(Icons.qr_code_2_rounded, size: 20),
+                label: const Text(
+                  'BAYAR VIA QRIS OTOMATIS',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ),
+          ],
           if (isPaid && invoice.paymentDate != null) ...[
             const Divider(height: 20),
             Row(

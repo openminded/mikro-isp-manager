@@ -110,7 +110,7 @@ class VouchersTab extends StatelessWidget {
               InkWell(
                 onTap: () async {
                   try {
-                    const channel = MethodChannel('com.giganusa.customer/launcher');
+                    const channel = MethodChannel('com.ayd.giganusa/launcher');
                     await channel.invokeMethod('openBrowser', {'url': loginUrl});
                   } catch (e) {
                     debugPrint('Error launching url: $e');
@@ -169,7 +169,7 @@ class VouchersTab extends StatelessWidget {
               label: const Text('Buka Halaman Login'),
               onPressed: () async {
                 try {
-                  const channel = MethodChannel('com.giganusa.customer/launcher');
+                  const channel = MethodChannel('com.ayd.giganusa/launcher');
                   await channel.invokeMethod('openBrowser', {'url': loginUrl});
                 } catch (e) {
                   debugPrint('Error launching url: $e');

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="100%" height="100%">
+  <!-- GigaNusa Horizontal Logo Branding (Ratio 4:1) -->
+  <g transform="translate(20, 20) scale(0.32)">
+    <!-- Logo Mark Mark 1:1 -->
+    <path d="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z" fill="#333745" />
+    <circle cx="250" cy="275" r="90" fill="#FF333A" />
+  </g>
+  
+  <!-- Text Branding -->
+  <text x="210" y="112" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-weight="900" font-size="64" letter-spacing="4" fill="#333745">GIGANUSA</text>
+  <text x="212" y="152" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-weight="700" font-size="24" letter-spacing="2" fill="#FF333A">PORTAL PELANGGAN</text>
+</svg>

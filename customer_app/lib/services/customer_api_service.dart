@@ -12,25 +12,21 @@ class CustomerAuthService {
   String _baseUrl = AppConstants.defaultApiUrl;
   String? _token;
 
-  String get baseUrl => _baseUrl;
+  String get baseUrl {
+    if (_baseUrl.isEmpty || _baseUrl == '/api' || _baseUrl.contains('5000')) {
+      return AppConstants.defaultApiUrl;
+    }
+    return _baseUrl;
+  }
+
   String? get token => _token;
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('cust_token');
-    if (kDebugMode) {
-      _baseUrl = AppConstants.defaultApiUrl;
-      await prefs.setString('cust_api_url', _baseUrl);
-      debugPrint('[CustomerAuth] Debug mode active. Api URL forced to: $_baseUrl');
-      return;
-    }
-    final savedUrl = prefs.getString('cust_api_url');
-    if (savedUrl != null && savedUrl.isNotEmpty) {
-      _baseUrl = savedUrl;
-    } else {
-      _baseUrl = AppConstants.defaultApiUrl;
-      await prefs.setString('cust_api_url', _baseUrl);
-    }
+    _baseUrl = AppConstants.defaultApiUrl;
+    await prefs.setString('cust_api_url', _baseUrl);
+    debugPrint('[CustomerAuth] API URL set to: $baseUrl');
   }
 
   Future<void> setBaseUrl(String url) async {
@@ -48,7 +44,7 @@ class CustomerAuthService {
   }
 
   Future<Map<String, dynamic>> login(String phone, String password, {String? selectedCustomerId}) async {
-    final uri = Uri.parse('$_baseUrl/customer-auth/login');
+    final uri = Uri.parse('$baseUrl/customer-auth/login');
     final response = await http.post(
       uri,
       headers: {'Content-Type': 'application/json'},
@@ -81,7 +77,7 @@ class CustomerAuthService {
     required String oldPassword,
     required String newPassword,
   }) async {
-    final uri = Uri.parse('$_baseUrl/customer-auth/change-password');
+    final uri = Uri.parse('$baseUrl/customer-auth/change-password');
     final response = await http.post(
       uri,
       headers: _headers,
@@ -101,7 +97,7 @@ class CustomerAuthService {
   }
 
   Future<Map<String, dynamic>> fetchDashboard(String customerId) async {
-    final uri = Uri.parse('$_baseUrl/customer-portal/dashboard?customerId=$customerId');
+    final uri = Uri.parse('$baseUrl/customer-portal/dashboard?customerId=$customerId');
     final response = await http.get(uri, headers: _headers).timeout(
       const Duration(seconds: 15),
       onTimeout: () => throw Exception('Waktu pemuatan data habis (Timeout).'),
@@ -116,7 +112,7 @@ class CustomerAuthService {
   }
 
   Future<Map<String, dynamic>> checkWifiStatus(String customerId) async {
-    final uri = Uri.parse('$_baseUrl/customer-portal/wifi-status?customerId=$customerId');
+    final uri = Uri.parse('$baseUrl/customer-portal/wifi-status?customerId=$customerId');
     final response = await http.get(uri, headers: _headers).timeout(
       const Duration(seconds: 15),
       onTimeout: () => throw Exception('Cek status WiFi timeout.'),
@@ -127,6 +123,25 @@ class CustomerAuthService {
       return data;
     } else {
       throw Exception(data['error'] ?? 'Gagal mengecek status WiFi');
+    }
+  }
+
+  Future<Map<String, dynamic>> createSumopodPayment(String invoiceId) async {
+    final uri = Uri.parse('$baseUrl/billing/sumopod/create-payment');
+    final response = await http.post(
+      uri,
+      headers: _headers,
+      body: jsonEncode({'invoiceId': invoiceId}),
+    ).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => throw Exception('Koneksi pembuatan link QRIS timeout.'),
+    );
+
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data;
+    } else {
+      throw Exception(data['error'] ?? 'Gagal membuat tautan pembayaran QRIS');
     }
   }
 

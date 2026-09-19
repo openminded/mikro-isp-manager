@@ -33,19 +33,9 @@ class DashboardTab extends StatelessWidget {
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: primaryThemeColor,
-        title: Row(
-          children: [
-            Icon(
-              isBlockedOrUnpaid ? Icons.warning_amber_rounded : Icons.wifi_tethering,
-              color: Colors.white,
-              size: 22,
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              'GIGA NUSA',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, letterSpacing: 1.2),
-            ),
-          ],
+        title: GigaLogoWidget.horizontal(
+          height: 26,
+          variant: GigaLogoVariant.white,
         ),
         actions: [
           IconButton(

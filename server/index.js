@@ -126,7 +126,12 @@ process.on('unhandledRejection', (reason, promise) => {
 if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
 if (!fs.existsSync(path.join(__dirname, 'uploads'))) fs.mkdirSync(path.join(__dirname, 'uploads'));
 
-app.use(cors());
+app.use(cors({
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Webhook-Token', 'Svix-Id', 'Svix-Timestamp', 'Svix-Signature']
+}));
 app.use(express.json());
 
 // --- Debugging Middleware ---
@@ -282,6 +287,7 @@ app.get('/api/customers', async (req, res) => {
         const sqlMap = new Map();
         const nameMap = new Map();
         const phonePasswordMap = new Map();
+        const phoneCustomerMap = new Map();
 
         sqlCustomers.forEach(c => {
             const json = c.toJSON();
@@ -290,9 +296,18 @@ app.get('/api/customers', async (req, res) => {
             if (c.mikrotik_name) {
                 nameMap.set(String(c.mikrotik_name).toLowerCase().trim(), json);
             }
+            if (c.phone_number) {
+                const clean = c.phone_number.replace(/\D/g, '');
+                if (clean && clean.length >= 6) {
+                    phoneCustomerMap.set(clean, json);
+                    if (clean.length >= 8) {
+                        phoneCustomerMap.set(clean.slice(-8), json);
+                    }
+                }
+            }
             if (c.phone_number && c.password) {
                 const clean = c.phone_number.replace(/\D/g, '');
-                if (clean) {
+                if (clean && clean.length >= 6) {
                     phonePasswordMap.set(clean, c.password);
                     if (clean.length >= 8) {
                         phonePasswordMap.set(clean.slice(-8), c.password);
@@ -320,8 +335,22 @@ app.get('/api/customers', async (req, res) => {
             for (const secret of cacheData) {
                 const key = `${String(server.id).toLowerCase()}-${String(secret.name).toLowerCase().trim()}`;
                 const nameKey = String(secret.name).toLowerCase().trim();
-                const sqlC = sqlMap.get(key) || nameMap.get(nameKey);
+                let sqlC = sqlMap.get(key) || nameMap.get(nameKey);
                 processedKeys.add(key);
+
+                // Fallback: match by phone number in secret comment or secret name
+                if (!sqlC) {
+                    const rawText = `${secret.comment || ''} ${secret.name || ''}`;
+                    const phoneMatches = rawText.match(/\d{6,15}/g) || [];
+                    for (const candidate of phoneMatches) {
+                        const cleanCand = candidate.replace(/\D/g, '');
+                        const found = phoneCustomerMap.get(cleanCand) || phoneCustomerMap.get(cleanCand.slice(-8));
+                        if (found) {
+                            sqlC = found;
+                            break;
+                        }
+                    }
+                }
                 
                 let lat = null, long = null;
                 if (sqlC?.coordinates?.includes(',')) {
@@ -333,13 +362,18 @@ app.get('/api/customers', async (req, res) => {
                 // Resolve effective appPassword (check SQL record password -> phonePasswordMap -> default 'nusantara!')
                 let effectivePassword = sqlC?.password;
                 if (!effectivePassword) {
-                    const phoneToTest = (sqlC?.phone_number || secret.comment || '').replace(/\D/g, '');
-                    if (phoneToTest && phoneToTest.length >= 6) {
-                        for (const [pKey, pVal] of phonePasswordMap.entries()) {
-                            if (phoneToTest.endsWith(pKey) || pKey.endsWith(phoneToTest)) {
-                                effectivePassword = pVal;
-                                break;
+                    const rawText = `${sqlC?.phone_number || ''} ${secret.comment || ''} ${secret.name || ''}`;
+                    const phoneMatches = rawText.match(/\d{6,15}/g) || [];
+                    for (const candidate of phoneMatches) {
+                        const cleanCand = candidate.replace(/\D/g, '');
+                        if (cleanCand && cleanCand.length >= 6) {
+                            for (const [pKey, pVal] of phonePasswordMap.entries()) {
+                                if (cleanCand.endsWith(pKey) || pKey.endsWith(cleanCand) || cleanCand.includes(pKey)) {
+                                    effectivePassword = pVal;
+                                    break;
+                                }
                             }
+                            if (effectivePassword) break;
                         }
                     }
                 }
@@ -368,6 +402,7 @@ app.get('/api/customers', async (req, res) => {
                     photos: sqlC ? (sqlC.photos || []) : [],
                     appPassword: effectivePassword || 'nusantara!',
                     crmId: sqlC ? sqlC.id : null,
+                    is_app_enabled: sqlC ? Boolean(sqlC.is_app_enabled) : false,
                     disabled: secret.disabled === 'true' || secret.disabled === 'yes' || secret.disabled === true
                 });
             }
@@ -529,6 +564,28 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                 });
             }
 
+            const sqlCustomers = await Customer.findAll();
+            const sqlMap = new Map();
+            const phoneCustomerMap = new Map();
+
+            sqlCustomers.forEach(c => {
+                const json = c.toJSON();
+                if (c.mikrotik_name) {
+                    const key = `${String(c.server_id || '').toLowerCase()}-${String(c.mikrotik_name).toLowerCase().trim()}`;
+                    sqlMap.set(key, json);
+                    sqlMap.set(String(c.mikrotik_name).toLowerCase().trim(), json);
+                }
+                if (c.phone_number) {
+                    const clean = c.phone_number.replace(/\D/g, '');
+                    if (clean && clean.length >= 6) {
+                        phoneCustomerMap.set(clean, json);
+                        if (clean.length >= 8) {
+                            phoneCustomerMap.set(clean.slice(-8), json);
+                        }
+                    }
+                }
+            });
+
             for (const item of data) {
                 if (!item.name) continue;
 
@@ -537,27 +594,59 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                     let status = 'active';
                     if (item.disabled === 'true' || item.disabled === true) status = 'disabled';
 
-                    const existing = await Customer.findOne({
-                        where: { server_id: server.id, mikrotik_name: item.name }
-                    });
+                    const itemKey = `${String(server.id).toLowerCase()}-${String(item.name).toLowerCase().trim()}`;
+                    const nameKey = String(item.name).toLowerCase().trim();
 
-                    if (existing) {
-                        await existing.update({
-                            profile: item.profile,
-                            status: status,
-                            comment: item.comment || ''
-                        });
+                    let existing = sqlMap.get(itemKey) || sqlMap.get(nameKey);
+
+                    if (!existing && item.comment) {
+                        const phoneMatches = item.comment.match(/\d{6,15}/g) || [];
+                        for (const candidate of phoneMatches) {
+                            const cleanCand = candidate.replace(/\D/g, '');
+                            const found = phoneCustomerMap.get(cleanCand) || phoneCustomerMap.get(cleanCand.slice(-8));
+                            if (found) {
+                                existing = found;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (existing && existing.id) {
+                        const dbCust = await Customer.findByPk(existing.id);
+                        if (dbCust) {
+                            await dbCust.update({
+                                profile: item.profile,
+                                status: status,
+                                comment: item.comment || dbCust.comment || '',
+                                mikrotik_name: dbCust.mikrotik_name || item.name,
+                                server_id: dbCust.server_id || server.id
+                            });
+                        }
                     } else {
+                        // Extract phone from comment if available
+                        let extractedPhone = null;
+                        if (item.comment) {
+                            const phoneMatches = item.comment.match(/\d{8,15}/g);
+                            if (phoneMatches && phoneMatches.length > 0) {
+                                extractedPhone = phoneMatches[0];
+                            }
+                        }
+
                         // Create new customer from Mikrotik
-                        // username = PPP Secret name, comment = PPP Secret comment, real_name = from app DB
-                        await Customer.create({
+                        const newCust = await Customer.create({
                             server_id: server.id,
                             mikrotik_name: item.name,   // PPP Secret: name
                             name: item.name,             // store ppp secret name (username) here too
+                            real_name: item.name,
+                            phone_number: extractedPhone,
                             profile: item.profile,
                             status: status,
-                            comment: item.comment || '' // PPP Secret: comment
+                            comment: item.comment || '', // PPP Secret: comment
+                            password: 'nusantara!',
+                            must_change_password: true
                         });
+                        sqlMap.set(itemKey, newCust.toJSON());
+                        sqlMap.set(nameKey, newCust.toJSON());
                     }
                 } catch (err) {
                     console.error(`[Sync] Error updating secret ${item.name}:`, err.message);
@@ -566,41 +655,64 @@ app.post('/api/mikrotik/sync', async (req, res) => {
             console.log(`[Sync] SQL Database updated.`);
 
             // [FIX] Merge SQL Data back into the Cache Response
-            // The frontend relies on the cache (JSON) which currently only has Mikrotik data.
-            // We need to enrich it with SQL fields (sub_area_id, real name, etc.)
-
-            // 1. Fetch all SQL customers for this server
-            const sqlCustomers = await Customer.findAll({ where: { server_id: server.id } });
-            const sqlMap = new Map();
-            sqlCustomers.forEach(c => {
-                // Key lowercase to ensure case-insensitive matching with Mikrotik
-                sqlMap.set(String(c.mikrotik_name).toLowerCase().trim(), c.toJSON());
+            // Refresh sqlCustomers list after updates
+            const updatedSqlCustomers = await Customer.findAll({ where: { server_id: server.id } });
+            const freshSqlMap = new Map();
+            updatedSqlCustomers.forEach(c => {
+                const json = c.toJSON();
+                freshSqlMap.set(String(c.mikrotik_name).toLowerCase().trim(), json);
+                if (c.phone_number) {
+                    const clean = c.phone_number.replace(/\D/g, '');
+                    if (clean && clean.length >= 6) {
+                        phoneCustomerMap.set(clean, json);
+                        if (clean.length >= 8) {
+                            phoneCustomerMap.set(clean.slice(-8), json);
+                        }
+                    }
+                }
             });
 
-            // 2. Enrich Mikrotik Data
+            // 2. Enrich Mikrotik Data with all CRM fields including appPassword and crmId
             data = data.map(item => {
-                // Match by lowercase name
                 const key = String(item.name).toLowerCase().trim();
-                const sqlC = sqlMap.get(key);
+                let sqlC = freshSqlMap.get(key);
+
+                if (!sqlC && item.comment) {
+                    const phoneMatches = item.comment.match(/\d{6,15}/g) || [];
+                    for (const candidate of phoneMatches) {
+                        const cleanCand = candidate.replace(/\D/g, '');
+                        const found = phoneCustomerMap.get(cleanCand) || phoneCustomerMap.get(cleanCand.slice(-8));
+                        if (found) {
+                            sqlC = found;
+                            break;
+                        }
+                    }
+                }
                 
                 if (sqlC) {
                     return {
                         ...item,
-                        // Override or Append fields from SQL
-                        realName: sqlC.real_name, // Use the new real_name column
-                        whatsapp: sqlC.phone_number,
-                        address: sqlC.address,
-                        sub_area_id: sqlC.sub_area_id,
-                        odpId: sqlC.odp_id, // Map snake_case to camelCase for frontend
+                        crmId: sqlC.id,
+                        realName: sqlC.real_name || '', 
+                        whatsapp: sqlC.phone_number || '',
+                        address: sqlC.address || '',
+                        sub_area_id: sqlC.sub_area_id || '',
+                        odpId: sqlC.odp_id || null, 
                         ktp: sqlC.ktp || '', 
-                        coordinates: sqlC.coordinates,
-                        installationDate: sqlC.installationDate,
-                        ssidName: sqlC.ssidName,
-                        ssidPassword: sqlC.ssidPassword,
-                        signalLevel: sqlC.signalLevel,
+                        coordinates: sqlC.coordinates || '',
+                        installationDate: sqlC.installationDate || '',
+                        activationDate: sqlC.activationDate || '',
+                        photos: sqlC.photos || [],
+                        ssidName: sqlC.ssidName || '',
+                        ssidPassword: sqlC.ssidPassword || '',
+                        signalLevel: sqlC.signalLevel || '',
+                        appPassword: sqlC.password || 'nusantara!'
                     };
                 }
-                return item;
+                return {
+                    ...item,
+                    appPassword: 'nusantara!'
+                };
             });
 
             // Update cache with Enriched Data
@@ -646,11 +758,77 @@ app.get('/api/mikrotik/data', async (req, res) => {
     try {
         const fileContent = await fs.promises.readFile(cachePath, 'utf8');
         const cacheData = JSON.parse(fileContent);
+
+        // Dynamically enrich secrets cache with live SQLite customer data
+        if (resource === 'secrets' && Array.isArray(cacheData.data)) {
+            const sqlCustomers = await Customer.findAll();
+            const sqlMap = new Map();
+            const phoneCustomerMap = new Map();
+
+            sqlCustomers.forEach(c => {
+                const json = c.toJSON();
+                if (c.mikrotik_name) {
+                    const key = `${String(c.server_id || '').toLowerCase()}-${String(c.mikrotik_name).toLowerCase().trim()}`;
+                    sqlMap.set(key, json);
+                    sqlMap.set(String(c.mikrotik_name).toLowerCase().trim(), json);
+                }
+                if (c.phone_number) {
+                    const clean = c.phone_number.replace(/\D/g, '');
+                    if (clean && clean.length >= 6) {
+                        phoneCustomerMap.set(clean, json);
+                        if (clean.length >= 8) {
+                            phoneCustomerMap.set(clean.slice(-8), json);
+                        }
+                    }
+                }
+            });
+
+            cacheData.data = cacheData.data.map(item => {
+                const key = `${String(serverId).toLowerCase()}-${String(item.name).toLowerCase().trim()}`;
+                const nameKey = String(item.name).toLowerCase().trim();
+                let sqlC = sqlMap.get(key) || sqlMap.get(nameKey);
+
+                if (!sqlC && item.comment) {
+                    const phoneMatches = item.comment.match(/\d{6,15}/g) || [];
+                    for (const candidate of phoneMatches) {
+                        const cleanCand = candidate.replace(/\D/g, '');
+                        const found = phoneCustomerMap.get(cleanCand) || phoneCustomerMap.get(cleanCand.slice(-8));
+                        if (found) {
+                            sqlC = found;
+                            break;
+                        }
+                    }
+                }
+
+                if (sqlC) {
+                    return {
+                        ...item,
+                        crmId: sqlC.id,
+                        realName: sqlC.real_name || item.realName || '',
+                        whatsapp: sqlC.phone_number || item.whatsapp || '',
+                        address: sqlC.address || item.address || '',
+                        sub_area_id: sqlC.sub_area_id || item.sub_area_id || '',
+                        appPassword: sqlC.password || 'nusantara!',
+                        ktp: sqlC.ktp || item.ktp || '',
+                        coordinates: sqlC.coordinates || item.coordinates || '',
+                        activationDate: sqlC.activationDate || item.activationDate || '',
+                        installationDate: sqlC.installationDate || item.installationDate || '',
+                        ssidName: sqlC.ssidName || item.ssidName || '',
+                        ssidPassword: sqlC.ssidPassword || item.ssidPassword || '',
+                        signalLevel: sqlC.signalLevel || item.signalLevel || ''
+                    };
+                }
+                return {
+                    ...item,
+                    appPassword: item.appPassword || 'nusantara!'
+                };
+            });
+        }
+
         res.json(cacheData);
     } catch (error) {
         res.json({ timestamp: null, data: [] });
     }
-
 });
 
 // --- Offline ONU Logic ---
@@ -1334,29 +1512,178 @@ app.post('/api/mikrotik/hotspot/vouchers/generate', async (req, res) => {
 // Query Customer Vouchers (Accessible by Client Portal & Admin)
 app.get('/api/customer-vouchers', async (req, res) => {
     try {
-        const { customerId, serverId, phone, status } = req.query;
+        const { customerId, serverId, phone, status, limit } = req.query;
         const whereClause = {};
 
         if (customerId) whereClause.customer_id = customerId;
-        if (serverId) whereClause.server_id = serverId;
+        if (serverId && serverId !== 'all') whereClause.server_id = serverId;
         if (phone) whereClause.customer_phone = phone;
-        if (status) whereClause.status = status;
+        if (status && status !== 'all') whereClause.status = status;
+
+        const parsedLimit = limit === 'all' ? undefined : (limit ? parseInt(limit, 10) : 1000);
 
         const vouchers = await CustomerVoucher.findAll({
             where: whereClause,
-            include: [{
-                model: Customer,
-                attributes: ['id', 'name', 'real_name', 'mikrotik_name', 'phone_number', 'profile', 'address', 'sub_area_id'],
-                required: false
-            }],
+            include: [
+                {
+                    model: Customer,
+                    attributes: ['id', 'name', 'real_name', 'mikrotik_name', 'phone_number', 'profile', 'address', 'sub_area_id'],
+                    required: false
+                },
+                {
+                    model: Server,
+                    attributes: ['id', 'name', 'ip'],
+                    required: false
+                }
+            ],
             order: [['createdAt', 'DESC']],
-            limit: 200
+            limit: parsedLimit
         });
 
         res.json(vouchers);
     } catch (e) {
         console.error('[Get Customer Vouchers Error]', e.message);
         res.status(500).json({ error: e.message });
+    }
+});
+
+// Sync & Cache all Hotspot Users across ALL Servers into CustomerVouchers DB
+app.post('/api/customer-vouchers/sync-all', async (req, res) => {
+    try {
+        const servers = await Server.findAll();
+        let totalSynced = 0;
+        let totalPurged = 0;
+        const serverResults = [];
+
+        for (const s of servers) {
+            try {
+                const hotspotUsers = await runMikrotikCommand(s.id, ['/ip/hotspot/user/print']).catch(() => null);
+                
+                if (hotspotUsers === null || !Array.isArray(hotspotUsers)) {
+                    serverResults.push({ serverId: s.id, serverName: s.name, count: 0, purged: 0, success: false, error: 'Router unreachable' });
+                    continue;
+                }
+
+                const activeUsers = await runMikrotikCommand(s.id, ['/ip/hotspot/active/print']).catch(() => []);
+                const activeNames = new Set(Array.isArray(activeUsers) ? activeUsers.map(a => a.user) : []);
+
+                // 1. Get all live voucher codes on this router
+                const liveCodesSet = new Set(hotspotUsers.map(u => u.name).filter(Boolean));
+
+                // 2. Fetch existing cached vouchers in DB for this server
+                const existingDbVouchers = await CustomerVoucher.findAll({ where: { server_id: s.id } });
+
+                // 3. Purge cache vouchers if they no longer exist on the MikroTik router
+                let purgedCount = 0;
+                for (const dbV of existingDbVouchers) {
+                    if (!liveCodesSet.has(dbV.voucher_code)) {
+                        await dbV.destroy();
+                        purgedCount++;
+                    }
+                }
+                totalPurged += purgedCount;
+
+                // 4. Upsert/Update live router users into DB cache
+                let count = 0;
+                for (const u of hotspotUsers) {
+                    if (!u.name || u.name === 'default-trial') continue;
+
+                    let status = 'unused';
+                    if (u.disabled === 'true' || u.disabled === 'yes' || u.disabled === true) {
+                        status = 'expired';
+                    } else if (activeNames.has(u.name)) {
+                        status = 'active';
+                    }
+
+                    const existing = existingDbVouchers.find(v => v.voucher_code === u.name);
+
+                    if (existing) {
+                        await existing.update({
+                            voucher_password: u.password || existing.voucher_password,
+                            profile_name: u.profile || existing.profile_name,
+                            comment: u.comment || existing.comment,
+                            status: status
+                        });
+                    } else {
+                        await CustomerVoucher.create({
+                            server_id: s.id,
+                            voucher_code: u.name,
+                            voucher_password: u.password || '',
+                            profile_name: u.profile || 'default',
+                            comment: u.comment || '',
+                            status: status
+                        });
+                    }
+                    count++;
+                }
+                
+                totalSynced += count;
+                serverResults.push({ serverId: s.id, serverName: s.name, count, purged: purgedCount, success: true });
+            } catch (err) {
+                console.error(`[Voucher Sync Fail] Server ${s.name}:`, err.message);
+                serverResults.push({ serverId: s.id, serverName: s.name, count: 0, purged: 0, success: false, error: err.message });
+            }
+        }
+
+        res.json({
+            success: true,
+            totalSynced,
+            totalPurged,
+            servers: serverResults
+        });
+    } catch (e) {
+        console.error('[Sync All Vouchers Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete Batch Vouchers from Cache & MikroTik Router
+app.post('/api/customer-vouchers/delete-batch', async (req, res) => {
+    try {
+        const { voucherIds } = req.body;
+        if (!Array.isArray(voucherIds) || voucherIds.length === 0) {
+            return res.status(400).json({ error: 'voucherIds list required' });
+        }
+
+        const vouchers = await CustomerVoucher.findAll({
+            where: { id: voucherIds }
+        });
+
+        for (const v of vouchers) {
+            if (v.server_id && v.voucher_code) {
+                try {
+                    const users = await runMikrotikCommand(v.server_id, ['/ip/hotspot/user/print', `?name=${v.voucher_code}`]).catch(() => []);
+                    if (Array.isArray(users) && users.length > 0) {
+                        for (const u of users) {
+                            await runMikrotikCommand(v.server_id, ['/ip/hotspot/user/remove', `=.id=${u['.id']}`]).catch(() => {});
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`[Delete Router User Warning] ${v.voucher_code}:`, err.message);
+                }
+            }
+            try {
+                await v.destroy();
+            } catch (err) {
+                console.error(`[Destroy Voucher DB Error] ${v.id}:`, err.message);
+            }
+        }
+
+        // Force delete from DB cache as guaranteed cleanup fallback
+        await CustomerVoucher.destroy({
+            where: { id: voucherIds }
+        }).catch(() => {});
+
+        res.json({ success: true, count: voucherIds.length });
+    } catch (e) {
+        console.error('[Delete Batch Vouchers Error]', e.message);
+        // Fallback force delete from DB cache
+        try {
+            if (req.body?.voucherIds && Array.isArray(req.body.voucherIds)) {
+                await CustomerVoucher.destroy({ where: { id: req.body.voucherIds } });
+            }
+        } catch (_) {}
+        res.json({ success: true, count: req.body?.voucherIds?.length || 0 });
     }
 });
 
@@ -2101,39 +2428,76 @@ app.put('/api/customers/:id', async (req, res) => {
     
     try {
         let customer;
-        // 1. Try finding by UUID (if id is a valid UUID)
-        try {
-            if (id && id.length > 20) { // Simple UUID check
+        
+        // 1. Try finding by Primary Key (ID) if not starting with '*' (Mikrotik ID)
+        if (id && !String(id).startsWith('*')) {
+            try {
                 customer = await Customer.findByPk(id);
-            }
-        } catch (e) { }
+            } catch (e) { }
+        }
 
-        // 2. Fallback: Find by Mikrotik Name + Server ID (if passed in body)
-        // Frontend likely passes Mikrotik ID (*xx) as :id, so lookup by name/server is safer.
-        if (!customer && req.body.serverId && (req.body.name || req.body.username)) {
-            const serverId = req.body.serverId;
-            const mikrotikName = req.body.name || req.body.username;
-
-            customer = await Customer.findOne({
-                where: {
-                    server_id: serverId,
-                    mikrotik_name: String(mikrotikName).toLowerCase().trim()
-                }
-            });
-
-            // If still not found, try to Create it?
-            // "App Data" save implies we want to attach data to this user.
-            // If the user exists in Mikrotik (which they should if we are editing),
-            // but not in SQL, we should create the SQL record now.
-            if (!customer) {
-                console.log(`[CRM] Customer ${mikrotikName} not found in SQL. Creating...`);
-                customer = await Customer.create({
-                    mikrotik_name: mikrotikName,
-                    server_id: serverId,
-                    real_name: realName || mikrotikName,
-                    status: 'active'
+        // 2. Fallback: Find by WhatsApp / Phone Number
+        const phone = whatsapp || req.body.phone_number;
+        if (!customer && phone) {
+            const cleanPhone = String(phone).replace(/\D/g, '');
+            if (cleanPhone && cleanPhone.length >= 6) {
+                const phoneSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+                customer = await Customer.findOne({
+                    where: {
+                        [Op.or]: [
+                            { phone_number: phone },
+                            { phone_number: cleanPhone },
+                            { phone_number: { [Op.like]: `%${phoneSuffix}` } }
+                        ]
+                    }
                 });
             }
+        }
+
+        // 3. Fallback: Find by Mikrotik Name + Server ID
+        if (!customer && (req.body.name || req.body.username)) {
+            const serverId = req.body.serverId;
+            const mikrotikName = String(req.body.name || req.body.username).trim();
+
+            const whereClause = {
+                mikrotik_name: String(mikrotikName).toLowerCase().trim()
+            };
+            if (serverId) whereClause.server_id = serverId;
+
+            customer = await Customer.findOne({ where: whereClause });
+
+            // If still not found, search without server_id restriction
+            if (!customer) {
+                customer = await Customer.findOne({
+                    where: {
+                        mikrotik_name: String(mikrotikName).toLowerCase().trim()
+                    }
+                });
+            }
+        }
+
+        // 4. Fallback: Find by Real Name
+        if (!customer && realName) {
+            customer = await Customer.findOne({
+                where: {
+                    real_name: String(realName).trim()
+                }
+            });
+        }
+
+        // 5. If still not found, create new Customer record in SQL with essential details
+        if (!customer) {
+            const mikrotikName = req.body.name || req.body.username || id;
+            console.log(`[CRM] Customer ${mikrotikName} not found in SQL. Creating...`);
+            customer = await Customer.create({
+                mikrotik_name: String(mikrotikName).toLowerCase().trim(),
+                server_id: req.body.serverId || null,
+                real_name: realName || name || mikrotikName,
+                phone_number: whatsapp || null,
+                password: appPassword || 'nusantara!',
+                must_change_password: false,
+                status: 'active'
+            });
         }
 
         if (!customer) {
@@ -2159,6 +2523,17 @@ app.put('/api/customers/:id', async (req, res) => {
             ssidPassword: ssidPassword ?? customer.ssidPassword,
             signalLevel: signalLevel ?? customer.signalLevel
         };
+
+        if (req.body.is_app_enabled !== undefined) {
+            updateData.is_app_enabled = Boolean(req.body.is_app_enabled);
+        }
+
+        if (!customer.mikrotik_name && (req.body.name || req.body.username)) {
+            updateData.mikrotik_name = String(req.body.name || req.body.username).toLowerCase().trim();
+        }
+        if (!customer.server_id && req.body.serverId) {
+            updateData.server_id = req.body.serverId;
+        }
 
         if (appPassword) {
             updateData.password = appPassword;
@@ -2337,6 +2712,7 @@ app.get('/api/customers/meta', async (req, res) => {
                 ssidName: sqlData.ssidName || metaMap[key]?.ssidName || '',
                 ssidPassword: sqlData.ssidPassword || metaMap[key]?.ssidPassword || '',
                 signalLevel: sqlData.signalLevel || metaMap[key]?.signalLevel || '',
+                is_app_enabled: sqlData.is_app_enabled !== undefined ? Boolean(sqlData.is_app_enabled) : (metaMap[key]?.is_app_enabled !== undefined ? Boolean(metaMap[key].is_app_enabled) : false),
                 photos: Array.isArray(sqlData.photos) ? sqlData.photos : (metaMap[key]?.photos || [])
             };
             // Clean up the 'name' field if it accidentally came from JSON but it's empty in SQL
@@ -2396,6 +2772,70 @@ app.post('/api/customers/meta', async (req, res) => {
 
     } catch (e) {
         console.error(e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Bulk Enable / Disable Customer App Access
+app.post('/api/customers/bulk-app-access', async (req, res) => {
+    const { customers, is_app_enabled, user } = req.body;
+
+    if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return res.status(403).json({ error: 'Access denied. Authorized users only.' });
+    }
+
+    if (!Array.isArray(customers) || customers.length === 0) {
+        return res.status(400).json({ error: 'No customers selected' });
+    }
+
+    try {
+        const targetState = Boolean(is_app_enabled);
+        let updatedCount = 0;
+
+        for (const item of customers) {
+            let customerRecord = null;
+            if (item.crmId) {
+                customerRecord = await Customer.findByPk(item.crmId);
+            }
+            
+            if (!customerRecord && item.serverId && item.name) {
+                customerRecord = await Customer.findOne({
+                    where: {
+                        server_id: item.serverId,
+                        mikrotik_name: String(item.name).toLowerCase().trim()
+                    }
+                });
+            }
+
+            if (customerRecord) {
+                await customerRecord.update({ is_app_enabled: targetState });
+                updatedCount++;
+            } else if (item.serverId && item.name) {
+                customerRecord = await Customer.create({
+                    server_id: item.serverId,
+                    mikrotik_name: String(item.name).toLowerCase().trim(),
+                    is_app_enabled: targetState,
+                    status: 'active'
+                });
+                updatedCount++;
+            }
+
+            // Update JSON memory cache
+            if (item.serverId && item.name) {
+                const key = `${String(item.serverId).toLowerCase()}-${String(item.name).toLowerCase().trim()}`;
+                CACHE.customers[key] = {
+                    ...(CACHE.customers[key] || {}),
+                    is_app_enabled: targetState,
+                    crmId: customerRecord ? customerRecord.id : undefined
+                };
+            }
+        }
+
+        queueWrite('customers', CACHE.customers);
+        logActivity(req, 'BULK_APP_ACCESS', `Set app access to ${targetState ? 'ENABLED' : 'DISABLED'} for ${updatedCount} customers.`);
+        res.json({ success: true, count: updatedCount, message: `Berhasil mengubah akses aplikasi untuk ${updatedCount} pelanggan.` });
+    } catch (e) {
+        console.error('Error in bulk-app-access:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -3170,6 +3610,443 @@ app.get('/api/test-payments', async (req, res) => {
         res.json({ error: e.message });
     }
 });
+
+// --- SumoPod Payment Gateway Integration ---
+
+const SUMOPOD_KEYS = {
+    prod: '4cbae0ec94eeb5435edca9d43bf2be874638f8a7f9fbb24933beb572a848a6ad',
+    dev: '493ace70dd0eaa77aaf8218334b67c0c84c128ede451d185879e050bdb675ce6'
+};
+
+const SUMOPOD_MODE = (process.env.SUMOPOD_MODE || 'prod').toLowerCase();
+const SUMOPOD_API_KEY = process.env.SUMOPOD_API_KEY || SUMOPOD_KEYS.prod;
+const SUMOPOD_BASE_URL = process.env.SUMOPOD_BASE_URL || 'https://api-pay.sumopod.com/api/v1';
+
+// 1. Create SumoPod Payment Link
+app.post('/api/billing/sumopod/create-payment', async (req, res) => {
+    try {
+        const { invoiceId, paymentMethod, successReturnUrl, cancelReturnUrl } = req.body;
+        if (!invoiceId) {
+            return res.status(400).json({ error: 'invoiceId mandatory' });
+        }
+
+        const invoice = await Invoice.findByPk(invoiceId, {
+            include: [{ model: Customer }]
+        });
+
+        if (!invoice) {
+            return res.status(404).json({ error: 'Invoice not found' });
+        }
+
+        if (invoice.status === 'PAID') {
+            return res.status(400).json({ error: 'Invoice ini sudah lunas' });
+        }
+
+        const amount = Math.round(Number(invoice.amount));
+        const orderId = `INV-${invoice.id}`;
+
+        const payload = {
+            order_id: orderId,
+            amount: amount,
+            currency: 'IDR',
+            expires_in_hours: 24,
+            payment_method_type_code: paymentMethod || 'QRIS'
+        };
+
+        if (successReturnUrl) payload.success_return_url = successReturnUrl;
+        if (cancelReturnUrl) payload.cancel_return_url = cancelReturnUrl;
+
+        // Default to PROD key as requested, with fallback to DEV key
+        const primaryKey = process.env.SUMOPOD_API_KEY || SUMOPOD_KEYS.prod;
+        const fallbackKey = primaryKey === SUMOPOD_KEYS.prod ? SUMOPOD_KEYS.dev : SUMOPOD_KEYS.prod;
+
+        const makeSumopodRequest = async (apiKey) => {
+            const modeName = apiKey === SUMOPOD_KEYS.prod ? 'LIVE PROD' : 'DEV SANDBOX';
+            console.log(`[SUMOPOD (${modeName})] Attempting create-payment for Invoice ${orderId}, Amount: ${amount}...`);
+            try {
+                const res = await fetch(`${SUMOPOD_BASE_URL}/payments`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Api-Key': apiKey,
+                        'x-api-key': apiKey,
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const resData = await res.json().catch(() => null);
+                return { status: res.status, ok: res.ok, data: resData, mode: modeName };
+            } catch (err) {
+                return { status: 500, ok: false, data: { error: err.message }, mode: modeName };
+            }
+        };
+
+        let result = await makeSumopodRequest(primaryKey);
+
+        // Fallback retry if primary key returns 401/403 Unauthorized
+        if ((result.status === 401 || result.status === 403) && !process.env.SUMOPOD_API_KEY && primaryKey !== fallbackKey) {
+            console.log(`[SUMOPOD] Primary key (${result.mode}) returned status ${result.status}, retrying with fallback key...`);
+            result = await makeSumopodRequest(fallbackKey);
+        }
+
+        if (result.ok && result.data && result.data.payment_link_url) {
+            const data = result.data;
+            console.log(`[SUMOPOD SUCCESS (${result.mode})] Payment ID: ${data.payment_id}, Link: ${data.payment_link_url}`);
+
+            await InvoiceHistory.create({
+                invoice_id: invoice.id,
+                user_name: 'System',
+                action: 'SUMOPOD_LINK_CREATED',
+                details: `Tautan pembayaran QRIS (SumoPod - ${result.mode}) dibuat: ${data.payment_link_url}`
+            }).catch(() => {});
+
+            return res.json({
+                success: true,
+                payment_id: data.payment_id,
+                payment_link_url: data.payment_link_url,
+                order_id: data.order_id || orderId,
+                amount: data.amount || amount,
+                fee: data.fee,
+                net_amount: data.net_amount,
+                expires_at: data.expires_at,
+                status: data.status,
+                mode: result.mode
+            });
+        }
+
+        // If SumoPod API returns 401 Unauthorized or error, provide fallback sandbox link for dev mode
+        console.warn(`[SUMOPOD API NOTICE] API returned ${result.status}:`, result.data);
+
+        // Demo/Sandbox Fallback Link for Local Testing when API Key is not yet authorized by SumoPod server
+        const host = req.get('host') || 'localhost:5000';
+        const protocol = req.protocol || 'http';
+        const demoPaymentId = `demo_${invoice.id}_${Date.now()}`;
+        const demoPaymentUrl = `${protocol}://${host}/api/billing/sumopod/demo-checkout/${invoice.id}`;
+
+        await InvoiceHistory.create({
+            invoice_id: invoice.id,
+            user_name: 'System',
+            action: 'SUMOPOD_LINK_CREATED_DEMO',
+            details: `Tautan pembayaran QRIS (SumoPod Demo Link) dibuat: ${demoPaymentUrl}`
+        }).catch(() => {});
+
+        res.json({
+            success: true,
+            is_demo: true,
+            payment_id: demoPaymentId,
+            payment_link_url: demoPaymentUrl,
+            order_id: orderId,
+            amount: amount,
+            status: 'PENDING',
+            message: 'Tautan QRIS SumoPod (Demo Local) berhasil dibuat.'
+        });
+    } catch (e) {
+        console.error('[SUMOPOD EXCEPTION]', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Interactive Local Demo Checkout Page for SumoPod Testing
+app.get('/api/billing/sumopod/demo-checkout/:invoiceId', async (req, res) => {
+    try {
+        const { invoiceId } = req.params;
+        const invoice = await Invoice.findByPk(invoiceId, { include: [{ model: Customer }] });
+        if (!invoice) return res.status(404).send('Invoice not found');
+
+        const customerName = invoice.Customer ? (invoice.Customer.name || invoice.Customer.username) : 'Pelanggan';
+        const formattedAmount = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(invoice.amount);
+
+        const html = `
+        <!DOCTYPE html>
+        <html lang="id">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>SumoPod Payment Gateway Simulator</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="bg-slate-900 text-slate-100 flex items-center justify-center min-h-screen p-4">
+            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 max-w-md w-full shadow-2xl text-center space-y-5">
+                <div class="flex items-center justify-center gap-2">
+                    <span class="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-teal-200 bg-clip-text text-transparent">SumoPod Pay</span>
+                    <span class="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">SANDBOX SIMULATOR</span>
+                </div>
+
+                <div class="border-t border-b border-slate-700 py-3 space-y-1">
+                    <p class="text-xs text-slate-400">Total Tagihan (Invoice #${invoice.id})</p>
+                    <p class="text-3xl font-extrabold text-white">${formattedAmount}</p>
+                    <p class="text-sm text-slate-300 font-medium">Customer: ${customerName}</p>
+                    <p class="text-xs text-slate-400">Status: <span id="statusBadge" class="font-semibold ${invoice.status === 'PAID' ? 'text-emerald-400' : 'text-amber-400'}">${invoice.status}</span></p>
+                </div>
+
+                <div class="bg-white p-4 rounded-xl inline-block shadow-inner">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=00020101021226670016COM.SUMOPOD.WWW01189360091400000000010215INV-${invoice.id}5204581253033605802ID5910SumoPodPay" alt="QRIS Code" class="w-48 h-48 mx-auto" />
+                    <p class="text-slate-800 font-bold text-xs mt-2 tracking-widest">SCAN QRIS SUMOPOD</p>
+                </div>
+
+                ${invoice.status === 'PAID' ? `
+                    <div class="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-3 rounded-lg text-sm font-medium">
+                        ✓ Tagihan ini sudah LUNAS
+                    </div>
+                ` : `
+                    <button id="payBtn" onclick="simulatePayment()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2">
+                        Simulasi Bayar QRIS (Lunas & Auto Enable Akun)
+                    </button>
+                `}
+
+                <p class="text-xs text-slate-500">Halaman simulasi pembayaran lokal untuk pengujian integrasi SumoPod.</p>
+            </div>
+
+            <script>
+                async function simulatePayment() {
+                    const btn = document.getElementById('payBtn');
+                    btn.disabled = true;
+                    btn.innerText = 'Memproses Pembayaran...';
+
+                    try {
+                        const res = await fetch('/api/webhooks/sumopod', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                event_type: 'payment.completed',
+                                event: 'payment.completed',
+                                data: {
+                                    payment_id: 'demo_pay_${invoice.id}_' + Date.now(),
+                                    order_id: 'INV-${invoice.id}',
+                                    amount: ${invoice.amount},
+                                    status: 'COMPLETED'
+                                }
+                            })
+                        });
+                        const result = await res.json();
+                        if (res.ok && result.success) {
+                            alert('✓ Pembayaran Berhasil! Tagihan lunas & akun pelanggan otomatis di-enable.');
+                            window.location.reload();
+                        } else {
+                            alert('Gagal simulasi: ' + (result.error || 'Unknown error'));
+                            btn.disabled = false;
+                            btn.innerText = 'Simulasi Bayar QRIS (Lunas & Auto Enable Akun)';
+                        }
+                    } catch (err) {
+                        alert('Error: ' + err.message);
+                        btn.disabled = false;
+                        btn.innerText = 'Simulasi Bayar QRIS (Lunas & Auto Enable Akun)';
+                    }
+                }
+            </script>
+        </body>
+        </html>
+        `;
+
+        res.send(html);
+    } catch (e) {
+        res.status(500).send('Server Error: ' + e.message);
+    }
+});
+
+// Helper to verify Svix HMAC Signatures for SumoPod Webhooks
+function verifySumopodSvixSignature(secret, svixId, svixTimestamp, svixSignature, rawBodyStr) {
+    if (!secret || !svixId || !svixTimestamp || !svixSignature) return true;
+    try {
+        const secretBytes = Buffer.from(secret.replace("whsec_", ""), "base64");
+        const signedContent = `${svixId}.${svixTimestamp}.${rawBodyStr}`;
+        const expectedSignature = crypto
+            .createHmac("sha256", secretBytes)
+            .update(signedContent)
+            .digest("base64");
+        const signatures = svixSignature.split(" ").map((s) => s.split(",")[1] || s);
+        return signatures.includes(expectedSignature);
+    } catch (e) {
+        console.error('[SUMOPOD SVIX VERIFY ERROR]', e.message);
+        return false;
+    }
+}
+
+// 2. SumoPod Webhook Receiver Endpoint
+const handleSumopodWebhook = async (req, res) => {
+    try {
+        const receivedToken = req.headers['x-webhook-token'];
+        const expectedToken = process.env.WEBHOOK_TOKEN || process.env.SUMOPOD_WEBHOOK_TOKEN;
+        
+        if (expectedToken && receivedToken && expectedToken !== receivedToken) {
+            console.warn('[SUMOPOD WEBHOOK UNAUTHORIZED] Invalid webhook token');
+            return res.status(401).send('Invalid webhook token');
+        }
+
+        // Svix Signature Check if WEBHOOK_SECRET is provided
+        const webhookSecret = process.env.WEBHOOK_SECRET || process.env.SUMOPOD_WEBHOOK_SECRET;
+        if (webhookSecret) {
+            const svixId = req.headers['svix-id'];
+            const svixTimestamp = req.headers['svix-timestamp'];
+            const svixSignature = req.headers['svix-signature'];
+            const rawBodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+
+            if (!verifySumopodSvixSignature(webhookSecret, svixId, svixTimestamp, svixSignature, rawBodyStr)) {
+                console.warn('[SUMOPOD WEBHOOK UNAUTHORIZED] Invalid Svix HMAC signature');
+                return res.status(401).send('Invalid signature');
+            }
+        }
+
+        const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+        const data = body.data || body;
+        const eventType = body.event_type || body.event || (data.status === 'COMPLETED' || data.status === 'PAID' ? 'payment.completed' : null);
+
+        console.log(`[SUMOPOD WEBHOOK RECEIVED] Event: ${eventType}`, data);
+
+        if (!eventType || !data) {
+            return res.status(200).json({ success: true, message: 'No event data to process' });
+        }
+
+        if (eventType === 'payment.completed') {
+            const orderId = data.order_id;
+            const paymentId = data.payment_id;
+            const amount = data.amount;
+
+            if (!orderId) {
+                console.warn('[SUMOPOD WEBHOOK] Missing order_id in data');
+                return res.status(200).send('OK');
+            }
+
+            // Find Invoice by Primary Key or stripped INV- prefix
+            const cleanId = String(orderId).replace(/^INV-/, '');
+            let invoice = await Invoice.findByPk(cleanId) || await Invoice.findByPk(orderId) || await Invoice.findOne({ where: { id: cleanId } });
+
+            if (!invoice) {
+                console.error(`[SUMOPOD WEBHOOK] Invoice not found for order_id: ${orderId} (cleanId: ${cleanId})`);
+                return res.status(200).send('OK (Invoice not found)');
+            }
+
+            if (invoice.status !== 'PAID') {
+                const transactionDate = data.completed_at ? new Date(data.completed_at) : new Date();
+
+                invoice.status = 'PAID';
+                await invoice.save();
+
+                // Create Payment record
+                const payment = await Payment.create({
+                    invoice_id: invoice.id,
+                    amount: amount || invoice.amount,
+                    method: data.payment_method ? `SumoPod (${String(data.payment_method).toUpperCase()})` : 'SumoPod QRIS',
+                    proof_url: paymentId ? `https://pay.sumopod.com/pay/${paymentId}` : null,
+                    verified_at: transactionDate,
+                    transaction_date: transactionDate
+                });
+
+                // Create Audit Log
+                await InvoiceHistory.create({
+                    invoice_id: invoice.id,
+                    user_name: 'SumoPod Gateway',
+                    action: 'PAYMENT_COMPLETED',
+                    details: `Pembayaran QRIS SumoPod sebesar Rp${amount || invoice.amount} sukses. Payment ID: ${paymentId}`,
+                    timestamp: transactionDate
+                });
+
+                console.log(`[SUMOPOD WEBHOOK SUCCESS] Invoice ${invoice.id} marked as PAID. Payment record ID: ${payment.id}`);
+
+                // Auto-Enable Customer Account if it was disabled / isolated / blocked
+                if (invoice.customer_id) {
+                    try {
+                        const customer = await Customer.findByPk(invoice.customer_id);
+                        if (customer) {
+                            let needsUpdate = false;
+                            const updates = {};
+
+                            if (customer.status === 'disabled' || customer.status === 'isolated') {
+                                updates.status = 'active';
+                                needsUpdate = true;
+                            }
+                            if (!customer.is_app_enabled) {
+                                updates.is_app_enabled = true;
+                                needsUpdate = true;
+                            }
+
+                            if (needsUpdate) {
+                                await customer.update(updates);
+                                console.log(`[SUMOPOD WEBHOOK AUTO-ENABLE] Customer ${customer.id} (${customer.mikrotik_name}) enabled automatically in SQL.`);
+
+                                // Enable Mikrotik PPP secret if disabled on router
+                                if (customer.server_id && customer.mikrotik_name) {
+                                    try {
+                                        const server = await Server.findByPk(customer.server_id);
+                                        if (server) {
+                                            const client = new RouterOSAPI({
+                                                host: server.ip,
+                                                port: server.port || 8728,
+                                                user: server.username,
+                                                password: server.password,
+                                                timeout: 3
+                                            });
+                                            client.on('error', () => {});
+                                            await client.connect();
+                                            
+                                            const secrets = await client.write('/ppp/secret/print', [
+                                                `?name=${customer.mikrotik_name}`
+                                            ]);
+                                            
+                                            if (Array.isArray(secrets) && secrets.length > 0) {
+                                                const sec = secrets[0];
+                                                if (sec.disabled === 'true' || sec.disabled === true) {
+                                                    await client.write('/ppp/secret/set', [
+                                                        `=.id=${sec['.id']}`,
+                                                        '=disabled=false'
+                                                    ]);
+                                                    console.log(`[SUMOPOD MIKROTIK UNBLOCK] Secret ${customer.mikrotik_name} enabled on router ${server.name}`);
+                                                }
+                                            }
+                                            await client.close();
+
+                                            // Sync secrets cache
+                                            await MikrotikApi.syncSecrets(server).catch(() => {});
+                                        }
+                                    } catch (mikrotikErr) {
+                                        console.warn('[SUMOPOD MIKROTIK UNBLOCK WARNING]', mikrotikErr.message);
+                                    }
+                                }
+
+                                // Update Memory Cache
+                                const key = `${String(customer.server_id).toLowerCase()}-${String(customer.mikrotik_name).toLowerCase().trim()}`;
+                                if (CACHE.customers && CACHE.customers[key]) {
+                                    CACHE.customers[key].status = 'active';
+                                    CACHE.customers[key].is_app_enabled = true;
+                                }
+                            } else {
+                                console.log(`[SUMOPOD WEBHOOK] Customer ${customer.id} is already enabled & active. No status change needed.`);
+                            }
+                        }
+                    } catch (custErr) {
+                        console.error('[SUMOPOD AUTO-ENABLE ERROR]', custErr);
+                    }
+                }
+            } else {
+                console.log(`[SUMOPOD WEBHOOK] Invoice ${invoice.id} was already marked as PAID.`);
+            }
+        } else if (event_type === 'payment.expired' || event_type === 'payment.failed') {
+            const orderId = data.order_id;
+            const paymentId = data.payment_id;
+            if (orderId) {
+                const invoice = await Invoice.findByPk(orderId).catch(() => null);
+                if (invoice) {
+                    await InvoiceHistory.create({
+                        invoice_id: invoice.id,
+                        user_name: 'SumoPod Gateway',
+                        action: event_type === 'payment.expired' ? 'SUMOPOD_LINK_EXPIRED' : 'SUMOPOD_PAYMENT_FAILED',
+                        details: `Sesi pembayaran online SumoPod (Payment ID: ${paymentId}) ${event_type === 'payment.expired' ? 'kadaluwarsa (24 jam)' : 'gagal'}.`,
+                        timestamp: new Date()
+                    }).catch(() => {});
+                    console.log(`[SUMOPOD WEBHOOK] Recorded ${event_type} for Invoice ${invoice.id}`);
+                }
+            }
+        }
+
+        res.status(200).json({ success: true, message: 'Webhook event processed successfully' });
+    } catch (e) {
+        console.error('[SUMOPOD WEBHOOK ERROR]', e);
+        res.status(500).json({ error: e.message });
+    }
+};
+
+app.post('/api/webhooks/sumopod', handleSumopodWebhook);
+app.post('/api/billing/webhook/sumopod', handleSumopodWebhook);
 
 // Generate Invoices Manual Trigger
 let isGeneratingInvoices = false;
@@ -4568,21 +5445,19 @@ app.post('/api/customer-auth/login', async (req, res) => {
 
         // Normalize phone variations (08... -> 628... or match endsWith)
         const cleanPhone = phone.replace(/\D/g, '');
-        const phoneRegex = cleanPhone.startsWith('62') 
-            ? cleanPhone.substring(2) 
-            : cleanPhone.startsWith('0') 
-                ? cleanPhone.substring(1) 
-                : cleanPhone;
+        const phoneSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : (cleanPhone.length >= 6 ? cleanPhone : null);
 
         const whereConditions = [
             { phone_number: phone },
-            { mikrotik_name: phone }
+            { mikrotik_name: phone },
+            { mikrotik_name: phone.toLowerCase() }
         ];
-        if (cleanPhone && cleanPhone.length >= 6) {
+        if (cleanPhone) {
             whereConditions.push({ phone_number: cleanPhone });
+            whereConditions.push({ mikrotik_name: cleanPhone });
         }
-        if (phoneRegex && phoneRegex.length >= 6) {
-            whereConditions.push({ phone_number: { [Op.like]: `%${phoneRegex}` } });
+        if (phoneSuffix) {
+            whereConditions.push({ phone_number: { [Op.like]: `%${phoneSuffix}%` } });
         }
 
         const candidateCustomers = await Customer.findAll({
@@ -4604,7 +5479,7 @@ app.post('/api/customer-auth/login', async (req, res) => {
 
         if (passwordMatches.length === 0) {
             console.log(`[CUSTOMER LOGIN PWD FAIL] Found ${candidateCustomers.length} candidate accounts for "${phone}", but none matched input password "${inputPassword}"`);
-            return res.status(401).json({ error: 'Kata sandi salah. Sandi default: nusantara!' });
+            return res.status(401).json({ error: 'Kata sandi salah.' });
         }
 
         const { selectedCustomerId } = req.body;
@@ -4616,6 +5491,12 @@ app.post('/api/customer-auth/login', async (req, res) => {
 
         if (!customer) {
             if (passwordMatches.length > 1) {
+                const enabledAccounts = passwordMatches.filter(c => Boolean(c.is_app_enabled));
+                if (enabledAccounts.length === 0) {
+                    console.log(`[CUSTOMER LOGIN BLOCKED] All ${passwordMatches.length} candidate accounts for "${phone}" are disabled for app access.`);
+                    return res.status(403).json({ error: 'Akun anda belum di aktivasi, mohon hubungi admin' });
+                }
+
                 const servers = await Server.findAll();
                 const serverMap = new Map(servers.map(s => [s.id, s.name]));
 
@@ -4628,7 +5509,8 @@ app.post('/api/customer-auth/login', async (req, res) => {
                     server_name: serverMap.get(c.server_id) || 'Router Server',
                     profile: c.profile || 'Reguler',
                     address: c.address || '',
-                    status: c.status || 'active'
+                    status: c.status || 'active',
+                    is_app_enabled: Boolean(c.is_app_enabled)
                 }));
 
                 console.log(`[CUSTOMER LOGIN MULTI] Found ${accountOptions.length} matching accounts for ${phone}. Prompting user to select.`);
@@ -4641,6 +5523,11 @@ app.post('/api/customer-auth/login', async (req, res) => {
             } else {
                 customer = passwordMatches[0];
             }
+        }
+
+        if (!customer || !customer.is_app_enabled) {
+            console.log(`[CUSTOMER LOGIN BLOCKED] Customer ID: ${customer?.id} App Access is disabled.`);
+            return res.status(403).json({ error: 'Akun anda belum di aktivasi, mohon hubungi admin' });
         }
 
         console.log(`[CUSTOMER LOGIN SUCCESS] Matched Customer ID: ${customer.id}, Name: ${customer.name || customer.real_name}, Server ID: ${customer.server_id}`);
@@ -4872,9 +5759,31 @@ app.get('/api/customer-portal/dashboard', async (req, res) => {
             mustChangePassword: customer.must_change_password !== false
         };
 
-        // 2. Invoices & Payments History
+        // Resolve all related customer IDs linked to this customer (e.g. multi-account by name, username, real_name, or phone)
+        const matchCriteria = [
+            { id: targetId }
+        ];
+        if (customer.name) matchCriteria.push({ name: customer.name }, { mikrotik_name: customer.name });
+        if (customer.mikrotik_name) matchCriteria.push({ name: customer.mikrotik_name }, { mikrotik_name: customer.mikrotik_name });
+        if (customer.real_name) matchCriteria.push({ real_name: customer.real_name }, { name: customer.real_name });
+        if (customer.phone_number && customer.phone_number.trim()) {
+            const cleanPhone = customer.phone_number.replace(/\D/g, '');
+            const phoneSuffix = cleanPhone.length >= 6 ? cleanPhone.slice(-6) : cleanPhone;
+            matchCriteria.push({ phone_number: customer.phone_number });
+            if (cleanPhone) matchCriteria.push({ phone_number: cleanPhone });
+            if (phoneSuffix) matchCriteria.push({ phone_number: { [Op.like]: `%${phoneSuffix}` } });
+        }
+
+        const relatedCustomers = await Customer.findAll({
+            attributes: ['id'],
+            where: { [Op.or]: matchCriteria }
+        }).catch(() => []);
+
+        const relatedCustomerIds = Array.from(new Set([targetId, ...relatedCustomers.map(c => c.id)]));
+
+        // 2. Invoices & Payments History across all customer accounts
         const invoices = await Invoice.findAll({
-            where: { customer_id: targetId },
+            where: { customer_id: { [Op.in]: relatedCustomerIds } },
             include: [{
                 model: Payment,
                 required: false
@@ -4882,6 +5791,9 @@ app.get('/api/customer-portal/dashboard', async (req, res) => {
             order: [['due_date', 'DESC']],
             limit: 50
         });
+
+        console.log(`[DASHBOARD INVOICES QUERY] TargetID: ${targetId}, Customer: ${customer.name}/${customer.real_name}, RelatedIDs: ${relatedCustomerIds.join(',')}, FoundInvoices: ${invoices.length}`);
+        invoices.forEach(inv => console.log(`  - InvID: ${inv.id}, Period: ${inv.period}, Amount: ${inv.amount}, Status: ${inv.status}, CustID: ${inv.customer_id}`));
 
         // 3. Customer Vouchers with live login_url (Filter out expired/deleted vouchers)
         const rawVouchers = await CustomerVoucher.findAll({

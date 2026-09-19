@@ -99,21 +99,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                             comment: s.comment,
                             serverName: server.name,
                             serverId: server.id,
-                            crmId: meta.crmId, // Fix: Map the SQL UUID
-                            whatsapp: meta.whatsapp,
-                            realName: meta.realName || realName, // Fix: Prioritize SQL realName
+                            crmId: meta.crmId || s.crmId, // Fix: Map the SQL UUID
+                            whatsapp: meta.whatsapp || s.whatsapp,
+                            realName: meta.realName || s.realName || realName, // Fix: Prioritize SQL realName
                             registrationId: registrationId,
-                            lat: meta.lat,
-                            long: meta.long,
-                            photos: meta.photos || [],
-                            ktp: meta.ktp,
-                            activationDate: meta.activationDate,
-                            installationDate: meta.installationDate,
-                            sub_area_id: meta.sub_area_id,
-                            ssidName: meta.ssidName,
-                            ssidPassword: meta.ssidPassword,
-                            signalLevel: meta.signalLevel,
-                            odpId: meta.odp_id || meta.odpId
+                            lat: meta.lat || s.lat,
+                            long: meta.long || s.long,
+                            photos: meta.photos || s.photos || [],
+                            ktp: meta.ktp || s.ktp,
+                            activationDate: meta.activationDate || s.activationDate,
+                            installationDate: meta.installationDate || s.installationDate,
+                            sub_area_id: meta.sub_area_id || s.sub_area_id,
+                            ssidName: meta.ssidName || s.ssidName,
+                            ssidPassword: meta.ssidPassword || s.ssidPassword,
+                            signalLevel: meta.signalLevel || s.signalLevel,
+                            odpId: meta.odp_id || meta.odpId || s.odpId,
+                            appPassword: s.appPassword || meta.appPassword || 'nusantara!',
+                            is_app_enabled: meta.is_app_enabled !== undefined ? Boolean(meta.is_app_enabled) : Boolean(s.is_app_enabled || false)
                         });
                     });
                 } catch (e) {

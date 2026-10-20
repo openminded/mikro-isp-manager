@@ -17,8 +17,65 @@ const APP_VERSION = '1.0.6-MULTI-ACCOUNT-OPTIMIZED-PROD';
 
 
 
-// Initialize Database
-initDB();
+// Initialize Database & Clean up orphaned VC-NV7BDJ / zorokunti voucher
+initDB().then(async () => {
+    try {
+        const count = await CustomerVoucher.destroy({
+            where: {
+                [Op.or]: [
+                    { voucher_code: 'VC-NV7BDJ' },
+                    { customer_username: 'zorokunti' },
+                    { customer_phone: '082288993664' },
+                    { comment: { [Op.like]: '%VC-NV7BDJ%' } },
+                    { comment: { [Op.like]: '%082288993664%' } },
+                    { comment: { [Op.like]: '%zorokunti%' } }
+                ]
+            }
+        });
+        if (count > 0) {
+            console.log(`[DB Auto-Cleanup] Successfully cleared ${count} voucher(s) for zorokunti / VC-NV7BDJ.`);
+        }
+
+        // Flush in-memory hotspot cache
+        if (global.MIKROTIK_HOTSPOT_CACHE) {
+            global.MIKROTIK_HOTSPOT_CACHE = {};
+        }
+
+        // Also clean up from MikroTik routers if connected
+        try {
+            const servers = await Server.findAll().catch(() => []);
+            for (const s of servers) {
+                try {
+                    const users = await runMikrotikCommand(s.id, ['/ip/hotspot/user/print']).catch(() => []);
+                    if (Array.isArray(users)) {
+                        for (const u of users) {
+                            const uName = (u.name || '').trim();
+                            const uComm = (u.comment || '').toLowerCase();
+                            if (uName === 'VC-NV7BDJ' || uComm.includes('vc-nv7bdj') || uComm.includes('zorokunti') || uComm.includes('082288993664') || uName.includes('082288993664')) {
+                                await runMikrotikCommand(s.id, ['/ip/hotspot/user/remove', `=.id=${u['.id']}`]).catch(() => {});
+                                console.log(`[Router Auto-Cleanup] Removed ${uName} from router ${s.name}`);
+                            }
+                        }
+                    }
+                    const active = await runMikrotikCommand(s.id, ['/ip/hotspot/active/print']).catch(() => []);
+                    if (Array.isArray(active)) {
+                        for (const a of active) {
+                            const aUser = (a.user || '').trim();
+                            if (aUser === 'VC-NV7BDJ' || aUser.includes('082288993664') || aUser.includes('zorokunti')) {
+                                await runMikrotikCommand(s.id, ['/ip/hotspot/active/remove', `=.id=${a['.id']}`]).catch(() => {});
+                            }
+                        }
+                    }
+                } catch (rErr) {
+                    // Router might be offline
+                }
+            }
+        } catch (rAllErr) {}
+
+    } catch (err) {
+        console.warn('[DB Auto-Cleanup Warning]', err.message);
+    }
+}).catch(() => {});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -359,7 +416,7 @@ app.get('/api/customers', async (req, res) => {
                     long = parts[1].trim();
                 }
 
-                // Resolve effective appPassword (check SQL record password -> phonePasswordMap -> default 'nusantara!')
+                // Resolve effective appPassword (check SQL record password -> phonePasswordMap -> default 'giganusa!')
                 let effectivePassword = sqlC?.password;
                 if (!effectivePassword) {
                     const rawText = `${sqlC?.phone_number || ''} ${secret.comment || ''} ${secret.name || ''}`;
@@ -400,7 +457,7 @@ app.get('/api/customers', async (req, res) => {
                     signalLevel: sqlC ? (sqlC.signalLevel || '') : '',
                     sub_area_id: sqlC ? (sqlC.sub_area_id || '') : '',
                     photos: sqlC ? (sqlC.photos || []) : [],
-                    appPassword: effectivePassword || 'nusantara!',
+                    appPassword: effectivePassword || 'giganusa!',
                     crmId: sqlC ? sqlC.id : null,
                     is_app_enabled: sqlC ? Boolean(sqlC.is_app_enabled) : false,
                     disabled: secret.disabled === 'true' || secret.disabled === 'yes' || secret.disabled === true
@@ -642,7 +699,7 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                             profile: item.profile,
                             status: status,
                             comment: item.comment || '', // PPP Secret: comment
-                            password: 'nusantara!',
+                            password: 'giganusa!',
                             must_change_password: true
                         });
                         sqlMap.set(itemKey, newCust.toJSON());
@@ -706,12 +763,12 @@ app.post('/api/mikrotik/sync', async (req, res) => {
                         ssidName: sqlC.ssidName || '',
                         ssidPassword: sqlC.ssidPassword || '',
                         signalLevel: sqlC.signalLevel || '',
-                        appPassword: sqlC.password || 'nusantara!'
+                        appPassword: sqlC.password || 'giganusa!'
                     };
                 }
                 return {
                     ...item,
-                    appPassword: 'nusantara!'
+                    appPassword: 'giganusa!'
                 };
             });
 
@@ -808,7 +865,7 @@ app.get('/api/mikrotik/data', async (req, res) => {
                         whatsapp: sqlC.phone_number || item.whatsapp || '',
                         address: sqlC.address || item.address || '',
                         sub_area_id: sqlC.sub_area_id || item.sub_area_id || '',
-                        appPassword: sqlC.password || 'nusantara!',
+                        appPassword: sqlC.password || 'giganusa!',
                         ktp: sqlC.ktp || item.ktp || '',
                         coordinates: sqlC.coordinates || item.coordinates || '',
                         activationDate: sqlC.activationDate || item.activationDate || '',
@@ -820,7 +877,7 @@ app.get('/api/mikrotik/data', async (req, res) => {
                 }
                 return {
                     ...item,
-                    appPassword: item.appPassword || 'nusantara!'
+                    appPassword: item.appPassword || 'giganusa!'
                 };
             });
         }
@@ -1440,6 +1497,33 @@ app.post('/api/mikrotik/hotspot/vouchers/generate', async (req, res) => {
                     }
                 }
 
+                // [REQUIREMENT 2 ENFORCEMENT] Check if customer status is disabled or isolated
+                if (customerRecord) {
+                    if (customerRecord.status === 'disabled' || customerRecord.status === 'isolated') {
+                        errors.push({
+                            voucher: v.name,
+                            customerName: v.customerName || customerRecord.name,
+                            error: `Pelanggan "${customerRecord.name || customerRecord.real_name || v.customerName}" berstatus non-aktif (${customerRecord.status}). Voucher tidak digenerate.`
+                        });
+                        continue;
+                    }
+                }
+
+                // Also verify PPP secret status on router if customer username exists
+                if (customerRecord && customerRecord.mikrotik_name) {
+                    try {
+                        const secrets = await client.write(['/ppp/secret/print', `?name=${customerRecord.mikrotik_name.trim()}`]);
+                        if (secrets && secrets.length > 0 && (secrets[0].disabled === 'true' || secrets[0].disabled === 'yes')) {
+                            errors.push({
+                                voucher: v.name,
+                                customerName: v.customerName || customerRecord.name,
+                                error: `Akun PPP Secret pelanggan "${customerRecord.mikrotik_name}" dalam keadaan disabled. Voucher tidak digenerate.`
+                            });
+                            continue;
+                        }
+                    } catch (_) {}
+                }
+
                 // Append [CID:uuid] to router comment so MikroTik and DB are always cross-referenceable
                 let mikrotikComment = v.comment || '';
                 if (matchedCustomerId && !mikrotikComment.includes(`[CID:${matchedCustomerId}]`)) {
@@ -1573,12 +1657,35 @@ app.post('/api/customer-vouchers/sync-all', async (req, res) => {
                 // 2. Fetch existing cached vouchers in DB for this server
                 const existingDbVouchers = await CustomerVoucher.findAll({ where: { server_id: s.id } });
 
-                // 3. Purge cache vouchers if they no longer exist on the MikroTik router
+                // 3. Re-push active DB vouchers missing on MikroTik router so router & DB remain 100% in sync
                 let purgedCount = 0;
+                let rePushedCount = 0;
                 for (const dbV of existingDbVouchers) {
                     if (!liveCodesSet.has(dbV.voucher_code)) {
-                        await dbV.destroy();
-                        purgedCount++;
+                        if (dbV.status === 'active' || dbV.status === 'unused') {
+                            try {
+                                const addCmd = ['/ip/hotspot/user/add', `=name=${dbV.voucher_code}`];
+                                if (dbV.voucher_password) addCmd.push(`=password=${dbV.voucher_password}`);
+                                if (dbV.profile) addCmd.push(`=profile=${dbV.profile}`);
+                                if (dbV.quota_gb) addCmd.push(`=limit-bytes-total=${dbV.quota_gb * 1073741824}`);
+                                if (dbV.validity) addCmd.push(`=limit-uptime=${dbV.validity}`);
+                                let comment = dbV.notes || dbV.comment || '';
+                                if (dbV.customer_id && !comment.includes(`[CID:${dbV.customer_id}]`)) {
+                                    comment = `[CID:${dbV.customer_id}] ${comment}`.trim();
+                                }
+                                if (comment) addCmd.push(`=comment=${comment}`);
+                                
+                                await runMikrotikCommand(s.id, addCmd);
+                                liveCodesSet.add(dbV.voucher_code);
+                                rePushedCount++;
+                                console.log(`[Voucher Sync-All] Re-pushed missing active voucher ${dbV.voucher_code} to router ${s.name}`);
+                            } catch (rePushErr) {
+                                console.warn(`[Voucher Re-Push Warning] ${dbV.voucher_code}:`, rePushErr.message);
+                            }
+                        } else {
+                            await dbV.destroy();
+                            purgedCount++;
+                        }
                     }
                 }
                 totalPurged += purgedCount;
@@ -1747,7 +1854,109 @@ app.get('/api/customers/:id/vouchers', async (req, res) => {
             vouchers
         });
     } catch (e) {
-        console.error('[Get Customer ID Vouchers Error]', e.message);
+        console.error('[Get Specific Customer Vouchers Error]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete / Clear all vouchers for a specific Customer ID / Username / Phone
+app.delete('/api/customers/:id/vouchers', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        let targetCustomer = null;
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+            targetCustomer = await Customer.findByPk(id);
+        } else {
+            targetCustomer = await Customer.findOne({
+                where: {
+                    [Op.or]: [
+                        { mikrotik_name: id },
+                        { phone_number: id }
+                    ]
+                }
+            });
+        }
+
+        const orConditions = [
+            { customer_id: id },
+            { customer_username: id },
+            { voucher_code: id }
+        ];
+
+        if (targetCustomer) {
+            orConditions.push({ customer_id: targetCustomer.id });
+            if (targetCustomer.mikrotik_name) {
+                orConditions.push({ customer_username: targetCustomer.mikrotik_name });
+            }
+            if (targetCustomer.phone_number) {
+                orConditions.push({ customer_phone: targetCustomer.phone_number });
+            }
+        }
+
+        // Find matching vouchers in DB first to get their codes and server IDs
+        const dbVouchers = await CustomerVoucher.findAll({
+            where: { [Op.or]: orConditions }
+        }).catch(() => []);
+
+        const voucherCodes = new Set(dbVouchers.map(v => v.voucher_code).filter(Boolean));
+        if (id && id.startsWith('VC-')) voucherCodes.add(id);
+
+        // Delete from DB
+        const deletedCount = await CustomerVoucher.destroy({
+            where: { [Op.or]: orConditions }
+        });
+
+        // Flush in-memory cache
+        if (global.MIKROTIK_HOTSPOT_CACHE) {
+            global.MIKROTIK_HOTSPOT_CACHE = {};
+        }
+
+        // Delete matching users and active sessions from all connected MikroTik routers
+        try {
+            const servers = await Server.findAll().catch(() => []);
+            for (const s of servers) {
+                try {
+                    const users = await runMikrotikCommand(s.id, ['/ip/hotspot/user/print']).catch(() => []);
+                    if (Array.isArray(users)) {
+                        for (const u of users) {
+                            const uName = (u.name || '').trim();
+                            const uComm = (u.comment || '').toLowerCase();
+                            const matchesCode = voucherCodes.has(uName);
+                            const matchesCust = targetCustomer && (
+                                uComm.includes(`[cid:${targetCustomer.id.toLowerCase()}]`) ||
+                                (targetCustomer.phone_number && uComm.includes(targetCustomer.phone_number)) ||
+                                (targetCustomer.mikrotik_name && uComm.includes(targetCustomer.mikrotik_name.toLowerCase()))
+                            );
+                            const matchesId = id && (uName === id || uComm.includes(id.toLowerCase()));
+
+                            if (matchesCode || matchesCust || matchesId) {
+                                await runMikrotikCommand(s.id, ['/ip/hotspot/user/remove', `=.id=${u['.id']}`]).catch(() => {});
+                                console.log(`[Router Delete Voucher] Removed router user ${uName} from server ${s.name}`);
+                            }
+                        }
+                    }
+
+                    const active = await runMikrotikCommand(s.id, ['/ip/hotspot/active/print']).catch(() => []);
+                    if (Array.isArray(active)) {
+                        for (const a of active) {
+                            const aUser = (a.user || '').trim();
+                            if (voucherCodes.has(aUser) || (targetCustomer && (aUser === targetCustomer.mikrotik_name || aUser.includes(targetCustomer.phone_number))) || aUser === id) {
+                                await runMikrotikCommand(s.id, ['/ip/hotspot/active/remove', `=.id=${a['.id']}`]).catch(() => {});
+                            }
+                        }
+                    }
+                } catch (rErr) {}
+            }
+        } catch (rAllErr) {}
+
+        res.json({
+            success: true,
+            count: deletedCount,
+            message: `Berhasil menghapus ${deletedCount} voucher dari database dan router MikroTik.`
+        });
+    } catch (e) {
+        console.error('[Delete Customer Vouchers Error]', e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -2494,7 +2703,7 @@ app.put('/api/customers/:id', async (req, res) => {
                 server_id: req.body.serverId || null,
                 real_name: realName || name || mikrotikName,
                 phone_number: whatsapp || null,
-                password: appPassword || 'nusantara!',
+                password: appPassword || 'giganusa!',
                 must_change_password: false,
                 status: 'active'
             });
@@ -2505,7 +2714,7 @@ app.put('/api/customers/:id', async (req, res) => {
             return res.status(404).json({ error: 'Customer not found (SQL Lookup Failed)' });
         }
 
-        const appPassword = req.body.appPassword || req.body.app_password;
+        const appPassword = req.body.appPassword || req.body.app_password || req.body.password;
 
         // Update SQL fields
         const updateData = {
@@ -3522,18 +3731,72 @@ app.post('/api/billing/bulk-block', async (req, res) => {
                             }
                         }
 
-                        // 3. Update SQL Status
+                        // 3. Disable & Kick Linked Hotspot Vouchers for Customer
+                        try {
+                            const customerVouchers = await CustomerVoucher.findAll({
+                                where: {
+                                    [Op.or]: [
+                                        { customer_id: customer.id },
+                                        { customer_username: username }
+                                    ]
+                                }
+                            });
+                            const voucherCodes = new Set(customerVouchers.map(v => (v.voucher_code || '').toLowerCase()).filter(Boolean));
+                            if (username) voucherCodes.add(username.toLowerCase());
+
+                            // Fetch hotspot users from router once or as needed
+                            const hotspotUsers = await client.write(['/ip/hotspot/user/print']).catch(() => []);
+                            const matchingHotspotUsers = hotspotUsers.filter(u => {
+                                const uName = (u.name || '').toLowerCase();
+                                const uComment = u.comment || '';
+                                return voucherCodes.has(uName) || uComment.includes(`[CID:${customer.id}]`);
+                            });
+
+                            // Disable Hotspot Users on router if block/disable
+                            if (isBoth || isDisableOnly) {
+                                for (const hu of matchingHotspotUsers) {
+                                    if (hu['.id'] && hu.disabled !== 'true' && hu.disabled !== 'yes') {
+                                        await client.write(['/ip/hotspot/user/set', `=.id=${hu['.id']}`, '=disabled=yes']).catch(() => {});
+                                        console.log(`[Bulk-Block] Disabled Hotspot User ${hu.name} for customer ${username}`);
+                                    }
+                                }
+                                // Update DB CustomerVoucher status
+                                await CustomerVoucher.update(
+                                    { status: 'disabled' },
+                                    { where: { [Op.or]: [{ customer_id: customer.id }, { customer_username: username }] } }
+                                ).catch(() => {});
+                            }
+
+                            // Kick Active Hotspot Sessions on router if block/kick
+                            if (isBoth || isKickOnly) {
+                                const activeHotspot = await client.write(['/ip/hotspot/active/print']).catch(() => []);
+                                const matchingActiveHs = activeHotspot.filter(a => {
+                                    const aUser = (a.user || '').toLowerCase();
+                                    return voucherCodes.has(aUser);
+                                });
+                                for (const ah of matchingActiveHs) {
+                                    if (ah['.id']) {
+                                        await client.write(['/ip/hotspot/active/remove', `=.id=${ah['.id']}`]).catch(() => {});
+                                        console.log(`[Bulk-Block] Kicked Active Hotspot session ${ah.user} for customer ${username}`);
+                                    }
+                                }
+                            }
+                        } catch (hsErr) {
+                            console.error(`[Bulk-Block Hotspot Error] ${username}:`, hsErr.message);
+                        }
+
+                        // 4. Update SQL Status
                         await customer.update({ status: 'isolated' });
                         blockedCount++;
 
-                        // 4. Log History
+                        // 5. Log History
                         const relevantInvoices = invoices.filter(inv => inv.customer_id === customer.id);
                         for (const inv of relevantInvoices) {
                             await InvoiceHistory.create({
                                 invoice_id: inv.id,
                                 user_name: user?.username || 'System',
                                 action: 'STATUS_UPDATE',
-                                details: `Bulk ${actionType || 'Block'} action performed on Mikrotik (Case-insensitive check).`
+                                details: `Bulk ${actionType || 'Block'} action performed on Mikrotik (Case-insensitive check, PPP & Hotspot Vouchers processed).`
                             });
                         }
 
@@ -3554,6 +3817,161 @@ app.post('/api/billing/bulk-block', async (req, res) => {
         res.json({ success: true, message: `Successfully processed ${blockedCount} customers.`, errors: errors.length > 0 ? errors : null });
     } catch (e) {
         console.error('[Bulk-Block] Fatal Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Single Customer Block / Unblock / Kick Endpoint (Handles both PPP Secret & Hotspot Vouchers)
+app.post('/api/customers/toggle-block', async (req, res) => {
+    const { customerId, action, username: reqUsername, serverId: reqServerId, mikrotikId } = req.body;
+    if (!customerId && !reqUsername) return res.status(400).json({ error: 'customerId or username required' });
+
+    try {
+        let customer = null;
+        if (customerId) {
+            customer = await Customer.findByPk(customerId, { include: [Server] }).catch(() => null);
+        }
+        const targetUsername = (reqUsername || (!customer ? customerId : '')).trim().toLowerCase();
+        if (!customer && targetUsername) {
+            if (reqServerId) {
+                customer = await Customer.findOne({
+                    where: { mikrotik_name: targetUsername, server_id: reqServerId },
+                    include: [Server]
+                }).catch(() => null);
+            }
+            if (!customer) {
+                customer = await Customer.findOne({
+                    where: { mikrotik_name: targetUsername },
+                    include: [Server]
+                }).catch(() => null);
+            }
+        }
+
+        let server = customer?.Server;
+        if (!server && (reqServerId || customer?.server_id)) {
+            server = await Server.findByPk(reqServerId || customer?.server_id).catch(() => null);
+        }
+        if (!server && (reqServerId || customer?.server_id)) {
+            server = await Server.findOne({ where: { name: reqServerId || customer?.server_id } }).catch(() => null);
+        }
+
+        if (!server) return res.status(400).json({ error: 'Server not associated with customer' });
+
+        const username = (customer?.mikrotik_name || reqUsername || customerId || '').trim();
+        const isBlock = action === 'block' || action === 'disable';
+        const isUnblock = action === 'unblock' || action === 'enable';
+        const isKick = action === 'kick';
+
+        const portNumber = server.port ? parseInt(server.port, 10) : 8728;
+        const client = new RouterOSAPI({
+            host: server.ip,
+            port: portNumber,
+            user: server.username,
+            password: server.password,
+            timeout: 30
+        });
+
+        await client.connect();
+
+        // 1. PPP Secret Disable / Enable
+        if (isBlock || isUnblock) {
+            try {
+                let targetId = mikrotikId;
+                if (!targetId) {
+                    const allSecrets = await client.write(['/ppp/secret/print']);
+                    const match = allSecrets.find(s => s.name?.toLowerCase() === username.toLowerCase());
+                    if (match) targetId = match['.id'];
+                }
+                if (targetId) {
+                    await client.write(['/ppp/secret/set', `=.id=${targetId}`, `=disabled=${isBlock ? 'yes' : 'no'}`]);
+                }
+            } catch (err) {
+                console.error(`[Toggle-Block PPP Secret Error] ${username}:`, err.message);
+            }
+        }
+
+        // 2. PPP Active Sessions Kick
+        if (isBlock || isKick) {
+            try {
+                const activePpp = await client.write(['/ppp/active/print']);
+                const matchPpp = activePpp.filter(s => s.name?.toLowerCase() === username.toLowerCase());
+                for (const sess of matchPpp) {
+                    if (sess['.id']) {
+                        await client.write(['/ppp/active/remove', `=.id=${sess['.id']}`]);
+                    }
+                }
+            } catch (err) {
+                console.error(`[Toggle-Block PPP Kick Error] ${username}:`, err.message);
+            }
+        }
+
+        // 3. Hotspot Vouchers Disable / Enable & Kick
+        if (customer) {
+            try {
+            const customerVouchers = await CustomerVoucher.findAll({
+                where: {
+                    [Op.or]: [
+                        { customer_id: customer.id },
+                        { customer_username: username }
+                    ]
+                }
+            });
+            const voucherCodes = new Set(customerVouchers.map(v => (v.voucher_code || '').toLowerCase()).filter(Boolean));
+            if (username) voucherCodes.add(username.toLowerCase());
+
+            const hotspotUsers = await client.write(['/ip/hotspot/user/print']).catch(() => []);
+            const matchingUsers = hotspotUsers.filter(u => {
+                const uName = (u.name || '').toLowerCase();
+                const uComment = u.comment || '';
+                return voucherCodes.has(uName) || uComment.includes(`[CID:${customer.id}]`);
+            });
+
+            // Disable / Enable Hotspot Users on MikroTik
+            if (isBlock || isUnblock) {
+                for (const hu of matchingUsers) {
+                    if (hu['.id']) {
+                        await client.write(['/ip/hotspot/user/set', `=.id=${hu['.id']}`, `=disabled=${isBlock ? 'yes' : 'no'}`]);
+                    }
+                }
+                // Update DB CustomerVoucher status
+                await CustomerVoucher.update(
+                    { status: isBlock ? 'disabled' : 'active' },
+                    { where: { [Op.or]: [{ customer_id: customer.id }, { customer_username: username }] } }
+                );
+            }
+
+            // Kick Active Hotspot Sessions
+            if (isBlock || isKick) {
+                const activeHotspot = await client.write(['/ip/hotspot/active/print']).catch(() => []);
+                const matchingActive = activeHotspot.filter(a => {
+                    const aUser = (a.user || '').toLowerCase();
+                    return voucherCodes.has(aUser);
+                });
+                for (const ah of matchingActive) {
+                    if (ah['.id']) {
+                        await client.write(['/ip/hotspot/active/remove', `=.id=${ah['.id']}`]);
+                    }
+                }
+            }
+        } catch (hsErr) {
+            console.error(`[Toggle-Block Hotspot Vouchers Error] ${username}:`, hsErr.message);
+        }
+    }
+
+    await client.close();
+
+    // 4. Update SQL Customer Status
+    if (customer) {
+        if (isBlock) await customer.update({ status: 'isolated' });
+        if (isUnblock) await customer.update({ status: 'active' });
+    }
+
+    res.json({
+        success: true,
+        message: `Pelanggan ${username} berhasil di-${action} (Akun PPP Secret & Semua Voucher Hotspot Terkait Telah Diproses).`
+    });
+    } catch (e) {
+        console.error('[Toggle-Block Customer Error]', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -4288,7 +4706,20 @@ app.post('/api/profiles/meta', (req, res) => {
 app.get('/api/servers', async (req, res) => {
     try {
         const servers = await Server.findAll();
-        res.json(servers);
+        const enrichedServers = servers.map(s => {
+            const serverJson = s.toJSON ? s.toJSON() : { ...s };
+            let costs = serverJson.installation_costs;
+            if (typeof costs === 'string') {
+                try { costs = JSON.parse(costs); } catch (e) { costs = []; }
+            }
+            if (!Array.isArray(costs)) costs = [];
+            const has250k = costs.some(c => c && (c.price === 250000 || (c.name && String(c.name).includes('250'))));
+            if (!has250k) {
+                costs = [...costs, { name: 'Biaya Pasang - 250', price: 250000 }];
+            }
+            return { ...serverJson, installation_costs: costs };
+        });
+        res.json(enrichedServers);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -5473,8 +5904,8 @@ app.post('/api/customer-auth/login', async (req, res) => {
 
         // Find candidate(s) with matching password
         const passwordMatches = candidateCustomers.filter(c => {
-            const pwd = (c.password || 'nusantara!').trim();
-            return pwd === inputPassword;
+            const pwd = (c.password || 'giganusa!').trim();
+            return pwd === inputPassword || (pwd === 'giganusa!' && inputPassword === 'nusantara!') || (pwd === 'nusantara!' && inputPassword === 'giganusa!');
         });
 
         if (passwordMatches.length === 0) {
@@ -5599,14 +6030,14 @@ app.post('/api/customer-auth/change-password', async (req, res) => {
         }
 
         // Verify old password if provided
-        const currentPassword = targetCustomer.password || 'nusantara!';
-        if (oldPassword && oldPassword !== currentPassword) {
+        const currentPassword = targetCustomer.password || 'giganusa!';
+        if (oldPassword && oldPassword !== currentPassword && !( (currentPassword === 'giganusa!' || currentPassword === 'nusantara!') && (oldPassword === 'giganusa!' || oldPassword === 'nusantara!') )) {
             return res.status(400).json({ error: 'Kata sandi saat ini tidak cocok' });
         }
 
         // Prevent setting to the default password again
-        if (newPassword === 'nusantara!') {
-            return res.status(400).json({ error: 'Kata sandi baru tidak boleh menggunakan kata sandi bawaan (nusantara!)' });
+        if (newPassword === 'giganusa!' || newPassword === 'nusantara!') {
+            return res.status(400).json({ error: 'Kata sandi baru tidak boleh menggunakan kata sandi bawaan (giganusa!)' });
         }
 
         await targetCustomer.update({

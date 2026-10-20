@@ -19,5 +19,5 @@ class AppConstants {
 
   static const String appName = 'GigaNusa';
   static const String appVersion = '1.0.0';
-  static const String defaultPassword = 'nusantara!';
+  static const String defaultPassword = 'giganusa!';
 }

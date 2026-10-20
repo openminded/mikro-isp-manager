@@ -140,6 +140,11 @@ export function HotspotManager() {
         setLoading(true);
         setFetchError(null);
         try {
+            // Always fetch DB vouchers in background so allVouchers badge is populated
+            MikrotikApi.getCustomerVouchers({ limit: 'all' })
+                .then(v => setAllVouchers(Array.isArray(v) ? v : []))
+                .catch(() => {});
+
             switch (activeTab) {
                 case 'users': {
                     if (!selectedServerId) break;
@@ -593,6 +598,15 @@ export function HotspotManager() {
                     >
                         <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
                         Refresh
+                    </button>
+                    <button
+                        onClick={handleSyncAllVouchersCache}
+                        disabled={isSyncingAllVouchers || !selectedServerId}
+                        className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 transition-all rounded-lg text-xs sm:text-sm font-semibold disabled:opacity-50 shadow-sm"
+                        title="Sinkronkan Voucher dari DB Cache ke Router MikroTik"
+                    >
+                        <RefreshCw className={cn("w-4 h-4 text-orange-600", isSyncingAllVouchers && "animate-spin")} />
+                        Sinkron Router
                     </button>
                     <button
                         onClick={() => handleOpenVoucherModal()}

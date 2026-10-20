@@ -300,6 +300,33 @@ export function Registration({ view = 'active' }: RegistrationProps) {
         setIsInstallOpen(true);
     };
 
+    const getAvailableInstallationCosts = () => {
+        const server = servers.find(s => s.name === selectedReg?.locationId);
+        const serverCosts: { name: string; price: number }[] = (server?.installation_costs && Array.isArray(server.installation_costs))
+            ? server.installation_costs
+            : [];
+
+        const costs: { name: string; price: number }[] = [...serverCosts];
+
+        // If no costs are configured on the server, provide default 200k option
+        if (costs.length === 0) {
+            costs.push({ name: 'Biaya Pasang - 200', price: 200000 });
+        }
+
+        // Ensure "Biaya Pasang - 250" (Rp 250.000) option is always available
+        const has250k = costs.some(c => c.price === 250000 || (c.name && c.name.toLowerCase().includes('250')));
+        if (!has250k) {
+            costs.push({ name: 'Biaya Pasang - 250', price: 250000 });
+        }
+
+        // Keep current selected cost if it came from pre-existing registration data
+        if (installData.costName && !costs.some(c => c.name === installData.costName)) {
+            costs.push({ name: installData.costName, price: installData.costPrice || 0 });
+        }
+
+        return costs;
+    };
+
     const handleInstallSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedReg) return;
@@ -1165,15 +1192,15 @@ export function Registration({ view = 'active' }: RegistrationProps) {
                                             return;
                                         }
                                         // Find cost
-                                        const server = servers.find(s => s.name === selectedReg?.locationId);
-                                        const cost = server?.installation_costs?.find((c: any) => c.name === name);
+                                        const cost = getAvailableInstallationCosts().find((c: any) => c.name === name);
+                                        // Use found cost
                                         if (cost) {
                                             setInstallData({ ...installData, costName: cost.name, costPrice: cost.price });
                                         }
                                     }}
                                 >
                                     <option value="">Select Cost...</option>
-                                    {selectedReg && servers.find(s => s.name === selectedReg.locationId)?.installation_costs?.map((c: any, idx: number) => (
+                                    {getAvailableInstallationCosts().map((c: any, idx: number) => (
                                         <option key={idx} value={c.name}>
                                             {c.name} - Rp {c.price.toLocaleString('id-ID')}
                                         </option>

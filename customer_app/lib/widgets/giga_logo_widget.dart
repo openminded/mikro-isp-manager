@@ -201,55 +201,39 @@ class _GigaLogoPainter extends CustomPainter {
     final h = size.height;
 
     final cx = w / 2;
-    final cy = h / 2;
+
+    // Canonical proportions (based on 500x500 design grid)
+    final archCenterY = h * 0.49;
+    final legBottomY = h * 0.77;
+    final strokeWidth = w * 0.18;
+    final legRadius = w * 0.31;
 
     // Optional ambient glow background
     if (showGlow) {
       final glowPaint = Paint()
         ..color = const Color(0xFFFF8A84).withOpacity(0.32)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18);
-      canvas.drawCircle(Offset(cx + w * 0.15, cy - h * 0.05), w * 0.28, glowPaint);
+      canvas.drawCircle(Offset(cx, archCenterY + h * 0.07), w * 0.28, glowPaint);
     }
 
-    // 1. Draw Arch Symbol (Slate color #333745 or theme variant)
+    // 1. Draw Slate Arch (Proportional U-shape with rounded caps)
     final archPaint = Paint()
       ..color = archColor
-      ..style = PaintingStyle.fill
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
       ..isAntiAlias = true;
 
-    final outerRadius = w * 0.41;
-    final innerRadius = w * 0.23;
-    final strokeThickness = outerRadius - innerRadius;
-    final legBottom = h * 0.88;
-    final archCenterY = h * 0.44;
-
     final archPath = Path();
-    archPath.addArc(
-      Rect.fromCircle(center: Offset(cx, archCenterY), radius: outerRadius),
-      pi,
-      pi,
-    );
-    archPath.lineTo(cx + outerRadius, legBottom);
-    archPath.arcToPoint(
-      Offset(cx + innerRadius, legBottom),
-      radius: Radius.circular(strokeThickness / 2),
-      clockwise: true,
-    );
-    archPath.lineTo(cx + innerRadius, archCenterY);
+    archPath.moveTo(cx - legRadius, legBottomY);
+    archPath.lineTo(cx - legRadius, archCenterY);
     archPath.arcTo(
-      Rect.fromCircle(center: Offset(cx, archCenterY), radius: innerRadius),
-      0,
-      -pi,
+      Rect.fromCircle(center: Offset(cx, archCenterY), radius: legRadius),
+      pi,
+      pi,
       false,
     );
-    archPath.lineTo(cx - innerRadius, legBottom);
-    archPath.arcToPoint(
-      Offset(cx - outerRadius, legBottom),
-      radius: Radius.circular(strokeThickness / 2),
-      clockwise: true,
-    );
-    archPath.lineTo(cx - outerRadius, archCenterY);
-    archPath.close();
+    archPath.lineTo(cx + legRadius, legBottomY);
 
     canvas.drawPath(archPath, archPaint);
 
@@ -259,8 +243,8 @@ class _GigaLogoPainter extends CustomPainter {
       ..style = PaintingStyle.fill
       ..isAntiAlias = true;
 
-    final circleRadius = w * 0.21;
-    final circleCenter = Offset(cx, archCenterY + circleRadius * 0.45);
+    final circleRadius = w * 0.176;
+    final circleCenter = Offset(cx, archCenterY + h * 0.07);
     canvas.drawCircle(circleCenter, circleRadius, circlePaint);
   }
 

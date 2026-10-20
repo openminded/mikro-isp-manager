@@ -2,8 +2,8 @@
   <!-- GigaNusa Vertical Stacked Logo Branding (Ratio 3:4) -->
   <g transform="translate(75, 40) scale(0.9)">
     <!-- Logo Mark 1:1 -->
-    <path d="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z" fill="#333745" />
-    <circle cx="250" cy="275" r="90" fill="#FF333A" />
+    <path d="M 95 385 L 95 245 A 155 155 0 0 1 405 245 L 405 385" fill="none" stroke="#333745" stroke-width="90" stroke-linecap="round" />
+    <circle cx="250" cy="280" r="88" fill="#FF333A" />
   </g>
 
   <!-- Typography Center Aligned -->

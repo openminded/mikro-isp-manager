@@ -454,7 +454,10 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
     const [formData, setFormData] = useState({
         name: '', ip: '', port: 8728, username: '', password: '',
         payment_due_days: 20, // Default 20th
-        installation_costs: [] as { name: string; price: number }[], // Setup installation costs
+        installation_costs: [
+            { name: 'Biaya Pasang - 200', price: 200000 },
+            { name: 'Biaya Pasang - 250', price: 250000 }
+        ] as { name: string; price: number }[], // Setup installation costs
         lat: '' as number | '',
         lng: '' as number | '',
         hotspot_login_url: ''
@@ -476,7 +479,14 @@ function ServerModal({ isOpen, onClose, onSave, initialData }: { isOpen: boolean
                 hotspot_login_url: (initialData as any).hotspot_login_url || ''
             });
         } else {
-            setFormData({ name: '', ip: '', port: 8728, username: '', password: '', payment_due_days: 7, installation_costs: [], lat: '', lng: '', hotspot_login_url: '' });
+            setFormData({
+                name: '', ip: '', port: 8728, username: '', password: '', payment_due_days: 7,
+                installation_costs: [
+                    { name: 'Biaya Pasang - 200', price: 200000 },
+                    { name: 'Biaya Pasang - 250', price: 250000 }
+                ],
+                lat: '', lng: '', hotspot_login_url: ''
+            });
         }
     }, [initialData, isOpen]);
 

@@ -10,11 +10,13 @@
         android:pivotY="250">
         <!-- Outer Arch -->
         <path
-            android:fillColor="#333745"
-            android:pathData="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z"/>
+            android:strokeColor="#333745"
+            android:strokeWidth="90"
+            android:strokeLineCap="round"
+            android:pathData="M 95 385 L 95 245 A 155 155 0 0 1 405 245 L 405 385"/>
         <!-- Red Sphere -->
         <path
             android:fillColor="#FF333A"
-            android:pathData="M 250 185 A 90 90 0 1 1 249.99 185 Z"/>
+            android:pathData="M 250 192 A 88 88 0 1 1 249.99 192 Z"/>
     </group>
 </vector>

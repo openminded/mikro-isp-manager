@@ -45,8 +45,8 @@ export const Customer = sequelize.define('Customer', {
     ssidName: { type: DataTypes.STRING, allowNull: true },
     ssidPassword: { type: DataTypes.STRING, allowNull: true },
     signalLevel: { type: DataTypes.STRING, allowNull: true }, // Redaman
-    // Consumer portal credentials
-    password: { type: DataTypes.STRING, defaultValue: 'nusantara!' },
+    // GigaNusa portal credentials
+    password: { type: DataTypes.STRING, defaultValue: 'giganusa!' },
     must_change_password: { type: DataTypes.BOOLEAN, defaultValue: true },
     is_app_enabled: { type: DataTypes.BOOLEAN, defaultValue: false }
 });
@@ -268,7 +268,7 @@ export const initDB = async () => {
             await sequelize.getQueryInterface().addColumn('Customers', 'password', {
                 type: DataTypes.STRING,
                 allowNull: true,
-                defaultValue: 'nusantara!'
+                defaultValue: 'giganusa!'
             });
         }
 
@@ -353,6 +353,26 @@ export const initDB = async () => {
         await sequelize.query('CREATE INDEX IF NOT EXISTS idx_vouchers_customer_id ON CustomerVouchers(customer_id);').catch(() => {});
         await sequelize.query('CREATE INDEX IF NOT EXISTS idx_vouchers_customer_phone ON CustomerVouchers(customer_phone);').catch(() => {});
         await sequelize.query('CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON Invoices(customer_id);').catch(() => {});
+
+        // Ensure standard installation costs for existing servers (Biaya Pasang - 250)
+        try {
+            const allServers = await Server.findAll();
+            for (const s of allServers) {
+                let costs = s.installation_costs;
+                if (typeof costs === 'string') {
+                    try { costs = JSON.parse(costs); } catch (e) { costs = []; }
+                }
+                if (!Array.isArray(costs)) costs = [];
+                const has250k = costs.some(c => c && (c.price === 250000 || (c.name && String(c.name).includes('250'))));
+                if (!has250k) {
+                    costs.push({ name: 'Biaya Pasang - 250', price: 250000 });
+                    await s.update({ installation_costs: costs });
+                    console.log(`[Database] Added Biaya Pasang - 250 to Server: ${s.name}`);
+                }
+            }
+        } catch (e) {
+            console.warn('[Database] Could not update installation costs on servers:', e.message);
+        }
 
         console.log('[Database] Models synchronized.');
         

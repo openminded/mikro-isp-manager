@@ -12,7 +12,7 @@ import type { Customer } from '@/types';
 function AppPasswordCell({ password }: { password?: string }) {
     const [show, setShow] = useState(false);
     const [copied, setCopied] = useState(false);
-    const pwd = password || 'nusantara!';
+    const pwd = password || 'giganusa!';
 
     const handleCopy = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -138,7 +138,7 @@ export function Customers() {
         if (selectedCustomers.length === 0) return;
 
         const actionText = enable ? 'Mengaktifkan' : 'Menonaktifkan';
-        if (!confirm(`${actionText} akses aplikasi Consumer App untuk ${selectedCustomers.length} pelanggan terpilih?`)) return;
+        if (!confirm(`${actionText} akses Aplikasi GigaNusa untuk ${selectedCustomers.length} pelanggan terpilih?`)) return;
 
         setIsBulkAppUpdating(true);
         try {
@@ -282,63 +282,57 @@ export function Customers() {
         setIsModalOpen(true);
     };
 
-    const handleSave = async (data: any, targetServerId: string, saveMode: 'server' | 'app') => {
+    const handleSave = async (data: any, targetServerId: string, _saveMode?: 'server' | 'app') => {
         setSaving(true);
         try {
             const server = servers.find(s => s.id === targetServerId);
             if (!server) throw new Error("Target server not found");
 
-            if (saveMode === 'server') {
-                // 1. Mikrotik Update
-                const mikrotikPayload = {
-                    name: data.name,
-                    password: data.password,
-                    profile: data.profile,
-                    comment: data.comment,
-                    "remote-address": data["remote-address"],
-                };
+            // 1. Mikrotik Update
+            const mikrotikPayload = {
+                name: data.name,
+                password: data.password,
+                profile: data.profile,
+                comment: data.comment,
+                "remote-address": data["remote-address"],
+            };
 
-                if (editingCustomer) {
-                    await MikrotikApi.updatePPPSecret(server, editingCustomer.id, mikrotikPayload);
-                } else {
-                    await MikrotikApi.addPPPSecret(server, mikrotikPayload);
-                }
-
-                // Sync cache immediately to reflect changes in the list
-                await MikrotikApi.syncSecrets(server);
-                setSyncStatus({ type: 'success', message: editingCustomer ? "Mikrotik Secret updated successfully." : "Mikrotik Secret created successfully." });
+            if (editingCustomer) {
+                await MikrotikApi.updatePPPSecret(server, editingCustomer.id, mikrotikPayload);
+            } else {
+                await MikrotikApi.addPPPSecret(server, mikrotikPayload);
             }
 
-            // [NEW] Always update CRM / Local Data if we are editing an existing customer
-            // or if we just created one (though for new ones, the sync above creates the SQL record).
-            // To be safe, we always call the PUT endpoint if we have basic CRM info.
-            if (editingCustomer || saveMode === 'app') {
-                // Use CRM ID (SQL UUID) if available, otherwise fallback to name/Mikrotik ID
-                const customerId = editingCustomer?.crmId || (editingCustomer ? (editingCustomer.id || editingCustomer.name) : data.name);
-                
-                await axios.put(`/api/customers/${customerId}`, {
-                    serverId: targetServerId,
-                    name: data.name,
-                    realName: data.realName,
-                    appPassword: data.appPassword,
-                    is_app_enabled: data.is_app_enabled,
-                    whatsapp: data.whatsapp,
-                    address: data.address,
-                    sub_area_id: data.sub_area_id,
-                    coordinates: `${data.lat || ''},${data.long || ''}`,
-                    ktp: data.ktp,
-                    activationDate: data.activationDate,
-                    installationDate: data.installationDate,
-                    photos: data.photos,
-                    ssidName: data.ssidName,
-                    ssidPassword: data.ssidPassword,
-                    signalLevel: data.signalLevel
-                });
+            // Sync cache immediately to reflect changes in the list
+            await MikrotikApi.syncSecrets(server);
 
-                if (saveMode === 'app') {
-                    setSyncStatus({ type: 'success', message: "App Data updated successfully (Saved to DB)." });
-                }
-            }
+            // 2. ALWAYS update CRM / SQL Database (including Mobile App Password)
+            const customerId = editingCustomer?.crmId || (editingCustomer ? (editingCustomer.id || editingCustomer.name) : data.name);
+            const effectiveAppPassword = data.appPassword && data.appPassword !== 'giganusa!'
+                ? data.appPassword
+                : (data.password || data.appPassword || 'giganusa!');
+
+            await axios.put(`/api/customers/${customerId}`, {
+                serverId: targetServerId,
+                name: data.name,
+                realName: data.realName,
+                password: data.password,
+                appPassword: effectiveAppPassword,
+                is_app_enabled: data.is_app_enabled,
+                whatsapp: data.whatsapp,
+                address: data.address,
+                sub_area_id: data.sub_area_id,
+                coordinates: `${data.lat || ''},${data.long || ''}`,
+                ktp: data.ktp,
+                activationDate: data.activationDate,
+                installationDate: data.installationDate,
+                photos: data.photos,
+                ssidName: data.ssidName,
+                ssidPassword: data.ssidPassword,
+                signalLevel: data.signalLevel
+            });
+
+            setSyncStatus({ type: 'success', message: "Data pelanggan dan sandi aplikasi berhasil disimpan." });
 
             // Also Handle Registration Real Name Update if needed (Legacy Support)
             if (data.realName && editingCustomer?.registrationId) {
@@ -362,29 +356,47 @@ export function Customers() {
     };
 
     const toggleCustomer = async (customer: Customer) => {
-        const server = servers.find(s => s.id === customer.serverId);
-        if (!server) return;
-
         try {
             const newDisabledState = !customer.disabled;
-            await MikrotikApi.togglePPPSecret(server, customer.id, newDisabledState);
+            const action = newDisabledState ? 'block' : 'unblock';
+            const server = servers.find(s => s.id === customer.serverId || s.name === customer.serverName || s.name === customer.serverId);
 
-            // If blocking, also remove active session to kick the user
-            if (newDisabledState) {
-                await MikrotikApi.removeActivePppSession(server, customer.name);
-                setSyncStatus({ type: 'success', message: `Blocked ${customer.name} and terminated active session.` });
-            } else {
-                setSyncStatus({ type: 'success', message: `Unblocked ${customer.name}.` });
+            if (!server) {
+                throw new Error(`Server tidak ditemukan untuk pelanggan ${customer.name} (serverId: ${customer.serverId})`);
             }
 
-            // Sync cache to reflect status change
-            await MikrotikApi.syncSecrets(server);
+            // === Direct Mikrotik Toggle (Most Reliable) ===
+            // Uses customer.id which is the Mikrotik .id (e.g. *1B) — exactly what /ppp/secret/set needs
+            await MikrotikApi.togglePPPSecret(server, customer.id, newDisabledState);
 
-            // Optimistic Update is tricky with global context unless we expose a setter or just refresh
+            // Kick active PPP session on block
+            if (newDisabledState) {
+                await MikrotikApi.removeActivePppSession(server, customer.name);
+            }
+
+            // === Background: also try to update DB status & block hotspot vouchers via backend ===
+            // Fire-and-forget — if it fails, the Mikrotik toggle already succeeded
+            const targetId = customer.crmId || customer.name;
+            MikrotikApi.toggleCustomerBlock(targetId, action, {
+                username: customer.name,
+                serverId: customer.serverId,
+                id: customer.id
+            }).catch(e => console.warn('[Background] DB toggle-block failed (non-fatal):', e.message));
+
+            // Sync Mikrotik cache for this server so the UI reflects the change
+            await MikrotikApi.syncSecrets(server).catch(console.error);
+
+            setSyncStatus({
+                type: 'success',
+                message: newDisabledState
+                    ? `Akun PPP & Voucher Hotspot ${customer.name} berhasil diblokir.`
+                    : `Akun PPP & Voucher Hotspot ${customer.name} berhasil diaktifkan kembali.`
+            });
+
             refreshCustomers(true);
         } catch (e: any) {
             console.error(e);
-            setSyncStatus({ type: 'error', message: `Failed to toggle status: ${e.message}` });
+            setSyncStatus({ type: 'error', message: `Gagal mengubah status pelanggan: ${e.message}` });
         }
     };
 
@@ -563,7 +575,7 @@ export function Customers() {
                             onClick={() => handleBulkAppAccess(true)}
                             disabled={isBulkAppUpdating}
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
-                            title="Aktifkan akses login Consumer App untuk pelanggan terpilih"
+                            title="Aktifkan akses login Aplikasi GigaNusa untuk pelanggan terpilih"
                         >
                             <Smartphone className="w-4 h-4" />
                             Enable App ({selectedKeys.size})
@@ -572,7 +584,7 @@ export function Customers() {
                             onClick={() => handleBulkAppAccess(false)}
                             disabled={isBulkAppUpdating}
                             className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
-                            title="Nonaktifkan akses login Consumer App untuk pelanggan terpilih"
+                            title="Nonaktifkan akses login Aplikasi GigaNusa untuk pelanggan terpilih"
                         >
                             <Smartphone className="w-4 h-4 text-slate-400" />
                             Disable App ({selectedKeys.size})
@@ -683,18 +695,17 @@ export function Customers() {
                                         </td>
                                         <td className="px-6 py-3">
                                             <AppPasswordCell password={customer.appPassword} />
-                                        </td>
-                                        <td className="px-6 py-3">
+                                                                    <td className="px-6 py-3">
                                             {customer.is_app_enabled ? (
-                                                <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200" title="Akses Consumer App Aktif">
+                                                <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200" title="Akses Aplikasi GigaNusa Aktif">
                                                     <Smartphone className="w-3 h-3 text-emerald-600" /> Aktif
                                                 </span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1 text-slate-500 text-xs font-medium bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200" title="Akses Consumer App Nonaktif (Belum Diaktivasi)">
+                                                <span className="inline-flex items-center gap-1 text-slate-500 text-xs font-medium bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200" title="Akses Aplikasi GigaNusa Nonaktif (Belum Diaktivasi)">
                                                     <Smartphone className="w-3 h-3 text-slate-400" /> Nonaktif
                                                 </span>
                                             )}
-                                        </td>
+                                        </td>               </td>
                                         <td className="px-6 py-3 text-slate-600">{customer.comment || '-'}</td>
                                         <td className="px-6 py-3">
                                             <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
@@ -1052,7 +1063,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
         name: '',
         realName: '',
         password: '',
-        appPassword: 'nusantara!',
+        appPassword: 'giganusa!',
         is_app_enabled: false,
         comment: '',
         profile: 'default',
@@ -1129,7 +1140,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 name: initialData.name,
                 realName: initialData.realName || '',
                 password: initialData.password || '',
-                appPassword: initialData.appPassword || 'nusantara!',
+                appPassword: initialData.appPassword || initialData.password || 'giganusa!',
                 is_app_enabled: Boolean(initialData.is_app_enabled),
                 comment: initialData.comment || '',
                 profile: initialData.profile,
@@ -1152,7 +1163,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                 name: '',
                 realName: '',
                 password: '',
-                appPassword: 'nusantara!',
+                appPassword: 'giganusa!',
                 is_app_enabled: false,
                 comment: '',
                 profile: 'default',
@@ -1379,17 +1390,16 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                                 value={formData.realName} onChange={e => setFormData({ ...formData, realName: e.target.value })}
                                             />
                                             <p className="text-xs text-slate-400">Updates linked registration data</p>
-                                        </div>
-                                        <div className="space-y-2">
+                                                              <div className="space-y-2">
                                             <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                                <span>Sandi Aplikasi Customer (App Login)</span>
-                                                <span className="text-xs text-amber-600 font-normal">Default: nusantara!</span>
+                                                <span>Sandi Aplikasi Customer (GigaNusa App Login)</span>
+                                                <span className="text-xs text-amber-600 font-normal">Default: giganusa!</span>
                                             </label>
                                             <div className="relative">
                                                 <input
                                                     type={showAppPwd ? "text" : "password"}
                                                     className="w-full pl-3 pr-10 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono text-sm"
-                                                    placeholder="nusantara!"
+                                                    placeholder="giganusa!"
                                                     value={formData.appPassword}
                                                     onChange={e => setFormData({ ...formData, appPassword: e.target.value })}
                                                 />
@@ -1401,7 +1411,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                                     {showAppPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                                 </button>
                                             </div>
-                                            <p className="text-xs text-slate-400">Kata sandi untuk login pelanggan di Aplikasi Mobile / Portal Client.</p>
+                                            <p className="text-xs text-slate-400">Kata sandi untuk login pelanggan di Aplikasi GigaNusa Mobile / Portal Client.</p>
                                         </div>
 
                                         {/* App Activation Toggle */}
@@ -1409,10 +1419,10 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                             <div className="flex items-center gap-2.5">
                                                 <Smartphone className="w-5 h-5 text-primary" />
                                                 <div>
-                                                    <div className="text-sm font-medium text-slate-800">Aktivasi Akses Consumer App</div>
+                                                    <div className="text-sm font-medium text-slate-800">Aktivasi Akses Aplikasi GigaNusa</div>
                                                     <div className="text-xs text-slate-500">Default: Nonaktif. Jika dinonaktifkan, muncul notifikasi saat login: "Akun anda belum di aktivasi, mohon hubungi admin".</div>
                                                 </div>
-                                            </div>
+                                            </div>                     </div>
                                             <input
                                                 type="checkbox"
                                                 className="w-5 h-5 accent-primary rounded cursor-pointer"

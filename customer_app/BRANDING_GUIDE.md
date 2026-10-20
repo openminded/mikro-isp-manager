@@ -26,14 +26,15 @@ Logo GigaNusa dibangun dengan sistem kisi geometris yang teratur (Vector ViewBox
 ### Detail Ukuran Geometri Logo:
 - **ViewBox Standard**: `500 x 500` (Canvas Square `1:1`)
 - **Outer Arch (Slate `#333745`)**:
-  - Pusat Arc Atas: `(250, 250)`
-  - Jari-jari Luar (*Outer Radius*): `130px` (Lebar Total Arch = `260px`)
-  - Jari-jari Dalam (*Inner Radius*): `88px` (Rongga Dalam = `176px`)
-  - Ketebalan Arch (*Stroke Width*): `42px`
-  - Kaki Arch: Memanjang vertikal hingga `Y = 420px` dengan *Rounded Bottom Cap* radius `21px`.
+  - Pusat Arc Atas: `(250, 245)`
+  - Radius Garis Tengah (*Centerline Radius*): `155px`
+  - Ketebalan Arch (*Stroke Width*): `90px` (Dengan *Round StrokeCap*)
+  - Jari-jari Luar (*Outer Radius*): `200px` (Lebar Total Arch = `400px`)
+  - Jari-jari Dalam (*Inner Radius*): `110px` (Rongga Dalam = `220px`)
+  - Kaki Arch: Memanjang vertikal hingga `Y = 385px` dengan *Rounded Cap* (Ujung Bawah `Y = 430px`).
 - **Inner Circle / Sphere (Bright Red `#FF333A`)**:
-  - Titik Pusat Circle: `(250, 275)` (Berada di tengah cavity arch)
-  - Jari-jari Circle (*Radius*): `90px` (Diameter = `180px`)
+  - Titik Pusat Circle: `(250, 280)` (Berada presisi di tengah cavity arch)
+  - Jari-jari Circle (*Radius*): `88px` (Diameter = `176px`), proporsional dengan margin bersih di dalam arch.
 
 ---
 

@@ -280,6 +280,7 @@ export function HotspotVoucherModal({
     // Quota Settings (1G, 5G, 10G, or custom increment per GB)
     const [quotaGb, setQuotaGb] = useState<number>(5);
     const [validity, setValidity] = useState<string>('30d');
+    const [vouchersPerCustomer, setVouchersPerCustomer] = useState<number>(1);
 
     // Voucher format options
     const [codeOption, setCodeOption] = useState<'username' | 'random'>('random');
@@ -371,8 +372,8 @@ export function HotspotVoucherModal({
             if (c.serverId !== currentServerId) return false;
 
             // Status filter
-            if (statusFilter === 'active' && c.disabled) return false;
-            if (statusFilter === 'disabled' && !c.disabled) return false;
+            if (statusFilter === 'active' && (c.disabled || c.status === 'disabled' || c.status === 'isolated')) return false;
+            if (statusFilter === 'disabled' && (!c.disabled && c.status !== 'disabled' && c.status !== 'isolated')) return false;
 
             // Profile filter
             if (profileFilter !== 'all' && c.profile !== profileFilter) return false;
@@ -406,8 +407,13 @@ export function HotspotVoucherModal({
     const quotaLabel = `${quotaGb} GB`;
     const totalBytes = quotaGb * 1073741824;
 
-    // Toggle customer selection
-    const handleToggleSelectOne = (id: string) => {
+    // Toggle customer selection with disabled check
+    const handleToggleSelectOne = (cust: any) => {
+        if (cust.disabled || cust.status === 'disabled' || cust.status === 'isolated') {
+            alert(`Pelanggan "${cust.realName || cust.name}" berstatus non-aktif (disabled/isolir). Voucher hotspot hanya dapat digenerate untuk pelanggan yang aktif.`);
+            return;
+        }
+        const id = cust.id || cust.name;
         const next = new Set(selectedCustomerIds);
         if (next.has(id)) next.delete(id);
         else next.add(id);
@@ -417,7 +423,11 @@ export function HotspotVoucherModal({
     const handleSelectAllFiltered = (checked: boolean) => {
         const next = new Set(selectedCustomerIds);
         if (checked) {
-            filteredCustomers.forEach(c => next.add(c.id || c.name));
+            filteredCustomers.forEach(c => {
+                if (!c.disabled && c.status !== 'disabled' && c.status !== 'isolated') {
+                    next.add(c.id || c.name);
+                }
+            });
         } else {
             filteredCustomers.forEach(c => next.delete(c.id || c.name));
         }
@@ -460,51 +470,59 @@ export function HotspotVoucherModal({
                 if (onSuccess) onSuccess();
             } else if (mode === 'customer') {
                 // Generate untuk customer yang terfilter & terpilih
-                const targetCustomers = customers.filter(c => selectedCustomerIds.has(c.id || c.name));
+                const rawSelected = customers.filter(c => selectedCustomerIds.has(c.id || c.name));
+                const targetCustomers = rawSelected.filter(c => !c.disabled && c.status !== 'disabled' && c.status !== 'isolated');
+                const skippedCount = rawSelected.length - targetCustomers.length;
 
                 if (targetCustomers.length === 0) {
-                    throw new Error('Pilih minimal 1 pelanggan dari tabel hasil filter');
+                    if (skippedCount > 0) {
+                        throw new Error(`${skippedCount} pelanggan yang dipilih berstatus non-aktif/disabled. Voucher hanya bisa dibuat untuk pelanggan aktif.`);
+                    }
+                    throw new Error('Pilih minimal 1 pelanggan aktif dari tabel hasil filter');
                 }
 
                 const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
                 const vouchersToCreate: any[] = [];
+                const qtyPerCust = Math.max(1, vouchersPerCustomer);
 
                 targetCustomers.forEach(cust => {
-                    let code = '';
-                    if (codeOption === 'username') {
-                        code = cust.name;
-                    } else {
-                        code = prefix;
-                        for (let j = 0; j < codeLength; j++) {
-                            code += chars.charAt(Math.floor(Math.random() * chars.length));
+                    for (let k = 0; k < qtyPerCust; k++) {
+                        let code = '';
+                        if (codeOption === 'username') {
+                            code = qtyPerCust > 1 ? `${cust.name}-${k + 1}` : cust.name;
+                        } else {
+                            code = prefix;
+                            for (let j = 0; j < codeLength; j++) {
+                                code += chars.charAt(Math.floor(Math.random() * chars.length));
+                            }
                         }
+
+                        const pass = voucherType === 'single' ? code : (
+                            chars.charAt(Math.floor(Math.random() * chars.length)) +
+                            Math.floor(1000 + Math.random() * 9000).toString()
+                        );
+
+                        const subAreaObj = subAreas.find(s => s.id === cust.sub_area_id);
+                        const displayName = cust.realName || cust.comment || cust.name;
+
+                        vouchersToCreate.push({
+                            name: code,
+                            password: pass,
+                            profile: selectedProfile,
+                            server: selectedHotspotServer || undefined,
+                            'limit-bytes-total': String(totalBytes),
+                            'limit-uptime': validity,
+                            comment: `[Kuota ${quotaLabel}] ${displayName} (${cust.name})${qtyPerCust > 1 ? ` #${k + 1}` : ''}`,
+                            // Customer Metadata for DB linking & client-side access
+                            customerId: cust.crmId || cust.id,
+                            customerName: displayName,
+                            customerUsername: cust.name,
+                            customerPhone: cust.whatsapp || '',
+                            subAreaName: subAreaObj?.name || '',
+                            quotaGb: quotaGb,
+                            validity: validity
+                        });
                     }
-
-                    const pass = voucherType === 'single' ? code : (
-                        chars.charAt(Math.floor(Math.random() * chars.length)) +
-                        Math.floor(1000 + Math.random() * 9000).toString()
-                    );
-
-                    const subAreaObj = subAreas.find(s => s.id === cust.sub_area_id);
-                    const displayName = cust.realName || cust.comment || cust.name;
-
-                    vouchersToCreate.push({
-                        name: code,
-                        password: pass,
-                        profile: selectedProfile,
-                        server: selectedHotspotServer || undefined,
-                        'limit-bytes-total': String(totalBytes),
-                        'limit-uptime': validity,
-                        comment: `[Kuota ${quotaLabel}] ${displayName} (${cust.name})`,
-                        // Customer Metadata for DB linking & client-side access
-                        customerId: cust.crmId || cust.id,
-                        customerName: displayName,
-                        customerUsername: cust.name,
-                        customerPhone: cust.whatsapp || '',
-                        subAreaName: subAreaObj?.name || '',
-                        quotaGb: quotaGb,
-                        validity: validity
-                    });
                 });
 
                 const res = await MikrotikApi.generateHotspotVouchers(currentServerId, vouchersToCreate);
@@ -513,6 +531,9 @@ export function HotspotVoucherModal({
                 }
 
                 setGeneratedVouchers(vouchersToCreate);
+                if (skippedCount > 0) {
+                    setErrorMsg(`Catatan: ${skippedCount} pelanggan non-aktif/disabled dilewati dan tidak dibuatkan voucher.`);
+                }
                 if (onSuccess) onSuccess();
             } else {
                 // Batch Anonymous Vouchers
@@ -1053,22 +1074,24 @@ export function HotspotVoucherModal({
                                                             const custId = cust.id || cust.name;
                                                             const isChecked = selectedCustomerIds.has(custId);
                                                             const subAreaName = subAreas.find(s => s.id === cust.sub_area_id)?.name || '-';
+                                                            const isDisabledCust = cust.disabled || cust.status === 'disabled' || cust.status === 'isolated';
 
                                                             return (
                                                                 <tr
                                                                     key={custId}
-                                                                    onClick={() => handleToggleSelectOne(custId)}
+                                                                    onClick={() => handleToggleSelectOne(cust)}
                                                                     className={cn(
                                                                         "cursor-pointer transition-colors",
-                                                                        isChecked ? "bg-amber-50/70" : "hover:bg-slate-50/80"
+                                                                        isDisabledCust ? "bg-red-50/50 opacity-60 cursor-not-allowed" : isChecked ? "bg-amber-50/70" : "hover:bg-slate-50/80"
                                                                     )}
                                                                 >
                                                                     <td className="px-4 py-2 text-center" onClick={e => e.stopPropagation()}>
                                                                         <input
                                                                             type="checkbox"
-                                                                            className="rounded text-orange-600 focus:ring-orange-500 w-4 h-4 cursor-pointer"
+                                                                            className="rounded text-orange-600 focus:ring-orange-500 w-4 h-4 cursor-pointer disabled:opacity-30"
                                                                             checked={isChecked}
-                                                                            onChange={() => handleToggleSelectOne(custId)}
+                                                                            disabled={isDisabledCust}
+                                                                            onChange={() => handleToggleSelectOne(cust)}
                                                                         />
                                                                     </td>
                                                                     <td className="px-3 py-2">
@@ -1093,11 +1116,11 @@ export function HotspotVoucherModal({
                                                                     <td className="px-3 py-2 text-center">
                                                                         <span className={cn(
                                                                             "px-2 py-0.5 rounded-full text-[10px] font-bold inline-block",
-                                                                            cust.disabled
+                                                                            isDisabledCust
                                                                                 ? "bg-red-100 text-red-700"
                                                                                 : "bg-emerald-100 text-emerald-700"
                                                                         )}>
-                                                                            {cust.disabled ? 'Disabled' : 'Active'}
+                                                                            {isDisabledCust ? (cust.status === 'isolated' ? 'Isolir' : 'Disabled') : 'Active'}
                                                                         </span>
                                                                     </td>
                                                                 </tr>
@@ -1157,8 +1180,38 @@ export function HotspotVoucherModal({
                                         )}
                                     </div>
 
-                                    {/* Voucher Code Option for Customers */}
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                    {/* Voucher Code & Quantity Options for Customers */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-semibold text-slate-700">
+                                                Jumlah Voucher / Pelanggan
+                                            </label>
+                                            <div className="flex items-center border border-slate-200 bg-white rounded-lg overflow-hidden">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setVouchersPerCustomer(Math.max(1, vouchersPerCustomer - 1))}
+                                                    className="px-2.5 py-1.5 hover:bg-slate-100 text-slate-600 font-bold text-xs"
+                                                >
+                                                    -
+                                                </button>
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    max={50}
+                                                    value={vouchersPerCustomer}
+                                                    onChange={e => setVouchersPerCustomer(Math.max(1, Number(e.target.value) || 1))}
+                                                    className="w-full py-1.5 text-xs font-mono font-bold text-center focus:outline-none"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setVouchersPerCustomer(vouchersPerCustomer + 1)}
+                                                    className="px-2.5 py-1.5 hover:bg-slate-100 text-slate-600 font-bold text-xs"
+                                                >
+                                                    +
+                                                </button>
+                                            </div>
+                                        </div>
+
                                         <div className="space-y-1">
                                             <label className="text-xs font-semibold text-slate-700">
                                                 Penamaan Akun / Kode Voucher

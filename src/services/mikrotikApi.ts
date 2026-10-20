@@ -558,6 +558,26 @@ export const MikrotikApi = {
             throw new Error(err.error || 'Failed to reset user counters');
         }
         return await res.json();
+    },
+
+    async toggleCustomerBlock(customerId: string, action: 'block' | 'unblock' | 'kick' | 'toggle', extra?: { username?: string; serverId?: string; id?: string }): Promise<any> {
+        const res = await fetch(`${META_API_URL}/customers/toggle-block`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                customerId,
+                action,
+                username: extra?.username,
+                serverId: extra?.serverId,
+                mikrotikId: extra?.id
+            })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to update customer block status');
+        }
+        return await res.json();
     }
 };
+
 

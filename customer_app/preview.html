@@ -359,9 +359,9 @@
         <div class="logo-container">
           <!-- Logo Arch + Circle -->
           <svg class="logo-svg" viewBox="0 0 500 500">
-            <circle cx="280" cy="230" r="140" fill="#FFA4A2" opacity="0.35" filter="blur(20px)" />
-            <path d="M 120 420 L 120 250 A 130 130 0 0 1 380 250 L 380 420 A 42 42 0 0 1 296 420 L 296 250 A 46 46 0 0 0 204 250 L 204 420 A 42 42 0 0 1 120 420 Z" fill="#333745" />
-            <circle cx="250" cy="275" r="90" fill="#FF333A" />
+            <circle cx="250" cy="280" r="140" fill="#FFA4A2" opacity="0.35" filter="blur(20px)" />
+            <path d="M 95 385 L 95 245 A 155 155 0 0 1 405 245 L 405 385" fill="none" stroke="#333745" stroke-width="90" stroke-linecap="round" />
+            <circle cx="250" cy="280" r="88" fill="#FF333A" />
           </svg>
           <div class="brand-title">GIGANUSA</div>
           <div class="brand-subtitle">Selamat Datang di <span>Portal Hotspot</span></div>
@@ -379,7 +379,7 @@
           <label class="form-label">Kata Sandi</label>
           <div class="input-box">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-            <input type="password" id="login-password" placeholder="Default: nusantara!" />
+            <input type="password" id="login-password" placeholder="Default: giganusa!" />
           </div>
         </div>
 
@@ -402,13 +402,13 @@
         </div>
 
         <div style="background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 14px; padding: 14px; font-size: 12px; color: #991B1B; font-weight: 600; margin-bottom: 20px;">
-          Demi menjaga keamanan akun Anda, silakan ganti kata sandi bawaan (<strong>nusantara!</strong>) sebelum melanjutkan ke aplikasi.
+          Demi menjaga keamanan akun Anda, silakan ganti kata sandi bawaan (<strong>giganusa!</strong>) sebelum melanjutkan ke aplikasi.
         </div>
 
         <div class="form-group">
           <label class="form-label">Kata Sandi Saat Ini</label>
           <div class="input-box">
-            <input type="password" id="old-pwd" value="nusantara!" readonly />
+            <input type="password" id="old-pwd" value="giganusa!" readonly />
           </div>
         </div>
 
@@ -672,8 +672,8 @@
         showToast('Kata sandi baru minimal 5 karakter');
         return;
       }
-      if (newPassword === 'nusantara!') {
-        showToast('Sandi baru tidak boleh default (nusantara!)');
+      if (newPassword === 'giganusa!' || newPassword === 'nusantara!') {
+        showToast('Sandi baru tidak boleh default (giganusa!)');
         return;
       }
       if (newPassword !== confirmPassword) {

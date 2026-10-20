@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/registration.dart';
+import '../../models/server.dart';
 import '../../providers/work_provider.dart';
 import 'package:intl/intl.dart';
 import '../forms/registration_form_screen.dart';
@@ -37,12 +38,10 @@ class _RegistrationDetailScreenState extends State<RegistrationDetailScreen> {
         (s) => s.name == widget.registration.locationId || s.id == widget.registration.locationId, 
         orElse: () => servers.isNotEmpty ? servers.first : throw 'No servers loaded' // Fallback safety?
     );
-    // Find costs
-    // Note: server might throw if not found. But we should have servers loaded.
-    // If not found, cost list is empty.
-    
-    // We need to properly import Server model if installationCosts is on it. 
-    // Assuming WorkProvider exposes servers list properly.
+    final availableCosts = [...server.installationCosts];
+    if (!availableCosts.any((c) => c.price == 250000 || c.name.toLowerCase().contains('250'))) {
+      availableCosts.add(InstallationCostType(name: 'Biaya Pasang - 250', price: 250000));
+    }
     
     showDialog(
       context: context,
@@ -72,13 +71,13 @@ class _RegistrationDetailScreenState extends State<RegistrationDetailScreen> {
                    value: _selectedCostName,
                    items: [
                        const DropdownMenuItem(value: null, child: Text('None / Custom')),
-                       ...server.installationCosts.map((c) => DropdownMenuItem(
+                       ...availableCosts.map((c) => DropdownMenuItem(
                            value: c.name, 
                            child: Text('${c.name} - ${c.price}')
                         ))
                    ],
                    onChanged: (val) {
-                       final cost = server.installationCosts.firstWhere((c) => c.name == val, orElse: () => server.installationCosts.first);
+                       final cost = availableCosts.firstWhere((c) => c.name == val, orElse: () => availableCosts.first);
                        if (val != null) {
                            setState(() {
                                _selectedCostName = val;

@@ -114,7 +114,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                             ssidPassword: meta.ssidPassword || s.ssidPassword,
                             signalLevel: meta.signalLevel || s.signalLevel,
                             odpId: meta.odp_id || meta.odpId || s.odpId,
-                            appPassword: s.appPassword || meta.appPassword || 'nusantara!',
+                            appPassword: s.appPassword || meta.appPassword || 'giganusa!',
                             is_app_enabled: meta.is_app_enabled !== undefined ? Boolean(meta.is_app_enabled) : Boolean(s.is_app_enabled || false)
                         });
                     });

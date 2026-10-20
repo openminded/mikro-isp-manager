@@ -13,7 +13,7 @@ class ForceChangePasswordScreen extends StatefulWidget {
 }
 
 class _ForceChangePasswordScreenState extends State<ForceChangePasswordScreen> {
-  final TextEditingController _oldPasswordController = TextEditingController(text: 'nusantara!');
+  final TextEditingController _oldPasswordController = TextEditingController(text: 'giganusa!');
   final TextEditingController _newPasswordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
   bool _obscureNew = true;
@@ -39,10 +39,10 @@ class _ForceChangePasswordScreenState extends State<ForceChangePasswordScreen> {
       return;
     }
 
-    if (newPassword == 'nusantara!') {
+    if (newPassword == 'giganusa!' || newPassword == 'nusantara!') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Kata sandi baru tidak boleh sama dengan kata sandi bawaan (nusantara!)'),
+          content: Text('Kata sandi baru tidak boleh sama dengan kata sandi bawaan (giganusa!)'),
           backgroundColor: Colors.red,
         ),
       );
@@ -134,7 +134,7 @@ class _ForceChangePasswordScreenState extends State<ForceChangePasswordScreen> {
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Demi keamanan akun Anda, harap ganti kata sandi default (nusantara!) sebelum melanjutkan.',
+                            'Demi keamanan akun Anda, harap ganti kata sandi default (giganusa!) sebelum melanjutkan.',
                             style: TextStyle(fontSize: 12, color: Color(0xFF991B1B), fontWeight: FontWeight.w600),
                           ),
                         ),
@@ -161,7 +161,7 @@ class _ForceChangePasswordScreenState extends State<ForceChangePasswordScreen> {
                         child: TextField(
                           controller: _oldPasswordController,
                           decoration: const InputDecoration(
-                            hintText: 'nusantara!',
+                            hintText: 'giganusa!',
                             prefixIcon: Icon(Icons.lock_clock_outlined, size: 20, color: Color(0xFF64748B)),
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.symmetric(vertical: 12, horizontal: 12),

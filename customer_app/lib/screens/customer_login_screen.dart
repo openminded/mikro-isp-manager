@@ -35,7 +35,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Silakan masukkan nomor HP atau username Anda'),
+          content: Text('Silakan masukkan nomor HP yang terdaftar'),
           backgroundColor: Colors.red,
         ),
       );
@@ -418,7 +418,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'NOMOR HP / USERNAME PELANGGAN',
+                        'NOMOR HP TERDAFTAR',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
@@ -438,16 +438,16 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                         ),
                         child: TextField(
                           controller: _phoneController,
-                          keyboardType: TextInputType.text,
+                          keyboardType: TextInputType.phone,
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
                             color: Color(0xFF1E293B),
                           ),
                           decoration: const InputDecoration(
-                            hintText: 'No HP (08...) atau Username PPPoE',
+                            hintText: 'Masukkan no HP yang terdaftar',
                             hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
-                            prefixIcon: Icon(Icons.person_pin_rounded, color: Color(0xFFF43F5E)),
+                            prefixIcon: Icon(Icons.phone_android_rounded, color: Color(0xFFF43F5E)),
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.symmetric(vertical: 14, horizontal: 12),
                           ),

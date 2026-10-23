@@ -49,7 +49,7 @@ android {
 
     defaultConfig {
         applicationId "com.ayd.giganusa"
-        minSdkVersion 21
+        minSdkVersion 24
         targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName

@@ -46,9 +46,64 @@ function AppPasswordCell({ password }: { password?: string }) {
     );
 }
 
+function AppAccessToggleCell({
+    customer,
+    onToggle,
+    isUpdating
+}: {
+    customer: Customer;
+    onToggle: (customer: Customer) => void;
+    isUpdating?: boolean;
+}) {
+    const isEnabled = Boolean(customer.is_app_enabled);
+
+    return (
+        <div className="flex items-center gap-2">
+            <button
+                type="button"
+                disabled={isUpdating}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onToggle(customer);
+                }}
+                className={cn(
+                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-50",
+                    isEnabled ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
+                )}
+                title={isEnabled ? "Akses aplikasi aktif. Klik untuk menonaktifkan." : "Akses aplikasi nonaktif. Klik untuk mengaktifkan."}
+            >
+                <span
+                    className={cn(
+                        "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
+                        isEnabled ? "translate-x-4" : "translate-x-0"
+                    )}
+                />
+            </button>
+            <button
+                type="button"
+                disabled={isUpdating}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onToggle(customer);
+                }}
+                className={cn(
+                    "inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer select-none transition-colors",
+                    isEnabled
+                        ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200"
+                        : "text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200"
+                )}
+                title={isEnabled ? "Klik untuk menonaktifkan" : "Klik untuk mengaktifkan"}
+            >
+                <Smartphone className={cn("w-3 h-3", isEnabled ? "text-emerald-600" : "text-slate-400")} />
+                {isEnabled ? "Aktif" : "Nonaktif"}
+            </button>
+        </div>
+    );
+}
+
 export function Customers() {
     const { servers } = useServers();
-    const { customers, refreshCustomers } = useData();
+    const { customers, refreshCustomers, updateCustomerLocal } = useData();
     // ...
     // const cleanPhone = data.whatsapp.replace(/\D/g, '');
     // const [customers, setCustomers] = useState<Customer[]>([]); // Removed local state
@@ -59,7 +114,7 @@ export function Customers() {
     const [serverFilter, setServerFilter] = useState<string>('all');
     const [profileFilter, setProfileFilter] = useState<string>('all');
     const [sortConfig, setSortConfig] = useState<{ key: keyof Customer | 'serverName' | 'comment' | 'activationDate', direction: 'asc' | 'desc' } | null>(null);
-    const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+    const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error' | 'warning', message: string } | null>(null);
 
     const [syncLoading, setSyncLoading] = useState(false);
 
@@ -133,6 +188,52 @@ export function Customers() {
         }
     };
 
+    const [togglingKeys, setTogglingKeys] = useState<Set<string>>(new Set());
+    const [isBulkAllUpdating, setIsBulkAllUpdating] = useState(false);
+
+    const handleToggleAppAccess = async (customer: Customer) => {
+        const itemKey = getCustomerKey(customer);
+        const nextState = !customer.is_app_enabled;
+        
+        // Optimistic UI update
+        updateCustomerLocal(customer.name, customer.serverId, { is_app_enabled: nextState });
+        setTogglingKeys(prev => new Set(prev).add(itemKey));
+
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post('/api/customers/toggle-app-access', {
+                customerId: customer.crmId || customer.id,
+                crmId: customer.crmId,
+                serverId: customer.serverId,
+                name: customer.name,
+                mikrotikName: customer.name,
+                is_app_enabled: nextState
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            if (res.data.success) {
+                setSyncStatus({
+                    type: 'success',
+                    message: `Akses aplikasi untuk ${customer.name} berhasil ${nextState ? 'diaktifkan' : 'dinonaktifkan'}.`
+                });
+            } else {
+                updateCustomerLocal(customer.name, customer.serverId, { is_app_enabled: !nextState });
+                setSyncStatus({ type: 'error', message: res.data.error || 'Gagal mengubah akses aplikasi.' });
+            }
+        } catch (err: any) {
+            updateCustomerLocal(customer.name, customer.serverId, { is_app_enabled: !nextState });
+            setSyncStatus({ type: 'error', message: `Error: ${err.response?.data?.error || err.message}` });
+        } finally {
+            setTogglingKeys(prev => {
+                const next = new Set(prev);
+                next.delete(itemKey);
+                return next;
+            });
+            setTimeout(() => setSyncStatus(null), 3500);
+        }
+    };
+
     const handleBulkAppAccess = async (enable: boolean) => {
         const selectedCustomers = customers.filter(c => selectedKeys.has(getCustomerKey(c)));
         if (selectedCustomers.length === 0) return;
@@ -142,8 +243,14 @@ export function Customers() {
 
         setIsBulkAppUpdating(true);
         try {
+            const token = localStorage.getItem('token');
             const userStr = localStorage.getItem('user');
             const userObj = userStr ? JSON.parse(userStr) : { role: 'superadmin' };
+
+            // Optimistically update all selected customers locally
+            selectedCustomers.forEach(c => {
+                updateCustomerLocal(c.name, c.serverId, { is_app_enabled: enable });
+            });
 
             const res = await axios.post('/api/customers/bulk-app-access', {
                 customers: selectedCustomers.map(c => ({
@@ -153,6 +260,8 @@ export function Customers() {
                 })),
                 is_app_enabled: enable,
                 user: userObj
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
             });
 
             if (res.data.success) {
@@ -161,11 +270,40 @@ export function Customers() {
                 refreshCustomers(true);
             } else {
                 setSyncStatus({ type: 'error', message: res.data.error || 'Gagal mengubah akses aplikasi.' });
+                refreshCustomers(true);
+            }
+        } catch (e: any) {
+            setSyncStatus({ type: 'error', message: `Error: ${e.response?.data?.error || e.message}` });
+            refreshCustomers(true);
+        } finally {
+            setIsBulkAppUpdating(false);
+            setTimeout(() => setSyncStatus(null), 4000);
+        }
+    };
+
+    const handleBulkAppAccessAll = async (enable: boolean) => {
+        const actionText = enable ? 'Mengaktifkan' : 'Menonaktifkan';
+        if (!confirm(`${actionText} akses Aplikasi GigaNusa untuk SEMUA pelanggan yang memiliki paket internet aktif (bukan BELUM AKTIF)?`)) return;
+
+        setIsBulkAllUpdating(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post('/api/customers/bulk-app-access-all', {
+                is_app_enabled: enable
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            if (res.data.success) {
+                setSyncStatus({ type: 'success', message: res.data.message });
+                refreshCustomers(true);
+            } else {
+                setSyncStatus({ type: 'error', message: res.data.error || 'Gagal mengubah akses aplikasi massal.' });
             }
         } catch (e: any) {
             setSyncStatus({ type: 'error', message: `Error: ${e.response?.data?.error || e.message}` });
         } finally {
-            setIsBulkAppUpdating(false);
+            setIsBulkAllUpdating(false);
             setTimeout(() => setSyncStatus(null), 4000);
         }
     };
@@ -177,6 +315,11 @@ export function Customers() {
         } else {
             setSelectedKeys(new Set());
         }
+    };
+
+    const handleSelectAllFiltered = () => {
+        const keys = filteredAndSortedCustomers.map(c => getCustomerKey(c));
+        setSelectedKeys(new Set(keys));
     };
 
     const handleSelectOne = (key: string, checked: boolean) => {
@@ -297,14 +440,27 @@ export function Customers() {
                 "remote-address": data["remote-address"],
             };
 
+            let mikrotikFailed = false;
+            let mikrotikErrorMsg = '';
             if (editingCustomer) {
-                await MikrotikApi.updatePPPSecret(server, editingCustomer.id, mikrotikPayload);
+                try {
+                    await MikrotikApi.updatePPPSecret(server, editingCustomer.id, mikrotikPayload);
+                    await MikrotikApi.syncSecrets(server);
+                } catch (mErr: any) {
+                    console.warn("Mikrotik router update failed or router offline:", mErr);
+                    mikrotikFailed = true;
+                    mikrotikErrorMsg = mErr?.message || 'Router offline';
+                }
             } else {
-                await MikrotikApi.addPPPSecret(server, mikrotikPayload);
+                try {
+                    await MikrotikApi.addPPPSecret(server, mikrotikPayload);
+                    await MikrotikApi.syncSecrets(server);
+                } catch (mErr: any) {
+                    console.warn("Mikrotik router add failed or router offline:", mErr);
+                    mikrotikFailed = true;
+                    mikrotikErrorMsg = mErr?.message || 'Router offline';
+                }
             }
-
-            // Sync cache immediately to reflect changes in the list
-            await MikrotikApi.syncSecrets(server);
 
             // 2. ALWAYS update CRM / SQL Database (including Mobile App Password)
             const customerId = editingCustomer?.crmId || (editingCustomer ? (editingCustomer.id || editingCustomer.name) : data.name);
@@ -332,7 +488,11 @@ export function Customers() {
                 signalLevel: data.signalLevel
             });
 
-            setSyncStatus({ type: 'success', message: "Data pelanggan dan sandi aplikasi berhasil disimpan." });
+            if (mikrotikFailed) {
+                setSyncStatus({ type: 'warning', message: `Data pelanggan berhasil disimpan di database (sinkronisasi router tertunda: ${mikrotikErrorMsg}).` });
+            } else {
+                setSyncStatus({ type: 'success', message: "Data pelanggan dan sandi aplikasi berhasil disimpan." });
+            }
 
             // Also Handle Registration Real Name Update if needed (Legacy Support)
             if (data.realName && editingCustomer?.registrationId) {
@@ -470,6 +630,43 @@ export function Customers() {
                         <span className="hidden md:inline font-medium">Add Customer</span>
                     </button>
 
+                    {selectedKeys.size > 0 ? (
+                        <>
+                            <button
+                                onClick={() => handleBulkAppAccess(true)}
+                                disabled={isBulkAppUpdating}
+                                className="p-2 md:px-3 md:py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/20 text-sm font-semibold active:scale-95"
+                                title="Aktifkan akses login Aplikasi GigaNusa untuk pelanggan yang dicentang"
+                            >
+                                <Smartphone className="w-4 h-4" />
+                                <span>Aktivasi App ({selectedKeys.size})</span>
+                            </button>
+                            <button
+                                onClick={() => handleBulkAppAccess(false)}
+                                disabled={isBulkAppUpdating}
+                                className="p-2 md:px-3 md:py-2 bg-slate-700 text-white hover:bg-slate-800 rounded-lg transition-all flex items-center gap-1.5 shadow-sm text-sm font-medium active:scale-95"
+                                title="Nonaktifkan akses login Aplikasi GigaNusa untuk pelanggan yang dicentang"
+                            >
+                                <Smartphone className="w-4 h-4 text-slate-300" />
+                                <span className="hidden xl:inline">Nonaktifkan App</span>
+                            </button>
+                        </>
+                    ) : (
+                        <button
+                            onClick={() => handleBulkAppAccessAll(true)}
+                            disabled={isBulkAllUpdating}
+                            className="p-2 md:px-3 md:py-2 bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-all flex items-center gap-1.5 shadow-sm text-sm font-medium disabled:opacity-50"
+                            title="Aktifkan akses Aplikasi GigaNusa untuk SEMUA pelanggan yang memiliki paket internet aktif"
+                        >
+                            {isBulkAllUpdating ? (
+                                <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
+                            ) : (
+                                <Smartphone className="w-4 h-4 text-emerald-600" />
+                            )}
+                            <span className="hidden xl:inline">Aktifkan Semua App</span>
+                        </button>
+                    )}
+
                     <button
                         onClick={() => setIsVoucherModalOpen(true)}
                         className="p-2 md:px-4 md:py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all flex items-center gap-2 shadow-md shadow-orange-500/20 font-medium text-sm"
@@ -496,9 +693,11 @@ export function Customers() {
                 syncStatus && (
                     <div className={cn(
                         "p-4 rounded-lg flex items-center gap-2 text-sm",
-                        syncStatus.type === 'success' ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-800 border border-red-200"
+                        syncStatus.type === 'success' ? "bg-emerald-50 text-emerald-800 border border-emerald-200" :
+                        syncStatus.type === 'warning' ? "bg-amber-50 text-amber-800 border border-amber-200" :
+                        "bg-red-50 text-red-800 border border-red-200"
                     )}>
-                        {syncStatus.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                        {syncStatus.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : syncStatus.type === 'warning' ? <AlertCircle className="w-4 h-4 text-amber-600" /> : <AlertCircle className="w-4 h-4 text-red-600" />}
                         {syncStatus.message}
                     </div>
                 )
@@ -561,58 +760,74 @@ export function Customers() {
 
             {/* Bulk Action Bar */}
             {selectedKeys.size > 0 && (
-                <div className="p-4 bg-slate-900 text-white rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 fade-in duration-200">
+                <div className="sticky top-4 z-40 p-4 bg-slate-900/95 backdrop-blur-md text-white rounded-xl shadow-2xl border border-slate-700/80 flex flex-col md:flex-row items-center justify-between gap-3 animate-in slide-in-from-top-2 fade-in duration-200">
                     <div className="flex items-center gap-3">
-                        <div className="bg-white/10 px-3 py-1 rounded-md text-sm font-medium">
-                            {selectedKeys.size} dipilih
+                        <div className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{selectedKeys.size} Terpilih</span>
                         </div>
-                        <span className="text-sm text-slate-400 border-l border-white/20 pl-3">
-                            Aksi massal untuk pelanggan yang dipilih.
+                        {selectedKeys.size < filteredAndSortedCustomers.length && (
+                            <button
+                                type="button"
+                                onClick={handleSelectAllFiltered}
+                                className="text-xs text-blue-400 hover:text-blue-300 underline font-medium transition-colors"
+                            >
+                                Pilih semua ({filteredAndSortedCustomers.length} pelanggan)
+                            </button>
+                        )}
+                        <span className="hidden lg:inline text-xs text-slate-400 border-l border-white/20 pl-3">
+                            Aksi massal untuk pelanggan yang dicentang
                         </span>
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
                         <button
+                            type="button"
                             onClick={() => handleBulkAppAccess(true)}
                             disabled={isBulkAppUpdating}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
-                            title="Aktifkan akses login Aplikasi GigaNusa untuk pelanggan terpilih"
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition-all flex items-center gap-2 shadow-md shadow-emerald-600/30 active:scale-95"
+                            title="Aktifkan akses login Aplikasi GigaNusa untuk semua pelanggan yang dicentang"
                         >
                             <Smartphone className="w-4 h-4" />
-                            Enable App ({selectedKeys.size})
+                            <span>Aktivasi Akses App ({selectedKeys.size})</span>
                         </button>
                         <button
+                            type="button"
                             onClick={() => handleBulkAppAccess(false)}
                             disabled={isBulkAppUpdating}
-                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
+                            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 disabled:opacity-50 text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 active:scale-95"
                             title="Nonaktifkan akses login Aplikasi GigaNusa untuk pelanggan terpilih"
                         >
                             <Smartphone className="w-4 h-4 text-slate-400" />
-                            Disable App ({selectedKeys.size})
+                            <span>Nonaktifkan App</span>
                         </button>
                         <button
+                            type="button"
                             onClick={() => setIsVoucherModalOpen(true)}
-                            className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm"
+                            className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow-sm active:scale-95"
                             title="Generate voucher kuota untuk pelanggan yang dipilih"
                         >
                             <Ticket className="w-4 h-4" />
-                            Voucher ({selectedKeys.size})
+                            <span>Voucher ({selectedKeys.size})</span>
                         </button>
                         <button
+                            type="button"
                             onClick={() => setSelectedKeys(new Set())}
-                            className="px-3 py-1.5 text-sm text-slate-300 hover:text-white transition-colors"
+                            className="px-3 py-2 text-sm text-slate-400 hover:text-white transition-colors"
                         >
                             Batal
                         </button>
                         <button
+                            type="button"
                             onClick={handleBulkDelete}
                             disabled={isBulkDeleting}
-                            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                            className="px-3 py-2 bg-red-600/80 hover:bg-red-600 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
+                            title="Hapus data pelanggan terpilih dari database"
                         >
                             {isBulkDeleting
                                 ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                 : <Trash2 className="w-4 h-4" />
                             }
-                            Hapus DB
+                            <span>Hapus DB</span>
                         </button>
                     </div>
                 </div>
@@ -695,17 +910,14 @@ export function Customers() {
                                         </td>
                                         <td className="px-6 py-3">
                                             <AppPasswordCell password={customer.appPassword} />
-                                                                    <td className="px-6 py-3">
-                                            {customer.is_app_enabled ? (
-                                                <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200" title="Akses Aplikasi GigaNusa Aktif">
-                                                    <Smartphone className="w-3 h-3 text-emerald-600" /> Aktif
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1 text-slate-500 text-xs font-medium bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200" title="Akses Aplikasi GigaNusa Nonaktif (Belum Diaktivasi)">
-                                                    <Smartphone className="w-3 h-3 text-slate-400" /> Nonaktif
-                                                </span>
-                                            )}
-                                        </td>               </td>
+                                        </td>
+                                        <td className="px-6 py-3">
+                                            <AppAccessToggleCell
+                                                customer={customer}
+                                                onToggle={handleToggleAppAccess}
+                                                isUpdating={togglingKeys.has(itemKey)}
+                                            />
+                                        </td>
                                         <td className="px-6 py-3 text-slate-600">{customer.comment || '-'}</td>
                                         <td className="px-6 py-3">
                                             <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
@@ -1232,6 +1444,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
             realName: formData.realName,
             password: formData.password,
             appPassword: formData.appPassword,
+            is_app_enabled: Boolean(formData.is_app_enabled),
             comment: formData.comment,
             profile: formData.profile,
             "remote-address": formData["remote-address"] || undefined,
@@ -1390,7 +1603,9 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                                 value={formData.realName} onChange={e => setFormData({ ...formData, realName: e.target.value })}
                                             />
                                             <p className="text-xs text-slate-400">Updates linked registration data</p>
-                                                              <div className="space-y-2">
+                                        </div>
+
+                                        <div className="space-y-2">
                                             <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                                 <span>Sandi Aplikasi Customer (GigaNusa App Login)</span>
                                                 <span className="text-xs text-amber-600 font-normal">Default: giganusa!</span>
@@ -1415,20 +1630,52 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                         </div>
 
                                         {/* App Activation Toggle */}
-                                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+                                        <div 
+                                            onClick={() => setFormData(prev => ({ ...prev, is_app_enabled: !prev.is_app_enabled }))}
+                                            className={cn(
+                                                "p-3.5 border rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-all select-none",
+                                                formData.is_app_enabled 
+                                                    ? "bg-emerald-50/60 border-emerald-300 hover:bg-emerald-50" 
+                                                    : "bg-slate-50 border-slate-200 hover:bg-slate-100/70"
+                                            )}
+                                        >
                                             <div className="flex items-center gap-2.5">
-                                                <Smartphone className="w-5 h-5 text-primary" />
-                                                <div>
-                                                    <div className="text-sm font-medium text-slate-800">Aktivasi Akses Aplikasi GigaNusa</div>
-                                                    <div className="text-xs text-slate-500">Default: Nonaktif. Jika dinonaktifkan, muncul notifikasi saat login: "Akun anda belum di aktivasi, mohon hubungi admin".</div>
+                                                <div className={cn("p-2 rounded-lg transition-colors", formData.is_app_enabled ? "bg-emerald-100 text-emerald-600" : "bg-slate-200 text-slate-500")}>
+                                                    <Smartphone className="w-5 h-5" />
                                                 </div>
-                                            </div>                     </div>
-                                            <input
-                                                type="checkbox"
-                                                className="w-5 h-5 accent-primary rounded cursor-pointer"
-                                                checked={formData.is_app_enabled}
-                                                onChange={e => setFormData({ ...formData, is_app_enabled: e.target.checked })}
-                                            />
+                                                <div>
+                                                    <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                                                        Aktivasi Akses Aplikasi GigaNusa
+                                                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border", formData.is_app_enabled ? "bg-emerald-100 text-emerald-700 border-emerald-300" : "bg-slate-200/60 text-slate-500 border-slate-300")}>
+                                                            {formData.is_app_enabled ? "AKTIF" : "NONAKTIF"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-xs text-slate-500">
+                                                        {formData.is_app_enabled 
+                                                            ? "Pelanggan dapat login ke Aplikasi GigaNusa Mobile menggunakan username/No HP & sandi." 
+                                                            : "Jika dinonaktifkan, muncul notifikasi saat login: \"Akun anda belum diaktivasi, mohon hubungi admin\"."}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setFormData(prev => ({ ...prev, is_app_enabled: !prev.is_app_enabled }));
+                                                }}
+                                                className={cn(
+                                                    "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500/20",
+                                                    formData.is_app_enabled ? "bg-emerald-600" : "bg-slate-300"
+                                                )}
+                                                title={formData.is_app_enabled ? "Klik untuk menonaktifkan" : "Klik untuk mengaktifkan"}
+                                            >
+                                                <span
+                                                    className={cn(
+                                                        "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                                                        formData.is_app_enabled ? "translate-x-5" : "translate-x-0"
+                                                    )}
+                                                />
+                                            </button>
                                         </div>
 
                                         <div className="space-y-2">

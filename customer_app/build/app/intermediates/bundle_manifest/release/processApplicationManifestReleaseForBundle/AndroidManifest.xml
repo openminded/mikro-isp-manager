@@ -1,14 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.ayd.giganusa"
-    android:versionCode="2"
-    android:versionName="1.0.1" >
+    android:versionCode="4"
+    android:versionName="1.0.3" >
 
     <uses-sdk
-        android:minSdkVersion="21"
+        android:minSdkVersion="24"
         android:targetSdkVersion="36" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Required for url_launcher on Android 11+ (API 30+) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+
+            <data android:scheme="https" />
+        </intent>
+    </queries>
 
     <permission
         android:name="com.ayd.giganusa.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
@@ -19,9 +33,10 @@
     <application
         android:name="android.app.Application"
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
-        android:extractNativeLibs="true"
+        android:extractNativeLibs="false"
         android:icon="@drawable/ic_launcher"
-        android:label="GigaNusa" >
+        android:label="GigaNusa"
+        android:usesCleartextTraffic="true" >
         <activity
             android:name="com.ayd.giganusa.MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"

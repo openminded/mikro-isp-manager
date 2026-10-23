@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/customer_provider.dart';
 import '../services/customer_api_service.dart';
 import '../theme/giga_theme.dart';
@@ -34,7 +35,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Silakan masukkan nomor HP terdaftar Anda'),
+          content: Text('Silakan masukkan nomor HP atau username Anda'),
           backgroundColor: Colors.red,
         ),
       );
@@ -45,7 +46,6 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Silakan masukkan kata sandi'),
-
           backgroundColor: Colors.red,
         ),
       );
@@ -62,13 +62,102 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
     } else if (result == LoginResultState.multipleAccounts) {
       _showAccountSelectionBottomSheet(phone, password, provider.availableAccounts);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(provider.errorMessage ?? 'Login gagal, periksa nomor HP Anda'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      final msg = provider.errorMessage ?? 'Login gagal, periksa nomor HP atau sandi Anda';
+      if (msg.toLowerCase().contains('aktivasi') || msg.toLowerCase().contains('belum di aktivasi')) {
+        _showNotActivatedDialog(phone, msg);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
     }
+  }
+
+  void _showNotActivatedDialog(String identifier, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: const [
+            Icon(Icons.lock_person_rounded, color: Color(0xFFE11D48), size: 28),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Akun Belum Aktif',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF1F2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFECDD3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Pemberitahuan:',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF9F1239)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Akun untuk "$identifier" belum diaktifkan fiturnya oleh Admin ISP. Silakan hubungi CS untuk aktivasi instan.',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF881337)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              const cleanPhone = '6285117535324';
+              final encodedMsg = Uri.encodeComponent(
+                'Halo CS GigaNusa, mohon bantuan untuk mengaktifkan akses aplikasi untuk akun saya:\nNomor HP/Username: $identifier',
+              );
+              final waUri = Uri.parse('https://wa.me/$cleanPhone?text=$encodedMsg');
+              try {
+                if (await canLaunchUrl(waUri)) {
+                  await launchUrl(waUri, mode: LaunchMode.externalApplication);
+                } else {
+                  await launchUrl(waUri);
+                }
+              } catch (_) {}
+            },
+            icon: const Icon(Icons.chat_rounded, size: 18),
+            label: const Text('Hubungi CS WhatsApp'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _navigateOnSuccess(CustomerProvider provider) {
@@ -129,6 +218,8 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                   final realName = acc['real_name'] ?? username;
                   final profile = acc['profile'] ?? 'Paket Internet';
 
+                  final bool isAppEnabled = acc['is_app_enabled'] == true || acc['is_app_enabled'] == 1 || acc['is_app_enabled'] == 'true';
+
                   return InkWell(
                     onTap: () async {
                       Navigator.pop(ctx); // Close sheet
@@ -138,12 +229,17 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                       if (result == LoginResultState.success) {
                         _navigateOnSuccess(provider);
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(provider.errorMessage ?? 'Gagal memilih akun'),
-                            backgroundColor: Colors.red.shade700,
-                          ),
-                        );
+                        final msg = provider.errorMessage ?? 'Gagal memilih akun';
+                        if (msg.toLowerCase().contains('aktivasi') || msg.toLowerCase().contains('belum di aktivasi')) {
+                          _showNotActivatedDialog(username, msg);
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(msg),
+                              backgroundColor: Colors.red.shade700,
+                            ),
+                          );
+                        }
                       }
                     },
                     borderRadius: BorderRadius.circular(16),
@@ -178,17 +274,42 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                   'Username: $username ($realName)',
                                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                                 ),
-                                const SizedBox(height: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.shade50,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    profile,
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blue.shade800),
-                                  ),
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        profile,
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blue.shade800),
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isAppEnabled ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: isAppEnabled ? const Color(0xFFA7F3D0) : const Color(0xFFFDE68A),
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        isAppEnabled ? 'App Aktif' : 'Belum Diaktifkan',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: isAppEnabled ? const Color(0xFF047857) : const Color(0xFFB45309),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
@@ -284,8 +405,11 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Logo with Arch and Center Circle
-                  const GigaLogoWidget(size: 100),
+                  // Logo with Arch and Center Circle (Tekan lama untuk set URL server)
+                  GestureDetector(
+                    onLongPress: _showServerConfig,
+                    child: const GigaLogoWidget(size: 100),
+                  ),
 
                   const SizedBox(height: 32),
 
@@ -294,7 +418,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'NOMOR HP PELANGGAN',
+                        'NOMOR HP / USERNAME PELANGGAN',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
@@ -314,16 +438,16 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                         ),
                         child: TextField(
                           controller: _phoneController,
-                          keyboardType: TextInputType.phone,
+                          keyboardType: TextInputType.text,
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
                             color: Color(0xFF1E293B),
                           ),
                           decoration: const InputDecoration(
-                            hintText: 'Masukkan no HP terdaftar (08...)',
+                            hintText: 'No HP (08...) atau Username PPPoE',
                             hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
-                            prefixIcon: Icon(Icons.phone_android, color: Color(0xFFF43F5E)),
+                            prefixIcon: Icon(Icons.person_pin_rounded, color: Color(0xFFF43F5E)),
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.symmetric(vertical: 14, horizontal: 12),
                           ),

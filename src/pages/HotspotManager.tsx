@@ -550,10 +550,10 @@ export function HotspotManager() {
     const paginatedData = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
     const tabs: { key: TabKey; label: string; icon: any; count: number }[] = [
-        { key: 'users', label: 'Users', icon: Users, count: Array.isArray(hotspotUsers) ? hotspotUsers.length : 0 },
-        { key: 'active', label: 'Active Sessions', icon: Activity, count: Array.isArray(activeSessions) ? activeSessions.length : 0 },
-        { key: 'profiles', label: 'Profiles', icon: Layers, count: Array.isArray(hotspotProfiles) ? hotspotProfiles.length : 0 },
-        { key: 'servers', label: 'Hotspot Servers', icon: Server, count: Array.isArray(hotspotServers) ? hotspotServers.length : 0 },
+        { key: 'users', label: 'Pengguna', icon: Users, count: Array.isArray(hotspotUsers) ? hotspotUsers.length : 0 },
+        { key: 'active', label: 'Sesi Aktif', icon: Activity, count: Array.isArray(activeSessions) ? activeSessions.length : 0 },
+        { key: 'profiles', label: 'Profil', icon: Layers, count: Array.isArray(hotspotProfiles) ? hotspotProfiles.length : 0 },
+        { key: 'servers', label: 'Server Hotspot', icon: Server, count: Array.isArray(hotspotServers) ? hotspotServers.length : 0 },
         { key: 'vouchers', label: 'Cache Voucher Multi-Server', icon: Ticket, count: Array.isArray(allVouchers) ? allVouchers.length : 0 },
     ];
 
@@ -983,14 +983,14 @@ export function HotspotManager() {
                                                             {u['limit-uptime'] && u['limit-uptime'] !== '0s' ? (
                                                                 <span className="text-slate-700">{u['limit-uptime']}</span>
                                                             ) : (
-                                                                <span className="text-slate-400 italic">Unlimited</span>
+                                                                <span className="text-slate-400 italic">Tak Terbatas</span>
                                                             )}
                                                         </td>
                                                         <td className="px-5 py-3 font-mono text-xs">
                                                             {u['limit-bytes-total'] && u['limit-bytes-total'] !== '0' ? (
                                                                 <span className="text-slate-700">{formatBytes(u['limit-bytes-total'])}</span>
                                                             ) : (
-                                                                <span className="text-slate-400 italic">Unlimited</span>
+                                                                <span className="text-slate-400 italic">Tak Terbatas</span>
                                                             )}
                                                         </td>
                                                         {/* Sisa Kuota Column */}
@@ -1037,12 +1037,12 @@ export function HotspotManager() {
                                                             ) : isDisabled ? (
                                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600">
                                                                     <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                                                                    Disabled
+                                                                    Nonaktif
                                                                 </span>
                                                             ) : (
                                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600">
                                                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                                                    Active
+                                                                    Aktif
                                                                 </span>
                                                             )}
                                                         </td>
@@ -1054,7 +1054,7 @@ export function HotspotManager() {
                                                                 <button onClick={() => handleOpenVoucherModal(u.name)} className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Beri Kuota / Voucher Bulanan">
                                                                     <Ticket className="w-4 h-4" />
                                                                 </button>
-                                                                <button onClick={() => handleToggle(u)} className={cn("p-1.5 rounded-lg transition-colors", isDisabled ? "text-emerald-500 hover:bg-emerald-50" : "text-amber-500 hover:bg-amber-50")} title={isDisabled ? 'Enable' : 'Disable'}>
+                                                                <button onClick={() => handleToggle(u)} className={cn("p-1.5 rounded-lg transition-colors", isDisabled ? "text-emerald-500 hover:bg-emerald-50" : "text-amber-500 hover:bg-amber-50")} title={isDisabled ? 'Aktifkan' : 'Nonaktifkan'}>
                                                                     {isDisabled ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                                                                 </button>
                                                                 <button onClick={() => handleEdit(u)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
@@ -1077,14 +1077,14 @@ export function HotspotManager() {
                                     <table className="w-full text-left text-sm min-w-[800px]">
                                         <thead className="bg-slate-50 border-b border-slate-200">
                                             <tr>
-                                                <th className="px-5 py-3 font-medium text-slate-500">User</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500">IP Address</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500">MAC Address</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500">Uptime</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500">Bytes In</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500">Bytes Out</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Pengguna</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Alamat IP</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Alamat MAC</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Waktu Aktif</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Bytes Masuk</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Bytes Keluar</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Server</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500 text-right">Action</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500 text-right">Aksi</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
@@ -1160,10 +1160,10 @@ export function HotspotManager() {
                                     <table className="w-full text-left text-sm min-w-[800px]">
                                         <thead className="bg-slate-50 border-b border-slate-200">
                                             <tr>
-                                                <th className="px-5 py-3 font-medium text-slate-500">Name</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Nama</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Address Pool</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Rate Limit (rx/tx)</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500 text-center">Shared Users</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500 text-center">User Bersama</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Session Timeout</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Idle Timeout</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Keepalive</th>
@@ -1210,7 +1210,7 @@ export function HotspotManager() {
                                                         {p['address-pool'] && p['address-pool'] !== 'none' ? p['address-pool'] : <span className="text-slate-400 italic">none</span>}
                                                     </td>
                                                     <td className="px-5 py-3 font-mono text-xs text-slate-600">
-                                                        {p['rate-limit'] ? p['rate-limit'] : <span className="text-slate-400 italic">Unlimited</span>}
+                                                        {p['rate-limit'] ? p['rate-limit'] : <span className="text-slate-400 italic">Tak Terbatas</span>}
                                                     </td>
                                                     <td className="px-5 py-3 text-center">
                                                         <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-700 font-bold text-xs">
@@ -1218,7 +1218,7 @@ export function HotspotManager() {
                                                         </span>
                                                     </td>
                                                     <td className="px-5 py-3 text-slate-600 text-xs">
-                                                        {p['session-timeout'] && p['session-timeout'] !== '0s' ? p['session-timeout'] : <span className="text-slate-400 italic">Unlimited</span>}
+                                                        {p['session-timeout'] && p['session-timeout'] !== '0s' ? p['session-timeout'] : <span className="text-slate-400 italic">Tak Terbatas</span>}
                                                     </td>
                                                     <td className="px-5 py-3 text-slate-600 text-xs">
                                                         {p['idle-timeout'] && p['idle-timeout'] !== 'none' ? p['idle-timeout'] : <span className="text-slate-400 italic">none</span>}
@@ -1237,11 +1237,11 @@ export function HotspotManager() {
                                     <table className="w-full text-left text-sm min-w-[800px]">
                                         <thead className="bg-slate-50 border-b border-slate-200">
                                             <tr>
-                                                <th className="px-5 py-3 font-medium text-slate-500">Name</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Nama</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Interface</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Address Pool</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500">Profile</th>
-                                                <th className="px-5 py-3 font-medium text-slate-500">Addresses Per MAC</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Profil</th>
+                                                <th className="px-5 py-3 font-medium text-slate-500">Alamat Per MAC</th>
                                                 <th className="px-5 py-3 font-medium text-slate-500">Status</th>
                                             </tr>
                                         </thead>
@@ -1294,7 +1294,7 @@ export function HotspotManager() {
                                                             {s.profile || <span className="text-slate-400 italic">default</span>}
                                                         </td>
                                                         <td className="px-5 py-3 text-slate-600 text-xs">
-                                                            {s['addresses-per-mac'] && s['addresses-per-mac'] !== 'unlimited' ? s['addresses-per-mac'] : <span className="text-slate-400 italic">unlimited</span>}
+                                                            {s['addresses-per-mac'] && s['addresses-per-mac'] !== 'unlimited' ? s['addresses-per-mac'] : <span className="text-slate-400 italic">tak terbatas</span>}
                                                         </td>
                                                         <td className="px-5 py-3">
                                                             <span className={cn(
@@ -1302,7 +1302,7 @@ export function HotspotManager() {
                                                                 isDisabled ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
                                                             )}>
                                                                 <span className={cn("w-1.5 h-1.5 rounded-full", isDisabled ? "bg-red-500" : "bg-emerald-500")} />
-                                                                {isDisabled ? 'Disabled' : 'Running'}
+                                                                {isDisabled ? 'Nonaktif' : 'Berjalan'}
                                                             </span>
                                                         </td>
                                                     </tr>

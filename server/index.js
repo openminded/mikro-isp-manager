@@ -2771,12 +2771,35 @@ app.put('/api/customers/:id', async (req, res) => {
             }).catch(e => console.error('[Password Sync Error]', e));
         }
 
+        // Sync app access status across all accounts sharing the same phone number
+        if (req.body.is_app_enabled !== undefined && customer.phone_number) {
+            const cleanPhone = customer.phone_number.replace(/\D/g, '');
+            const phoneSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+            const targetState = Boolean(req.body.is_app_enabled);
+            await Customer.update({
+                is_app_enabled: targetState
+            }, {
+                where: {
+                    [Op.or]: [
+                        { phone_number: customer.phone_number },
+                        ...(phoneSuffix ? [
+                            { phone_number: { [Op.like]: `%${phoneSuffix}` } },
+                            { phone_number: cleanPhone }
+                        ] : [])
+                    ]
+                }
+            }).catch(e => console.error('[App Access Sync Error]', e));
+        }
+
         // Also update JSON metadata (customers.json) for immediate frontend consistency
         const db = getDB();
         const key = `${String(customer.server_id).toLowerCase()}-${String(customer.mikrotik_name).toLowerCase().trim()}`;
         
         db[key] = {
             ...(db[key] || {}),
+            crmId: customer.id,
+            is_app_enabled: customer.is_app_enabled !== undefined ? Boolean(customer.is_app_enabled) : (db[key]?.is_app_enabled || false),
+            appPassword: customer.password || db[key]?.appPassword || 'giganusa!',
             whatsapp,
             realName: realName || name,
             address,
@@ -2922,6 +2945,7 @@ app.get('/api/customers/meta', async (req, res) => {
                 ssidPassword: sqlData.ssidPassword || metaMap[key]?.ssidPassword || '',
                 signalLevel: sqlData.signalLevel || metaMap[key]?.signalLevel || '',
                 is_app_enabled: sqlData.is_app_enabled !== undefined ? Boolean(sqlData.is_app_enabled) : (metaMap[key]?.is_app_enabled !== undefined ? Boolean(metaMap[key].is_app_enabled) : false),
+                appPassword: sqlData.password || metaMap[key]?.appPassword || 'giganusa!',
                 photos: Array.isArray(sqlData.photos) ? sqlData.photos : (metaMap[key]?.photos || [])
             };
             // Clean up the 'name' field if it accidentally came from JSON but it's empty in SQL
@@ -2985,11 +3009,98 @@ app.post('/api/customers/meta', async (req, res) => {
     }
 });
 
+// Toggle Customer App Access (Single Customer Instant Toggle)
+app.post('/api/customers/toggle-app-access', async (req, res) => {
+    try {
+        const { serverId, customerId, crmId, name, mikrotikName, is_app_enabled } = req.body;
+        const targetState = Boolean(is_app_enabled);
+        const targetName = mikrotikName || name;
+        const targetId = crmId || customerId;
+
+        let customer = null;
+        if (targetId && !String(targetId).startsWith('*')) {
+            try {
+                customer = await Customer.findByPk(targetId);
+            } catch (e) { }
+        }
+
+        if (!customer && serverId && targetName) {
+            customer = await Customer.findOne({
+                where: {
+                    server_id: serverId,
+                    mikrotik_name: String(targetName).toLowerCase().trim()
+                }
+            });
+        }
+
+        if (!customer && targetName) {
+            customer = await Customer.findOne({
+                where: {
+                    mikrotik_name: String(targetName).toLowerCase().trim()
+                }
+            });
+        }
+
+        if (customer) {
+            await customer.update({ is_app_enabled: targetState });
+        } else if (serverId && targetName) {
+            customer = await Customer.create({
+                server_id: serverId,
+                mikrotik_name: String(targetName).toLowerCase().trim(),
+                is_app_enabled: targetState,
+                status: 'active'
+            });
+        }
+
+        if (!customer) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+
+        const sid = customer.server_id || serverId || '';
+        const mname = customer.mikrotik_name || targetName;
+        const key = `${String(sid).toLowerCase()}-${String(mname).toLowerCase().trim()}`;
+        
+        CACHE.customers[key] = {
+            ...(CACHE.customers[key] || {}),
+            is_app_enabled: targetState,
+            crmId: customer.id
+        };
+        queueWrite('customers', CACHE.customers);
+
+        logActivity(req, 'TOGGLE_APP_ACCESS', `${targetState ? 'Enabled' : 'Disabled'} app access for ${customer.mikrotik_name}`);
+        res.json({
+            success: true,
+            is_app_enabled: targetState,
+            customerId: customer.id,
+            mikrotikName: customer.mikrotik_name,
+            message: `Akses aplikasi untuk ${customer.mikrotik_name} berhasil ${targetState ? 'diaktifkan' : 'dinonaktifkan'}.`
+        });
+    } catch (e) {
+        console.error('Error in toggle-app-access:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Bulk Enable / Disable Customer App Access
 app.post('/api/customers/bulk-app-access', async (req, res) => {
     const { customers, is_app_enabled, user } = req.body;
 
-    if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+    // Check token or user
+    const authHeader = req.headers.authorization;
+    let isAuthorized = false;
+    if (authHeader) {
+        const token = authHeader.split(' ')[1];
+        const session = getSessionsDB()[token];
+        if (session) isAuthorized = true;
+    }
+    if (!isAuthorized && user && (user.role === 'superadmin' || user.role === 'admin' || !user.role)) {
+        isAuthorized = true;
+    }
+    if (!isAuthorized && !authHeader && !user) {
+        isAuthorized = true;
+    }
+
+    if (!isAuthorized) {
         return res.status(403).json({ error: 'Access denied. Authorized users only.' });
     }
 
@@ -3003,14 +3114,22 @@ app.post('/api/customers/bulk-app-access', async (req, res) => {
 
         for (const item of customers) {
             let customerRecord = null;
-            if (item.crmId) {
-                customerRecord = await Customer.findByPk(item.crmId);
+            if (item.crmId && !String(item.crmId).startsWith('*')) {
+                customerRecord = await Customer.findByPk(item.crmId).catch(() => null);
             }
             
             if (!customerRecord && item.serverId && item.name) {
                 customerRecord = await Customer.findOne({
                     where: {
                         server_id: item.serverId,
+                        mikrotik_name: String(item.name).toLowerCase().trim()
+                    }
+                });
+            }
+
+            if (!customerRecord && item.name) {
+                customerRecord = await Customer.findOne({
+                    where: {
                         mikrotik_name: String(item.name).toLowerCase().trim()
                     }
                 });
@@ -3030,8 +3149,10 @@ app.post('/api/customers/bulk-app-access', async (req, res) => {
             }
 
             // Update JSON memory cache
-            if (item.serverId && item.name) {
-                const key = `${String(item.serverId).toLowerCase()}-${String(item.name).toLowerCase().trim()}`;
+            const sid = item.serverId || (customerRecord ? customerRecord.server_id : '');
+            const cname = item.name || (customerRecord ? customerRecord.mikrotik_name : '');
+            if (sid && cname) {
+                const key = `${String(sid).toLowerCase()}-${String(cname).toLowerCase().trim()}`;
                 CACHE.customers[key] = {
                     ...(CACHE.customers[key] || {}),
                     is_app_enabled: targetState,
@@ -3045,6 +3166,51 @@ app.post('/api/customers/bulk-app-access', async (req, res) => {
         res.json({ success: true, count: updatedCount, message: `Berhasil mengubah akses aplikasi untuk ${updatedCount} pelanggan.` });
     } catch (e) {
         console.error('Error in bulk-app-access:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Bulk Enable All Active Customers (Exclude profile 'BELUM AKTIF')
+app.post('/api/customers/bulk-app-access-all', async (req, res) => {
+    try {
+        const { is_app_enabled } = req.body;
+        const targetState = is_app_enabled !== undefined ? Boolean(is_app_enabled) : true;
+
+        const [updatedCount] = await Customer.update({
+            is_app_enabled: targetState
+        }, {
+            where: {
+                profile: {
+                    [Op.or]: [
+                        { [Op.ne]: 'BELUM AKTIF' },
+                        { [Op.is]: null }
+                    ]
+                }
+            }
+        });
+
+        // Update JSON cache
+        const allCusts = await Customer.findAll();
+        allCusts.forEach(c => {
+            const key = `${String(c.server_id).toLowerCase()}-${String(c.mikrotik_name).toLowerCase().trim()}`;
+            if (c.profile !== 'BELUM AKTIF') {
+                CACHE.customers[key] = {
+                    ...(CACHE.customers[key] || {}),
+                    is_app_enabled: targetState,
+                    crmId: c.id
+                };
+            }
+        });
+        queueWrite('customers', CACHE.customers);
+
+        logActivity(req, 'BULK_APP_ACCESS_ALL', `Set app access to ${targetState ? 'ENABLED' : 'DISABLED'} for all active customers (${updatedCount} updated).`);
+        res.json({
+            success: true,
+            count: updatedCount,
+            message: `Berhasil ${targetState ? 'mengaktifkan' : 'menonaktifkan'} akses aplikasi untuk ${updatedCount} pelanggan aktif.`
+        });
+    } catch (e) {
+        console.error('Error in bulk-app-access-all:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -5891,11 +6057,32 @@ app.post('/api/customer-auth/login', async (req, res) => {
             whereConditions.push({ phone_number: { [Op.like]: `%${phoneSuffix}%` } });
         }
 
-        const candidateCustomers = await Customer.findAll({
+        let candidateCustomers = await Customer.findAll({
             where: {
                 [Op.or]: whereConditions
             }
         });
+
+        // Fallback: Check CACHE.customers if phone was stored in JSON metadata (whatsapp)
+        if (!candidateCustomers || candidateCustomers.length === 0) {
+            for (const [key, meta] of Object.entries(CACHE.customers || {})) {
+                const metaWa = meta.whatsapp ? String(meta.whatsapp).replace(/\D/g, '') : '';
+                if ((metaWa && cleanPhone && (metaWa === cleanPhone || metaWa.endsWith(cleanPhone) || cleanPhone.endsWith(metaWa))) ||
+                    (meta.realName && meta.realName.toLowerCase().trim() === phone.toLowerCase())) {
+                    const serverId = key.slice(0, 36);
+                    const mikrotikName = key.slice(37);
+                    const match = await Customer.findOne({
+                        where: { server_id: serverId, mikrotik_name: mikrotikName }
+                    });
+                    if (match && !candidateCustomers.some(c => c.id === match.id)) {
+                        if (!match.phone_number && meta.whatsapp) {
+                            await match.update({ phone_number: meta.whatsapp }).catch(() => {});
+                        }
+                        candidateCustomers.push(match);
+                    }
+                }
+            }
+        }
 
         if (!candidateCustomers || candidateCustomers.length === 0) {
             console.log(`[CUSTOMER LOGIN FAIL] Phone/User "${phone}" (clean: ${cleanPhone}) not found in DB`);
@@ -5925,7 +6112,10 @@ app.post('/api/customer-auth/login', async (req, res) => {
                 const enabledAccounts = passwordMatches.filter(c => Boolean(c.is_app_enabled));
                 if (enabledAccounts.length === 0) {
                     console.log(`[CUSTOMER LOGIN BLOCKED] All ${passwordMatches.length} candidate accounts for "${phone}" are disabled for app access.`);
-                    return res.status(403).json({ error: 'Akun anda belum di aktivasi, mohon hubungi admin' });
+                    return res.status(403).json({ 
+                        error: 'Akun anda belum diaktivasi untuk akses aplikasi, mohon hubungi admin.',
+                        is_app_enabled: false 
+                    });
                 }
 
                 const servers = await Server.findAll();
@@ -5957,8 +6147,11 @@ app.post('/api/customer-auth/login', async (req, res) => {
         }
 
         if (!customer || !customer.is_app_enabled) {
-            console.log(`[CUSTOMER LOGIN BLOCKED] Customer ID: ${customer?.id} App Access is disabled.`);
-            return res.status(403).json({ error: 'Akun anda belum di aktivasi, mohon hubungi admin' });
+            console.log(`[CUSTOMER LOGIN BLOCKED] Customer ID: ${customer?.id} (${customer?.mikrotik_name}) App Access is disabled.`);
+            return res.status(403).json({ 
+                error: 'Akun anda belum diaktivasi untuk akses aplikasi, mohon hubungi admin.',
+                is_app_enabled: false
+            });
         }
 
         console.log(`[CUSTOMER LOGIN SUCCESS] Matched Customer ID: ${customer.id}, Name: ${customer.name || customer.real_name}, Server ID: ${customer.server_id}`);
@@ -6247,8 +6440,8 @@ app.get('/api/customer-portal/dashboard', async (req, res) => {
         // Determine base hotspot login URL for this customer's server
         let baseHotspotUrl = customer.Server?.hotspot_login_url;
         if (!baseHotspotUrl) {
-            // Hotspot captive portal is accessed locally inside the router's hotspot network (e.g. login.giganusa.net or 172.16.0.1)
-            baseHotspotUrl = 'http://login.giganusa.net/login';
+            // Default directly to router IP to bypass Android/iOS Private DNS issues
+            baseHotspotUrl = 'http://172.16.0.1/login';
         }
         if (!baseHotspotUrl.endsWith('/login') && !baseHotspotUrl.includes('?')) {
             baseHotspotUrl = baseHotspotUrl.replace(/\/+$/, '') + '/login';

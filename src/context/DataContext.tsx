@@ -14,6 +14,7 @@ interface DataContextType {
     refreshCustomers: (force?: boolean) => Promise<void>;
     refreshProfiles: (force?: boolean) => Promise<void>;
     refreshPools: (force?: boolean) => Promise<void>;
+    updateCustomerLocal: (name: string, serverId: string, updates: Partial<Customer>) => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -231,11 +232,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
     }, [servers]);
 
+    const updateCustomerLocal = (name: string, serverId: string, updates: Partial<Customer>) => {
+        setCustomers(prev => prev.map(c => {
+            if (c.serverId === serverId && c.name.toLowerCase() === name.toLowerCase()) {
+                return { ...c, ...updates };
+            }
+            return c;
+        }));
+    };
+
     return (
         <DataContext.Provider value={{
             customers, profiles, pools,
             loadingCustomers, loadingProfiles, loadingPools,
-            refreshCustomers, refreshProfiles, refreshPools
+            refreshCustomers, refreshProfiles, refreshPools,
+            updateCustomerLocal
         }}>
             {children}
         </DataContext.Provider>

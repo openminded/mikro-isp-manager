@@ -31,3 +31,5 @@ server/data/*
 mobile_app/**/*.apk
 *.zip
 *.lnk
+powershell.bat
+customer_app/**/*.apk

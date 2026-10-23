@@ -10,8 +10,8 @@ deviceId
 kRepeat
 java.lang.Integer
 verticalText
-android.util.LongArray
 FlutterSharedPreferences
+android.util.LongArray
 getUncaughtExceptionPreHandler
 onBackPressed
 adapter
@@ -32,7 +32,6 @@ WindowInfoTrackerImpl.kt
 TextInputClient.updateEditingStateWit...
 openBrowser
 registerWith
-INT_VALUE
 SystemSoundType.alert
 REDUCE_MOTION
 DECREASE
@@ -84,9 +83,8 @@ kotlinx.coroutines.default.parallelism
 extensionCallback
 list
 LONG_PRESS
-DID_LOSE_ACCESSIBILITY_FOCUS
 HAS_CHECKED_STATE
-java.util.stream.DoubleStream
+DID_LOSE_ACCESSIBILITY_FOCUS
 FlutterEngine
 flutter/keyevent
 phoneCountryCode
@@ -100,7 +98,6 @@ enable_state_restoration
 COMPLETING_WAITING_CHILDREN
 ClassVerificationFailure
 _invoked
-DOUBLE_VALUE
 locale
 SDK_INT
 SET_SELECTION
@@ -147,7 +144,6 @@ TextInputType.none
 TextInputAction.none
 secondaryActivityName.className
 byte
-DISTINCT
 getNextMatch
 splitRule
 resizeUp
@@ -155,7 +151,6 @@ creditCardNumber
 onPostResume
 io.flutter.Entrypoint
 CLIP_RECT
-NO_MORE
 other
 wait
 FlutterActivityAndFragmentDelegate
@@ -168,7 +163,6 @@ URI
 safeCast
 FlutterTextureView
 URL
-segments
 CHARACTERS
 top
 io.flutter.embedding.android.EnableVu...
@@ -180,7 +174,6 @@ addressRegion
 resizeDown
 TextInput.setClient
 _resumed
-java.util.stream.LongStream
 TextInputType.multiline
 getChildId
 PRIVATE
@@ -207,11 +200,9 @@ read
 flutter/keydata
 memoryPressure
 flutter/restoration
-rnd
 touch
 onUserLeaveHint
 _cur
-mStableInsets
 CommonPool
 onResume
 java.util.List
@@ -236,16 +227,13 @@ rect
 kotlinx.coroutines.DefaultExecutor.ke...
 kotlin.Annotation
 INVERT_COLORS
-REFERENCE
 packageName
 synchronizeToNativeViewHierarchy
 LANDSCAPE_LEFT
 info.displayFeatures
 enableJavaScript
 direction
-OP
 BITMAP
-STREAM
 windowConfiguration
 newConfig
 resizeUpRight
@@ -281,7 +269,6 @@ android.view.ViewRootImpl
 Destroying.
 input
 REMOVE_FROZEN
-segmentShift
 POSTURE_FLAT
 android.support.customtabs.extra.SESS...
 kotlin.collections.ListIterator
@@ -306,8 +293,8 @@ getSourceNodeId
 call
 streetAddress
 kotlin.Char
-flutter/isolate
 ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN
+flutter/isolate
 grab
 chars
 dimen
@@ -344,7 +331,6 @@ DartExecutor
 fields
 getDescriptor
 keymap
-cellsBusy
 string
 FlutterLoader
 onRequestPermissionsResult
@@ -376,8 +362,8 @@ enableSuggestions
 DATETIME
 PASTE
 android.intent.action.VIEW
-short
 IS_MULTILINE
+short
 middleName
 window
 personFamilyName
@@ -390,9 +376,9 @@ VISIBLE_PASSWORD
 IS_FOCUSABLE
 TextInput.clearClient
 SCROLL_RIGHT
-textCapitalization
 android.widget.ImageView
 android.widget.RadioButton
+textCapitalization
 moduleName
 dev.flutter.pigeon.url_launcher_andro...
 hybridFallback
@@ -401,8 +387,8 @@ getBounds
 put
 EmptyCoroutineContext
 TextInputType.text
-CPU_ACQUIRED
 ACTION_ARGUMENT_SELECTION_END_INT
+CPU_ACQUIRED
 embeddingCallback
 SCROLL_LEFT
 TextInputAction.search
@@ -413,18 +399,16 @@ InputConnectionAdaptor
 flutter/platform
 TEXTURE_WITH_HYBRID_FALLBACK
 dart_entrypoint
-sizeCtl
 kotlinx.coroutines.scheduler.core.poo...
 kotlinx.coroutines.scheduler.max.pool...
 double
-INSTANCE
 POSTURE_HALF_OPENED
 newPassword
 POSTAL_ADDRESS
 smsOTPCode
 SystemChannel
-com.android.browser.headers
 flutter_deeplinking_enabled
+com.android.browser.headers
 flutterEngine
 HEAVY_IMPACT
 light
@@ -442,19 +426,18 @@ BOLD_TEXT
 Dispatchers.Unconfined
 WindowInfoTrackerCallbackAdapter.kt
 flags
-$splitsWithActivity
 PrivateApi
+$splitsWithActivity
 SystemSound.play
 onPause
 SystemUiOverlay.bottom
 ImageReaderSurfaceProducer
 androidx.browser.customtabs.extra.SHA...
 enabled
-android.intent.action.RUN
 android.widget.SeekBar
+android.intent.action.RUN
 INITIALIZED
 LAZY
-mContentInsets
 KeyEventChannel
 android.support.v13.view.inputmethod....
 producerIndex
@@ -484,8 +467,8 @@ SettingsChannel
 selectionBase
 plainCodePoint
 _reusableCancellableContinuation
-TextInputAction.commitContent
 android.view.View
+TextInputAction.commitContent
 inputType
 java.lang.Byte
 BOTH
@@ -494,7 +477,6 @@ deltaEnd
 kind
 GeneratedPluginRegistrant
 SplitPairFilter
-OptionalInt.empty
 io.flutter.embedding.android.EnableIm...
 _consensus
 SCROLL_UP
@@ -591,7 +573,6 @@ clearFocus
 secondaryActivityIntent
 kUp
 FRAMEWORK_CLIENT
-SPLITERATOR
 LOCALE
 hintText
 INACTIVE
@@ -612,7 +593,6 @@ _queue
 setSidecarCallback
 configurationId
 Override
-SORTED
 info
 DORMANT
 HYBRID_ONLY
@@ -632,7 +612,6 @@ FlutterImageView
 nodeId
 inputAction
 frame
-java.util.stream.IntStream
 TERMINATED
 flutter/navigation
 Localization.getStringResource
@@ -645,11 +624,9 @@ ENQUEUE_FAILED
 ProcessText.queryTextActions
 cached_engine_group_id
 statusBarColor
-SIZED
 VGhpcyBpcyB0aGUgcHJlZml4IGZvciBCaWdJb...
 java.lang.Boolean
 contentCommitMimeTypes
-OptionalDouble.empty
 continuation
 DISABLE_ANIMATIONS
 DeviceOrientation.landscapeRight
@@ -685,7 +662,6 @@ endIndex
 context
 $newLayoutInfo
 action
-transferIndex
 text
 id
 kDirectionalPad
@@ -721,7 +697,6 @@ file
 RIGHT
 placeholderIntent
 CancellableContinuation
-CONCURRENT
 onDestroy
 IS_KEYBOARD_KEY
 personNameSuffix
@@ -745,7 +720,6 @@ IS_SLIDER
 newIndent
 resizeUpLeftDownRight
 KeyboardManager
-ALL
 RESUMED
 SpellCheckChannel
 flutter/processtext
@@ -755,7 +729,6 @@ activityFilters
 suffix
 mVisibleInsets
 personMiddleInitial
-LONG_VALUE
 cleartextTrafficPermitted
 DID_GAIN_ACCESSIBILITY_FOCUS
 kotlin.Number
@@ -769,8 +742,8 @@ separator
 personMiddleName
 io.flutter.embedding.android.Impeller...
 entries
-null
 grabbing
+null
 NavigationChannel
 background
 alwaysUse24HourFormat
@@ -784,12 +757,9 @@ p0
 featureBounds
 transformer
 statusBarIconBrightness
-ANY
-lockState
 ON_OFF_SWITCH_LABELS
 asyncTraceEnd
 transform
-theUnsafe
 STARTED
 activity.windowManager.maximumWindowM...
 kotlin.Comparable
@@ -824,11 +794,11 @@ EMAIL_ADDRESS
 java.lang.Long
 metaState
 java.util.Map
-INTERNAL
 TextInputPlugin
+INTERNAL
 height
-BOTTOM_OVERLAYS
 CUT
+BOTTOM_OVERLAYS
 _decision
 accept
 input_method
@@ -848,7 +818,6 @@ HALF_OPENED
 activity.windowManager.currentWindowM...
 $this$$receiver
 ImageTextureRegistryEntry
-UNLIMITED
 key
 email
 android.type.verbatim
@@ -881,9 +850,7 @@ primaryColor
 rules
 personGivenName
 pairs
-baseCount
 TextInput.setEditingState
-ORDERED
 enableDomStorage
 ON_START
 windowMetrics.bounds
@@ -962,7 +929,6 @@ java.util.Set
 ACTION_ARGUMENT_SELECTION_START_INT
 push
 _state
-OptionalLong.empty
 SHOW_ON_SCREEN
 brieflyShowPassword
 overridingDecorator
@@ -970,7 +936,6 @@ newDeviceState
 kotlinx.coroutines.scheduler
 gender
 java.lang.Double
-mutex
 range
 resizeRow
 usesVirtualDisplay
@@ -983,11 +948,8 @@ get
 dark
 tracker
 oneTimeCode
-initialized
 FLAT
 getDisplayInfo
-Optional.empty
-UPSTREAM_TERMINAL_OP
 copy
 precise
 java.lang.Number
@@ -995,15 +957,13 @@ BanUncheckedReflection
 resizeDownRight
 newLayout
 DARK
-COPY
 IS_READ_ONLY
+COPY
 androidx.browser.customtabs.extra.NAV...
-SpinedBuffer:
 token
 initializer
 filter
 SystemChrome.setPreferredOrientations
-TERMINAL_OP
 help
 ACTIVITY_NOT_FOUND
 phoneNumberDevice
@@ -1014,15 +974,12 @@ URI_MASKABLE
 ON_CREATE
 HAS_ENABLED_STATE
 android.widget.Switch
-java.util.secureRandomSeed
 data
-IDENTITY_FINISH
 resizeUpRightDownLeft
 ON_RESUME
 IS_ENABLED
 float
 IS_BUTTON
-segmentMask
 postalAddressExtended
 TextCapitalization.characters
 asyncTraceBegin
@@ -1051,7 +1008,6 @@ kotlin.collections.Iterable
 telephoneNumberDevice
 DATA
 UTF8
-UNORDERED
 files
 didGainFocus
 flutter/localization
@@ -1067,18 +1023,15 @@ Brightness.light
 LTR
 error
 kotlin.Byte
-MAYBE_MORE
 array
 kotlin.collections.Set
 postfix
 android.intent.action.SEND
 value
 getWindowLayoutInfo
-SHORT_CIRCUIT
 opaque
 REUSABLE_CLAIMED
 java.util.Iterator
-org.openjdk.java.util.stream.tripwire
 0x%08x
 dart_entrypoint_args
 onWindowFocusChanged
@@ -1090,12 +1043,11 @@ intent
 int
 personName
 boolean
-java.util.stream.Collector.Characteri...
 com.google.android.inputmethod.latin
 emit
-dev.flutter.pigeon.SharedPreferencesA...
 AccessibilityBridge
 SCROLL_DOWN
+dev.flutter.pigeon.SharedPreferencesA...
 Marking id:accessibility_action_clickable_span:2131034112 used because it matches string pool constant acc
 Marking id:accessibility_custom_action_0:2131034113 used because it matches string pool constant acc
 Marking id:accessibility_custom_action_1:2131034114 used because it matches string pool constant acc
@@ -1373,7 +1325,7 @@ Marking id:line3:2131034166 used because it matches string pool constant line
 @com.ayd.giganusa:id/tag_accessibility_clickable_spans : reachable=false
 @com.ayd.giganusa:id/tag_accessibility_heading : reachable=false
 @com.ayd.giganusa:id/tag_accessibility_pane_title : reachable=true
-@com.ayd.giganusa:id/tag_on_apply_window_listener : reachable=true
+@com.ayd.giganusa:id/tag_on_apply_window_listener : reachable=false
 @com.ayd.giganusa:id/tag_on_receive_content_listener : reachable=false
 @com.ayd.giganusa:id/tag_on_receive_content_mime_types : reachable=false
 @com.ayd.giganusa:id/tag_screen_reader_focusable : reachable=false
@@ -1381,7 +1333,7 @@ Marking id:line3:2131034166 used because it matches string pool constant line
 @com.ayd.giganusa:id/tag_transition_group : reachable=false
 @com.ayd.giganusa:id/tag_unhandled_key_event_manager : reachable=false
 @com.ayd.giganusa:id/tag_unhandled_key_listeners : reachable=true
-@com.ayd.giganusa:id/tag_window_insets_animation_callback : reachable=true
+@com.ayd.giganusa:id/tag_window_insets_animation_callback : reachable=false
 @com.ayd.giganusa:id/text : reachable=true
 @com.ayd.giganusa:id/text2 : reachable=true
 @com.ayd.giganusa:id/time : reachable=false
@@ -1508,9 +1460,7 @@ The root reachable resources are:
  id:line3:2131034166
  id:locale:2131034167
  id:tag_accessibility_pane_title:2131034179
- id:tag_on_apply_window_listener:2131034180
  id:tag_unhandled_key_listeners:2131034187
- id:tag_window_insets_animation_callback:2131034188
  id:text:2131034189
  id:text2:2131034190
  id:view_tree_lifecycle_owner:2131034193
@@ -1598,12 +1548,14 @@ Unused resources are:
  id:tag_accessibility_actions:2131034176
  id:tag_accessibility_clickable_spans:2131034177
  id:tag_accessibility_heading:2131034178
+ id:tag_on_apply_window_listener:2131034180
  id:tag_on_receive_content_listener:2131034181
  id:tag_on_receive_content_mime_types:2131034182
  id:tag_screen_reader_focusable:2131034183
  id:tag_state_description:2131034184
  id:tag_transition_group:2131034185
  id:tag_unhandled_key_event_manager:2131034186
+ id:tag_window_insets_animation_callback:2131034188
  id:time:2131034191
  id:title:2131034192
  integer:status_bar_notification_info_maxnum:2131099648

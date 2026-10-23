@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/customer_provider.dart';
 import '../../models/customer_portal_models.dart';
 
@@ -17,6 +18,84 @@ class VouchersTab extends StatelessWidget {
         backgroundColor: const Color(0xFF1E293B),
       ),
     );
+  }
+
+  Future<void> _launchLoginUrl(BuildContext context, String? urlString) async {
+    if (urlString == null || urlString.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('URL halaman login tidak tersedia.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    final trimmed = urlString.trim();
+    Uri? uri = Uri.tryParse(trimmed);
+    if (uri != null && !uri.hasScheme) {
+      uri = Uri.tryParse('http://$trimmed');
+    }
+
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Format link login tidak valid.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    bool launched = false;
+    try {
+      // 1. Launch in external browser application
+      launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (e) {
+      debugPrint('[url_launcher] externalApplication error: $e');
+    }
+
+    if (!launched) {
+      try {
+        // 2. Fallback to platform default
+        launched = await launchUrl(
+          uri,
+          mode: LaunchMode.platformDefault,
+        );
+      } catch (e) {
+        debugPrint('[url_launcher] platformDefault error: $e');
+      }
+    }
+
+    if (!launched) {
+      // 3. Fallback to native Android intent via MethodChannel
+      try {
+        const channelA = MethodChannel('com.ayd.giganusa/launcher');
+        final res = await channelA.invokeMethod('openBrowser', {'url': uri.toString()});
+        if (res == true) launched = true;
+      } catch (_) {
+        try {
+          const channelB = MethodChannel('com.giganusa.customer/launcher');
+          final res = await channelB.invokeMethod('openBrowser', {'url': uri.toString()});
+          if (res == true) launched = true;
+        } catch (_) {}
+      }
+    }
+
+    if (!launched && context.mounted) {
+      // 4. Fallback: Copy to clipboard and notify user
+      Clipboard.setData(ClipboardData(text: uri.toString()));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Tidak dapat membuka browser secara otomatis. Link disalin: ${uri.toString()}'),
+          backgroundColor: const Color(0xFFD97706),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   Future<void> _activateVoucher(BuildContext context, CustomerVoucherItem voucher) async {
@@ -63,7 +142,6 @@ class VouchersTab extends StatelessWidget {
       ),
     );
 
-    bool activatedSuccess = false;
     String statusMsg = '';
 
     try {
@@ -72,15 +150,12 @@ class VouchersTab extends StatelessWidget {
       final resp = await http.get(uri).timeout(const Duration(seconds: 6));
       
       if (resp.statusCode == 200 || resp.statusCode == 302 || resp.statusCode == 301) {
-        activatedSuccess = true;
         statusMsg = 'Voucher berhasil diaktivasi ke Hotspot MikroTik!';
       } else {
-        activatedSuccess = true;
         statusMsg = 'Permintaan aktivasi dikirim ke router WiFi!';
       }
     } catch (e) {
       // Network timeout or local redirect
-      activatedSuccess = true;
       statusMsg = 'Permintaan login voucher dikirim ke gateway hotspot.';
     }
 
@@ -108,14 +183,7 @@ class VouchersTab extends StatelessWidget {
               Text(statusMsg, style: const TextStyle(fontSize: 13, color: Color(0xFF334155))),
               const SizedBox(height: 12),
               InkWell(
-                onTap: () async {
-                  try {
-                    const channel = MethodChannel('com.ayd.giganusa/launcher');
-                    await channel.invokeMethod('openBrowser', {'url': loginUrl});
-                  } catch (e) {
-                    debugPrint('Error launching url: $e');
-                  }
-                },
+                onTap: () => _launchLoginUrl(context, loginUrl),
                 borderRadius: BorderRadius.circular(10),
                 child: Container(
                   padding: const EdgeInsets.all(10),
@@ -167,14 +235,7 @@ class VouchersTab extends StatelessWidget {
               ),
               icon: const Icon(Icons.open_in_new_rounded, size: 16),
               label: const Text('Buka Halaman Login'),
-              onPressed: () async {
-                try {
-                  const channel = MethodChannel('com.ayd.giganusa/launcher');
-                  await channel.invokeMethod('openBrowser', {'url': loginUrl});
-                } catch (e) {
-                  debugPrint('Error launching url: $e');
-                }
-              },
+              onPressed: () => _launchLoginUrl(context, loginUrl),
             ),
           ],
         ),
@@ -976,6 +1037,67 @@ class VouchersTab extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                ],
+                // Directly Clickable Hotspot Login Link (Url Halaman Login)
+                if (voucher.loginUrl != null && voucher.loginUrl!.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  InkWell(
+                    onTap: () => _launchLoginUrl(context, voucher.loginUrl),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.open_in_browser_rounded, size: 18, color: Color(0xFF2563EB)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Link Halaman Login Hotspot:',
+                                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF1E40AF)),
+                                ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  voucher.loginUrl!,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF2563EB),
+                                    fontWeight: FontWeight.w600,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2563EB),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Text('Buka', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white)),
+                                SizedBox(width: 2),
+                                Icon(Icons.open_in_new_rounded, size: 10, color: Colors.white),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
                 // Activate button (only for active vouchers)

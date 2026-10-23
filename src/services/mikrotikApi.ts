@@ -212,11 +212,29 @@ export const MikrotikApi = {
     // --- CRM / Extended Data Methods ---
     async getExtendedData(): Promise<Record<string, any>> {
         try {
-            const res = await fetch(`${META_API_URL}/customers/meta`);
+            const res = await fetch(`${META_API_URL}/customers/meta?_t=${Date.now()}`, { cache: 'no-store' });
             return await res.json();
         } catch (e) {
             console.error("Failed to fetch extended data", e);
             return {};
+        }
+    },
+
+    async toggleCustomerAppAccess(payload: { serverId?: string; customerId?: string; crmId?: string; name?: string; mikrotikName?: string; is_app_enabled: boolean }): Promise<any> {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${META_API_URL}/customers/toggle-app-access`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify(payload)
+            });
+            return await res.json();
+        } catch (e) {
+            console.error("Failed to toggle customer app access", e);
+            return { success: false, error: (e as any).message };
         }
     },
 
@@ -356,7 +374,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to fetch hotspot servers');
+            throw new Error(err.error || 'Gagal mengambil data server hotspot');
         }
         return await res.json();
     },
@@ -369,7 +387,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to fetch hotspot users');
+            throw new Error(err.error || 'Gagal mengambil data user hotspot');
         }
         return await res.json();
     },
@@ -382,7 +400,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to add hotspot user');
+            throw new Error(err.error || 'Gagal menambahkan user hotspot');
         }
         return await res.json();
     },
@@ -395,7 +413,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to update hotspot user');
+            throw new Error(err.error || 'Gagal mengupdate user hotspot');
         }
         return await res.json();
     },
@@ -408,7 +426,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to delete hotspot user');
+            throw new Error(err.error || 'Gagal menghapus user hotspot');
         }
         return await res.json();
     },
@@ -421,7 +439,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to toggle hotspot user');
+            throw new Error(err.error || 'Gagal mengubah status user hotspot');
         }
         return await res.json();
     },
@@ -434,7 +452,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to fetch hotspot active sessions');
+            throw new Error(err.error || 'Gagal mengambil data sesi aktif hotspot');
         }
         return await res.json();
     },
@@ -447,7 +465,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to kick hotspot user');
+            throw new Error(err.error || 'Gagal mengeluarkan user hotspot');
         }
         return await res.json();
     },
@@ -460,7 +478,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to fetch hotspot profiles');
+            throw new Error(err.error || 'Gagal mengambil data profil hotspot');
         }
         return await res.json();
     },
@@ -479,7 +497,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to generate hotspot vouchers');
+            throw new Error(err.error || 'Gagal membuat voucher hotspot');
         }
         return await res.json();
     },
@@ -499,7 +517,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to set user quota');
+            throw new Error(err.error || 'Gagal mengatur kuota user');
         }
         return await res.json();
     },
@@ -512,7 +530,7 @@ export const MikrotikApi = {
         if (params?.status) q.set('status', params.status);
         if (params?.limit) q.set('limit', params.limit);
         const res = await fetch(`${META_API_URL}/customer-vouchers?${q.toString()}`);
-        if (!res.ok) throw new Error('Failed to fetch customer vouchers');
+        if (!res.ok) throw new Error('Gagal mengambil data voucher pelanggan');
         return await res.json();
     },
 
@@ -523,7 +541,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to sync vouchers across all servers');
+            throw new Error(err.error || 'Gagal menyinkronkan voucher di semua server');
         }
         return await res.json();
     },
@@ -536,14 +554,14 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to delete vouchers');
+            throw new Error(err.error || 'Gagal menghapus voucher');
         }
         return await res.json();
     },
 
     async getVouchersByCustomerId(customerId: string): Promise<any> {
         const res = await fetch(`${META_API_URL}/customers/${customerId}/vouchers`);
-        if (!res.ok) throw new Error('Failed to fetch vouchers for customer');
+        if (!res.ok) throw new Error('Gagal mengambil voucher untuk pelanggan');
         return await res.json();
     },
 
@@ -555,7 +573,7 @@ export const MikrotikApi = {
         });
         if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error || 'Failed to reset user counters');
+            throw new Error(err.error || 'Gagal mereset counter user');
         }
         return await res.json();
     },

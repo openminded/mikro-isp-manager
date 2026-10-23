@@ -1614,7 +1614,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                                 <input
                                                     type={showAppPwd ? "text" : "password"}
                                                     className="w-full pl-3 pr-10 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono text-sm"
-                                                    placeholder="giganusa!"
+                                                    placeholder="Masukkan kata sandi..."
                                                     value={formData.appPassword}
                                                     onChange={e => setFormData({ ...formData, appPassword: e.target.value })}
                                                 />

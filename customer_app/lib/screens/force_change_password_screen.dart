@@ -161,7 +161,7 @@ class _ForceChangePasswordScreenState extends State<ForceChangePasswordScreen> {
                         child: TextField(
                           controller: _oldPasswordController,
                           decoration: const InputDecoration(
-                            hintText: 'giganusa!',
+                            hintText: 'Masukkan kata sandi saat ini',
                             prefixIcon: Icon(Icons.lock_clock_outlined, size: 20, color: Color(0xFF64748B)),
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.symmetric(vertical: 12, horizontal: 12),

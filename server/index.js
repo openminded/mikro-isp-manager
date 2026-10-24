@@ -189,7 +189,11 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Webhook-Token', 'Svix-Id', 'Svix-Timestamp', 'Svix-Signature']
 }));
-app.use(express.json());
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf;
+    }
+}));
 
 // --- Debugging Middleware ---
 app.use((req, res, next) => {
@@ -4463,7 +4467,7 @@ const handleSumopodWebhook = async (req, res) => {
             const svixId = req.headers['svix-id'];
             const svixTimestamp = req.headers['svix-timestamp'];
             const svixSignature = req.headers['svix-signature'];
-            const rawBodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+            const rawBodyStr = req.rawBody ? req.rawBody.toString('utf8') : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
 
             if (!verifySumopodSvixSignature(webhookSecret, svixId, svixTimestamp, svixSignature, rawBodyStr)) {
                 console.warn('[SUMOPOD WEBHOOK UNAUTHORIZED] Invalid Svix HMAC signature');
@@ -4474,11 +4478,18 @@ const handleSumopodWebhook = async (req, res) => {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
         const data = body.data || body;
         const eventType = body.event_type || body.event || (data.status === 'COMPLETED' || data.status === 'PAID' ? 'payment.completed' : null);
+        const event_type = eventType;
 
         console.log(`[SUMOPOD WEBHOOK RECEIVED] Event: ${eventType}`, data);
 
         if (!eventType || !data) {
             return res.status(200).json({ success: true, message: 'No event data to process' });
+        }
+
+        // Test event from SumoPod Settings dashboard ("Save & Test")
+        if (eventType === 'payment.test') {
+            console.log('[SUMOPOD WEBHOOK TEST] Test ping received successfully from SumoPod dashboard!');
+            return res.status(200).json({ success: true, message: 'Test webhook received successfully' });
         }
 
         if (eventType === 'payment.completed') {
@@ -4604,7 +4615,7 @@ const handleSumopodWebhook = async (req, res) => {
             } else {
                 console.log(`[SUMOPOD WEBHOOK] Invoice ${invoice.id} was already marked as PAID.`);
             }
-        } else if (event_type === 'payment.expired' || event_type === 'payment.failed') {
+        } else if (eventType === 'payment.expired' || eventType === 'payment.failed') {
             const orderId = data.order_id;
             const paymentId = data.payment_id;
             if (orderId) {
@@ -4613,11 +4624,11 @@ const handleSumopodWebhook = async (req, res) => {
                     await InvoiceHistory.create({
                         invoice_id: invoice.id,
                         user_name: 'SumoPod Gateway',
-                        action: event_type === 'payment.expired' ? 'SUMOPOD_LINK_EXPIRED' : 'SUMOPOD_PAYMENT_FAILED',
-                        details: `Sesi pembayaran online SumoPod (Payment ID: ${paymentId}) ${event_type === 'payment.expired' ? 'kadaluwarsa (24 jam)' : 'gagal'}.`,
+                        action: eventType === 'payment.expired' ? 'SUMOPOD_LINK_EXPIRED' : 'SUMOPOD_PAYMENT_FAILED',
+                        details: `Sesi pembayaran online SumoPod (Payment ID: ${paymentId}) ${eventType === 'payment.expired' ? 'kadaluwarsa (24 jam)' : 'gagal'}.`,
                         timestamp: new Date()
                     }).catch(() => {});
-                    console.log(`[SUMOPOD WEBHOOK] Recorded ${event_type} for Invoice ${invoice.id}`);
+                    console.log(`[SUMOPOD WEBHOOK] Recorded ${eventType} for Invoice ${invoice.id}`);
                 }
             }
         }
@@ -4631,6 +4642,18 @@ const handleSumopodWebhook = async (req, res) => {
 
 app.post('/api/webhooks/sumopod', handleSumopodWebhook);
 app.post('/api/billing/webhook/sumopod', handleSumopodWebhook);
+
+// GET routes so user can easily verify in browser that the webhook is running
+const handleSumopodWebhookStatus = (req, res) => {
+    res.json({
+        success: true,
+        service: 'SumoPod Webhook Receiver',
+        status: 'READY',
+        message: 'Endpoint webhook aktif dan siap menerima payload HTTP POST dari SumoPod.'
+    });
+};
+app.get('/api/webhooks/sumopod', handleSumopodWebhookStatus);
+app.get('/api/billing/webhook/sumopod', handleSumopodWebhookStatus);
 
 // Generate Invoices Manual Trigger
 let isGeneratingInvoices = false;

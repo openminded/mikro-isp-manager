@@ -6,11 +6,11 @@ import 'theme/giga_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const GigaNusaApp());
+  runApp(const GiganusaApp());
 }
 
-class GigaNusaApp extends StatelessWidget {
-  const GigaNusaApp({super.key});
+class GiganusaApp extends StatelessWidget {
+  const GiganusaApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +19,7 @@ class GigaNusaApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CustomerProvider()),
       ],
       child: MaterialApp(
-        title: 'GigaNusa',
+        title: 'Giganusa',
         theme: GigaTheme.theme,
         home: const CustomerSplashScreen(),
         debugShowCheckedModeBanner: false,

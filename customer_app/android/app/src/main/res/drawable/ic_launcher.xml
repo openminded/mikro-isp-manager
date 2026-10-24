@@ -8,7 +8,7 @@
         android:fillColor="#F8FAFC"
         android:pathData="M0,0h500v500h-500z"/>
     
-    <!-- GigaNusa Logo Vector Outer Arch -->
+    <!-- Giganusa Logo Vector Outer Arch -->
     <path
         android:strokeColor="#333745"
         android:strokeWidth="90"

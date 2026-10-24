@@ -198,7 +198,7 @@ class ProfileTab extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      'Pelanggan GigaNusa',
+                      'Pelanggan Giganusa',
                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
                     ),
                   ),
@@ -270,7 +270,7 @@ class ProfileTab extends StatelessWidget {
                   const Divider(height: 1),
                   ListTile(
                     leading: const Icon(Icons.info_outline, color: Color(0xFF334155)),
-                    title: const Text('Tentang GigaNusa', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    title: const Text('Tentang Giganusa', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                     subtitle: const Text('Versi 1.0.0', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
                   ),
                 ],

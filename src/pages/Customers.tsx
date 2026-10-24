@@ -239,7 +239,7 @@ export function Customers() {
         if (selectedCustomers.length === 0) return;
 
         const actionText = enable ? 'Mengaktifkan' : 'Menonaktifkan';
-        if (!confirm(`${actionText} akses Aplikasi GigaNusa untuk ${selectedCustomers.length} pelanggan terpilih?`)) return;
+        if (!confirm(`${actionText} akses Aplikasi Giganusa untuk ${selectedCustomers.length} pelanggan terpilih?`)) return;
 
         setIsBulkAppUpdating(true);
         try {
@@ -283,7 +283,7 @@ export function Customers() {
 
     const handleBulkAppAccessAll = async (enable: boolean) => {
         const actionText = enable ? 'Mengaktifkan' : 'Menonaktifkan';
-        if (!confirm(`${actionText} akses Aplikasi GigaNusa untuk SEMUA pelanggan yang memiliki paket internet aktif (bukan BELUM AKTIF)?`)) return;
+        if (!confirm(`${actionText} akses Aplikasi Giganusa untuk SEMUA pelanggan yang memiliki paket internet aktif (bukan BELUM AKTIF)?`)) return;
 
         setIsBulkAllUpdating(true);
         try {
@@ -636,7 +636,7 @@ export function Customers() {
                                 onClick={() => handleBulkAppAccess(true)}
                                 disabled={isBulkAppUpdating}
                                 className="p-2 md:px-3 md:py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/20 text-sm font-semibold active:scale-95"
-                                title="Aktifkan akses login Aplikasi GigaNusa untuk pelanggan yang dicentang"
+                                title="Aktifkan akses login Aplikasi Giganusa untuk pelanggan yang dicentang"
                             >
                                 <Smartphone className="w-4 h-4" />
                                 <span>Aktivasi App ({selectedKeys.size})</span>
@@ -645,7 +645,7 @@ export function Customers() {
                                 onClick={() => handleBulkAppAccess(false)}
                                 disabled={isBulkAppUpdating}
                                 className="p-2 md:px-3 md:py-2 bg-slate-700 text-white hover:bg-slate-800 rounded-lg transition-all flex items-center gap-1.5 shadow-sm text-sm font-medium active:scale-95"
-                                title="Nonaktifkan akses login Aplikasi GigaNusa untuk pelanggan yang dicentang"
+                                title="Nonaktifkan akses login Aplikasi Giganusa untuk pelanggan yang dicentang"
                             >
                                 <Smartphone className="w-4 h-4 text-slate-300" />
                                 <span className="hidden xl:inline">Nonaktifkan App</span>
@@ -656,7 +656,7 @@ export function Customers() {
                             onClick={() => handleBulkAppAccessAll(true)}
                             disabled={isBulkAllUpdating}
                             className="p-2 md:px-3 md:py-2 bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-all flex items-center gap-1.5 shadow-sm text-sm font-medium disabled:opacity-50"
-                            title="Aktifkan akses Aplikasi GigaNusa untuk SEMUA pelanggan yang memiliki paket internet aktif"
+                            title="Aktifkan akses Aplikasi Giganusa untuk SEMUA pelanggan yang memiliki paket internet aktif"
                         >
                             {isBulkAllUpdating ? (
                                 <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
@@ -785,7 +785,7 @@ export function Customers() {
                             onClick={() => handleBulkAppAccess(true)}
                             disabled={isBulkAppUpdating}
                             className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition-all flex items-center gap-2 shadow-md shadow-emerald-600/30 active:scale-95"
-                            title="Aktifkan akses login Aplikasi GigaNusa untuk semua pelanggan yang dicentang"
+                            title="Aktifkan akses login Aplikasi Giganusa untuk semua pelanggan yang dicentang"
                         >
                             <Smartphone className="w-4 h-4" />
                             <span>Aktivasi Akses App ({selectedKeys.size})</span>
@@ -795,7 +795,7 @@ export function Customers() {
                             onClick={() => handleBulkAppAccess(false)}
                             disabled={isBulkAppUpdating}
                             className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 disabled:opacity-50 text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 active:scale-95"
-                            title="Nonaktifkan akses login Aplikasi GigaNusa untuk pelanggan terpilih"
+                            title="Nonaktifkan akses login Aplikasi Giganusa untuk pelanggan terpilih"
                         >
                             <Smartphone className="w-4 h-4 text-slate-400" />
                             <span>Nonaktifkan App</span>
@@ -1607,7 +1607,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
 
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                                <span>Sandi Aplikasi Customer (GigaNusa App Login)</span>
+                                                <span>Sandi Aplikasi Customer (Giganusa App Login)</span>
                                                 <span className="text-xs text-amber-600 font-normal">Default: giganusa!</span>
                                             </label>
                                             <div className="relative">
@@ -1626,7 +1626,7 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                                     {showAppPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                                 </button>
                                             </div>
-                                            <p className="text-xs text-slate-400">Kata sandi untuk login pelanggan di Aplikasi GigaNusa Mobile / Portal Client.</p>
+                                            <p className="text-xs text-slate-400">Kata sandi untuk login pelanggan di Aplikasi Giganusa Mobile / Portal Client.</p>
                                         </div>
 
                                         {/* App Activation Toggle */}
@@ -1645,14 +1645,14 @@ function CustomerModal({ isOpen, onClose, onSave, initialData, servers, isLoadin
                                                 </div>
                                                 <div>
                                                     <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                                                        Aktivasi Akses Aplikasi GigaNusa
+                                                        Aktivasi Akses Aplikasi Giganusa
                                                         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border", formData.is_app_enabled ? "bg-emerald-100 text-emerald-700 border-emerald-300" : "bg-slate-200/60 text-slate-500 border-slate-300")}>
                                                             {formData.is_app_enabled ? "AKTIF" : "NONAKTIF"}
                                                         </span>
                                                     </div>
                                                     <div className="text-xs text-slate-500">
                                                         {formData.is_app_enabled 
-                                                            ? "Pelanggan dapat login ke Aplikasi GigaNusa Mobile menggunakan username/No HP & sandi." 
+                                                            ? "Pelanggan dapat login ke Aplikasi Giganusa Mobile menggunakan username/No HP & sandi." 
                                                             : "Jika dinonaktifkan, muncul notifikasi saat login: \"Akun anda belum diaktivasi, mohon hubungi admin\"."}
                                                     </div>
                                                 </div>

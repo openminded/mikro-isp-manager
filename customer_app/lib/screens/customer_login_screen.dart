@@ -141,7 +141,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
               Navigator.pop(ctx);
               const cleanPhone = '6285117535324';
               final encodedMsg = Uri.encodeComponent(
-                'Halo CS GigaNusa, mohon bantuan untuk mengaktifkan akses aplikasi untuk akun saya:\nNomor HP/Username: $identifier',
+                'Halo CS Giganusa, mohon bantuan untuk mengaktifkan akses aplikasi untuk akun saya:\nNomor HP/Username: $identifier',
               );
               final waUri = Uri.parse('https://wa.me/$cleanPhone?text=$encodedMsg');
               try {
@@ -574,7 +574,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                         style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
                       ),
                       Text(
-                        'GigaNusa',
+                        'Giganusa',
                         style: TextStyle(fontSize: 12, color: Color(0xFF334155), fontWeight: FontWeight.w700),
                       ),
                     ],

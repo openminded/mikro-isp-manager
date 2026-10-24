@@ -2,7 +2,7 @@ export interface Customer {
     id: string; // Mikrotik ID (*1)
     name: string; // Username
     password?: string;
-    appPassword?: string; // Sandi Aplikasi Customer GigaNusa (default: giganusa!)
+    appPassword?: string; // Sandi Aplikasi Customer Giganusa (default: giganusa!)
     service: string;
     profile: string;
     "remote-address"?: string;
@@ -31,7 +31,7 @@ export interface Customer {
     ssidPassword?: string;
     signalLevel?: string;
     crmId?: string; // SQL UUID for CRM linking
-    is_app_enabled?: boolean; // GigaNusa App Activation Status (default: false)
+    is_app_enabled?: boolean; // Giganusa App Activation Status (default: false)
 }
 
 export interface Profile {

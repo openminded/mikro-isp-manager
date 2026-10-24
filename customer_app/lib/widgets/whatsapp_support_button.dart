@@ -10,7 +10,7 @@ class WhatsAppSupportButton extends StatelessWidget {
   const WhatsAppSupportButton({
     super.key,
     this.phone = '6285117535324',
-    this.message = 'Halo CS GigaNusa, saya butuh bantuan.',
+    this.message = 'Halo CS Giganusa, saya butuh bantuan.',
     this.label = 'Chat CS',
     this.isIconOnly = false,
   });

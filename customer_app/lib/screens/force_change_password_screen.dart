@@ -74,7 +74,7 @@ class _ForceChangePasswordScreenState extends State<ForceChangePasswordScreen> {
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Kata sandi berhasil diperbarui! Selamat datang di GigaNusa.'),
+          content: Text('Kata sandi berhasil diperbarui! Selamat datang di Giganusa.'),
           backgroundColor: Colors.green,
         ),
       );

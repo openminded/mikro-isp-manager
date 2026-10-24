@@ -17,7 +17,7 @@ class AppConstants {
     return kReleaseMode ? productionApiUrl : debugApiUrl;
   }
 
-  static const String appName = 'GigaNusa';
+  static const String appName = 'Giganusa';
   static const String appVersion = '1.0.0';
   static const String defaultPassword = 'giganusa!';
 }

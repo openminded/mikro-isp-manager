@@ -4257,9 +4257,7 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Api-Key': apiKey,
-                        'x-api-key': apiKey,
-                        'Authorization': `Bearer ${apiKey}`
+                        'X-Api-Key': apiKey
                     },
                     body: JSON.stringify(payload)
                 });

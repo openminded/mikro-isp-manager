@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/customer_provider.dart';
-import '../../theme/giga_theme.dart';
 import '../../widgets/giga_logo_widget.dart';
 
 class DashboardTab extends StatelessWidget {
@@ -421,7 +420,7 @@ class DashboardTab extends StatelessWidget {
                     _buildInfoRow(
                       icon: Icons.person_outline,
                       label: 'Nama Pelanggan (Konsumen)',
-                      value: (customer?.realName?.isNotEmpty == true ? customer!.realName : customer?.name) ?? '-',
+                      value: (customer != null && customer.realName.isNotEmpty ? customer.realName : customer?.name) ?? '-',
                     ),
                     const Divider(height: 20),
                     _buildInfoRow(

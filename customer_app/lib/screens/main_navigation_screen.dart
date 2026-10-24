@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/customer_provider.dart';
-import '../theme/giga_theme.dart';
 import '../widgets/whatsapp_support_button.dart';
 import 'tabs/dashboard_tab.dart';
 import 'tabs/vouchers_tab.dart';

@@ -4279,17 +4279,30 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
         if (result.ok && result.data && result.data.payment_link_url) {
             const data = result.data;
             let finalPaymentUrl = data.payment_link_url;
+            let qrSvg = null;
 
-            // Automatically resolve redirect to inject /id/ for native Indonesian language & guidance
+            // Automatically resolve redirect to extract QRIS SVG & enforce /id/ route
             try {
-                const headRes = await fetch(data.payment_link_url, { method: 'HEAD', redirect: 'manual' });
+                const headRes = await fetch(data.payment_link_url, { redirect: 'manual' });
                 const loc = headRes.headers.get('location');
+                const checkoutUrl = loc || data.payment_link_url;
+
                 if (loc && loc.includes('checkout.pymnt.app/')) {
                     finalPaymentUrl = loc.replace('checkout.pymnt.app/', 'checkout.pymnt.app/id/');
                 }
-            } catch (_) {}
 
-            console.log(`[SUMOPOD SUCCESS (${result.mode})] Payment ID: ${data.payment_id}, Link: ${finalPaymentUrl}`);
+                // Fetch checkout page HTML to extract the raw QR Code SVG
+                const pageRes = await fetch(checkoutUrl);
+                const html = await pageRes.text();
+                const svgMatch = html.match(/<svg id="qrcode"[^>]*>[\s\S]*?<\/svg>/i);
+                if (svgMatch) {
+                    qrSvg = svgMatch[0];
+                }
+            } catch (err) {
+                console.warn('[SUMOPOD QR SVG EXTRACT WARNING]', err.message);
+            }
+
+            console.log(`[SUMOPOD SUCCESS (${result.mode})] Payment ID: ${data.payment_id}, Link: ${finalPaymentUrl}, Has SVG: ${!!qrSvg}`);
 
             await InvoiceHistory.create({
                 invoice_id: invoice.id,
@@ -4302,6 +4315,8 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
                 success: true,
                 payment_id: data.payment_id,
                 payment_link_url: finalPaymentUrl,
+                qr_svg: qrSvg,
+                merchant_name: 'PT ANDALAN YASA DIGITAL',
                 order_id: data.order_id || orderId,
                 amount: data.amount || amount,
                 fee: data.fee,

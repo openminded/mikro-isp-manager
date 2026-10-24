@@ -90,6 +90,8 @@ class CustomerInvoice {
       paymentMethod: payMethod,
     );
   }
+
+  bool get isPaid => status.toUpperCase() == 'PAID';
 }
 
 class VoucherUsageData {

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../providers/customer_provider.dart';
 import '../../models/customer_portal_models.dart';
+import '../../widgets/qris_payment_sheet.dart';
 
 class BillingTab extends StatelessWidget {
   const BillingTab({super.key});
@@ -29,7 +30,7 @@ class BillingTab extends StatelessWidget {
                 CircularProgressIndicator(color: Color(0xFF10B981)),
                 SizedBox(height: 16),
                 Text(
-                  'Membuat Tautan QRIS SumoPod...',
+                  'Menyiapkan Pembayaran QRIS...',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
               ],
@@ -43,19 +44,36 @@ class BillingTab extends StatelessWidget {
       final res = await provider.apiService.createSumopodPayment(invoice.id);
       if (context.mounted) Navigator.of(context).pop();
 
-      final paymentUrl = res['payment_link_url'];
-      if (paymentUrl != null && paymentUrl.toString().isNotEmpty) {
-        final uri = Uri.parse(paymentUrl.toString());
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final qrSvg = res['qr_svg'];
+      final paymentUrl = res['payment_link_url']?.toString() ?? '';
+      final amount = (res['amount'] is num) ? (res['amount'] as num).toInt() : invoice.amount.toInt();
+      final merchantName = res['merchant_name']?.toString() ?? 'PT ANDALAN YASA DIGITAL';
+      final paymentId = res['payment_id']?.toString() ?? '';
+
+      if (context.mounted) {
+        if (qrSvg != null && qrSvg.toString().isNotEmpty) {
+          // Native in-app QRIS sheet with auto-polling & screenshot guide
+          await QrisPaymentSheet.show(
+            context,
+            invoice: invoice,
+            qrSvg: qrSvg.toString(),
+            paymentUrl: paymentUrl,
+            amount: amount,
+            merchantName: merchantName,
+            paymentId: paymentId,
+          );
+        } else if (paymentUrl.isNotEmpty) {
+          // Fallback to browser if qr_svg extraction is not available
+          final uri = Uri.parse(paymentUrl);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } else {
+            await launchUrl(uri, mode: LaunchMode.platformDefault);
+          }
         } else {
-          await launchUrl(uri, mode: LaunchMode.platformDefault);
-        }
-      } else {
-        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(res['error'] ?? 'Gagal membuat tautan QRIS'),
+              content: Text(res['error'] ?? 'Gagal membuat tagihan QRIS'),
               backgroundColor: Colors.red,
             ),
           );

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/customer_provider.dart';
-import '../../widgets/giga_logo_widget.dart';
 import '../customer_login_screen.dart';
 
 class ProfileTab extends StatelessWidget {

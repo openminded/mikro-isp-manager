@@ -4244,12 +4244,13 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
         if (successReturnUrl) payload.success_return_url = successReturnUrl;
         if (cancelReturnUrl) payload.cancel_return_url = cancelReturnUrl;
 
-        // Default to PROD key as requested, with fallback to DEV key
-        const primaryKey = process.env.SUMOPOD_API_KEY || SUMOPOD_KEYS.prod;
-        const fallbackKey = primaryKey === SUMOPOD_KEYS.prod ? SUMOPOD_KEYS.dev : SUMOPOD_KEYS.prod;
+        const activeKey = '1e44de55ca2cd390f706d9eaeee9bb65730bdbb508e541bc7de732ff29a35812';
+        const envKey = process.env.SUMOPOD_API_KEY;
+        const primaryKey = (envKey && envKey.length > 20 && !envKey.includes('4cbae0ec')) ? envKey : activeKey;
+        const fallbackKey = activeKey;
 
         const makeSumopodRequest = async (apiKey) => {
-            const modeName = apiKey === SUMOPOD_KEYS.prod ? 'LIVE PROD' : 'DEV SANDBOX';
+            const modeName = apiKey === activeKey ? 'LIVE PROD' : 'DEV SANDBOX';
             console.log(`[SUMOPOD (${modeName})] Attempting create-payment for Invoice ${orderId}, Amount: ${amount}...`);
             try {
                 const res = await fetch(`${SUMOPOD_BASE_URL}/payments`, {
@@ -4272,7 +4273,7 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
         let result = await makeSumopodRequest(primaryKey);
 
         // Fallback retry if primary key returns 401/403 Unauthorized
-        if ((result.status === 401 || result.status === 403) && !process.env.SUMOPOD_API_KEY && primaryKey !== fallbackKey) {
+        if ((result.status === 401 || result.status === 403) && primaryKey !== fallbackKey) {
             console.log(`[SUMOPOD] Primary key (${result.mode}) returned status ${result.status}, retrying with fallback key...`);
             result = await makeSumopodRequest(fallbackKey);
         }
@@ -4326,7 +4327,13 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
             order_id: orderId,
             amount: amount,
             status: 'PENDING',
-            message: 'Tautan QRIS SumoPod (Demo Local) berhasil dibuat.'
+            message: 'Tautan QRIS SumoPod (Demo Local) berhasil dibuat.',
+            debug_info: {
+                api_status: result?.status,
+                api_data: result?.data,
+                key_prefix: primaryKey ? primaryKey.substring(0, 8) : null,
+                key_suffix: primaryKey ? primaryKey.substring(primaryKey.length - 8) : null
+            }
         });
     } catch (e) {
         console.error('[SUMOPOD EXCEPTION]', e);

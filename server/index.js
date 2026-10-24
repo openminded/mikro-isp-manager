@@ -4316,7 +4316,7 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
                 payment_id: data.payment_id,
                 payment_link_url: finalPaymentUrl,
                 qr_svg: qrSvg,
-                merchant_name: 'PT ANDALAN YASA DIGITAL',
+                merchant_name: data.merchant_name || '',
                 order_id: data.order_id || orderId,
                 amount: data.amount || amount,
                 fee: data.fee,

@@ -13,7 +13,7 @@ class QrisPaymentSheet extends StatefulWidget {
   final String qrSvg;
   final String paymentUrl;
   final int amount;
-  final String merchantName;
+  final String? merchantName;
   final String paymentId;
 
   const QrisPaymentSheet({
@@ -22,7 +22,7 @@ class QrisPaymentSheet extends StatefulWidget {
     required this.qrSvg,
     required this.paymentUrl,
     required this.amount,
-    this.merchantName = 'PT ANDALAN YASA DIGITAL',
+    this.merchantName,
     required this.paymentId,
   });
 
@@ -32,7 +32,7 @@ class QrisPaymentSheet extends StatefulWidget {
     required String qrSvg,
     required String paymentUrl,
     required int amount,
-    String merchantName = 'PT ANDALAN YASA DIGITAL',
+    String? merchantName,
     required String paymentId,
   }) {
     return showModalBottomSheet(
@@ -62,7 +62,7 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
   @override
   void initState() {
     super.initState();
-    // Poll every 4 seconds to check if webhook has marked invoice as PAID
+    // Poll every 4 seconds to check if invoice status has changed to PAID
     _startPolling();
   }
 
@@ -108,7 +108,7 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
           setState(() => _isChecking = false);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Pembayaran belum terdeteksi. Silakan selesaikan pembayaran di m-Banking / e-Wallet Anda.'),
+              content: Text('Pembayaran belum terverifikasi. Pastikan transaksi pada m-Banking / e-Wallet Anda telah berhasil.'),
               backgroundColor: Color(0xFFF59E0B),
               duration: Duration(seconds: 3),
             ),
@@ -206,11 +206,13 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Pembayaran QRIS',
+                        'Pembayaran Tagihan',
                         style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: Color(0xFF1E293B)),
                       ),
                       Text(
-                        widget.merchantName,
+                        widget.merchantName != null && widget.merchantName!.trim().isNotEmpty
+                            ? widget.merchantName!.trim()
+                            : 'Kanal Resmi QRIS Nasional',
                         style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -260,7 +262,7 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
           ),
           const SizedBox(height: 24),
           const Text(
-            'Alhamdulillah, Pembayaran Berhasil!',
+            'Pembayaran Berhasil Diterima',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 20,
@@ -270,9 +272,9 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Tagihan Anda telah lunas dan akun internet Anda otomatis aktif.',
+            'Tagihan Anda telah lunas dan layanan internet Anda telah aktif kembali.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+            style: TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.4),
           ),
           const SizedBox(height: 32),
           SizedBox(
@@ -365,8 +367,8 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
 
               const SizedBox(height: 10),
               const Text(
-                'NMID: ID1020023456789 • ASPI',
-                style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
+                'Standar QRIS Nasional • Bank Indonesia & ASPI',
+                style: TextStyle(fontSize: 10.5, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -376,39 +378,77 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
 
         // Nominal Card
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total yang Harus Dibayar', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                  const SizedBox(height: 2),
-                  Text(
-                    currencyFormatter.format(widget.amount),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF0F172A),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Total Pembayaran',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        currencyFormatter.format(widget.amount),
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF0F172A),
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _copyAmount,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF1E293B),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
+                    icon: const Icon(Icons.copy_rounded, size: 14),
+                    label: const Text('Salin Nominal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
-              TextButton.icon(
-                onPressed: _copyAmount,
-                style: TextButton.styleFrom(
-                  backgroundColor: const Color(0xFFF1F5F9),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              const SizedBox(height: 12),
+              // Peringatan 3 Digit Kode Pembayaran
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFDE68A)),
                 ),
-                icon: const Icon(Icons.copy_rounded, size: 14, color: Color(0xFF334155)),
-                label: const Text('Salin', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD97706)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'PENTING: Mohon bayar tepat sesuai nominal di atas hingga 3 digit terakhir. Tiga digit terakhir merupakan kode unik pembayaran untuk verifikasi otomatis sistem.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF92400E),
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -416,43 +456,43 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
 
         const SizedBox(height: 16),
 
-        // Cara Bayar Card (Humanized Indonesian Guide)
+        // Petunjuk Pembayaran Card (Bahasa Formal & Terstruktur)
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFFEFF6FF),
+            color: const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFBFDBFE)),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Row(
                 children: [
-                  Icon(Icons.lightbulb_rounded, size: 18, color: Color(0xFF2563EB)),
-                  SizedBox(width: 6),
+                  Icon(Icons.menu_book_rounded, size: 18, color: Color(0xFF2563EB)),
+                  SizedBox(width: 8),
                   Text(
-                    'Cara Bayar Cepat Pakai 1 HP:',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Color(0xFF1E40AF)),
+                    'Petunjuk Pembayaran (Satu Perangkat)',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF1E293B)),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               _buildStepRow(
                 '1',
-                'Ambil Screenshot (tangkapan layar) kode QRIS di atas.',
+                'Lakukan tangkapan layar (screenshot) kode QRIS di atas dan pastikan tersimpan pada Galeri foto perangkat Anda.',
               ),
               _buildStepRow(
                 '2',
-                'Buka m-Banking (BCA, Mandiri, BRI) atau e-Wallet (DANA, GoPay, OVO, ShopeePay).',
+                'Buka aplikasi Mobile Banking (BCA, Mandiri, BRI, BNI, dll.) atau Uang Elektronik (GoPay, OVO, DANA, ShopeePay).',
               ),
               _buildStepRow(
                 '3',
-                'Pilih menu Scan / Bayar QRIS -> Pilih icon Galeri Foto untuk memasukkan gambar screenshot tadi.',
+                'Pilih menu Pembayaran / Pindai (Scan) QRIS, kemudian pilih ikon Galeri foto untuk memuat gambar kode QRIS yang telah disimpan.',
               ),
               _buildStepRow(
                 '4',
-                'Pastikan penerima adalah ${widget.merchantName} dan nominal sesuai, lalu masukkan PIN Anda.',
+                'Periksa kembali nominal transaksi agar sesuai persis dengan rincian di atas (termasuk 3 digit kode pembayaran), lalu masukkan PIN Anda untuk menyelesaikan transaksi.',
               ),
             ],
           ),
@@ -480,10 +520,10 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
                 : const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
+                      Icon(Icons.sync_rounded, size: 18, color: Colors.white),
                       SizedBox(width: 8),
                       Text(
-                        'Saya Sudah Bayar (Cek Status)',
+                        'Cek Status Pembayaran',
                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                       ),
                     ],
@@ -501,9 +541,9 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
               await launchUrl(uri, mode: LaunchMode.externalApplication);
             }
           },
-          icon: const Icon(Icons.open_in_new, size: 14, color: Color(0xFF64748B)),
+          icon: const Icon(Icons.open_in_browser_rounded, size: 15, color: Color(0xFF64748B)),
           label: const Text(
-            'Atau buka halaman web SumoPod',
+            'Buka tautan pembayaran di peramban (browser)',
             style: TextStyle(fontSize: 12, color: Color(0xFF64748B), decoration: TextDecoration.underline),
           ),
         ),
@@ -513,14 +553,14 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
 
   Widget _buildStepRow(String number, String text) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 18,
-            height: 18,
-            margin: const EdgeInsets.only(top: 2, right: 8),
+            width: 20,
+            height: 20,
+            margin: const EdgeInsets.only(top: 2, right: 10),
             decoration: const BoxDecoration(
               color: Color(0xFF2563EB),
               shape: BoxShape.circle,
@@ -528,14 +568,14 @@ class _QrisPaymentSheetState extends State<QrisPaymentSheet> {
             child: Center(
               child: Text(
                 number,
-                style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
           ),
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF334155), height: 1.35),
+              style: const TextStyle(fontSize: 12.5, color: Color(0xFF334155), height: 1.4),
             ),
           ),
         ],

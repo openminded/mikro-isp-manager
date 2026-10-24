@@ -47,7 +47,7 @@ class BillingTab extends StatelessWidget {
       final qrSvg = res['qr_svg'];
       final paymentUrl = res['payment_link_url']?.toString() ?? '';
       final amount = (res['amount'] is num) ? (res['amount'] as num).toInt() : invoice.amount.toInt();
-      final merchantName = res['merchant_name']?.toString() ?? 'PT ANDALAN YASA DIGITAL';
+      final merchantName = res['merchant_name']?.toString() ?? '';
       final paymentId = res['payment_id']?.toString() ?? '';
 
       if (context.mounted) {

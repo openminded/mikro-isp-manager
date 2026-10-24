@@ -4278,19 +4278,30 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
 
         if (result.ok && result.data && result.data.payment_link_url) {
             const data = result.data;
-            console.log(`[SUMOPOD SUCCESS (${result.mode})] Payment ID: ${data.payment_id}, Link: ${data.payment_link_url}`);
+            let finalPaymentUrl = data.payment_link_url;
+
+            // Automatically resolve redirect to inject /id/ for native Indonesian language & guidance
+            try {
+                const headRes = await fetch(data.payment_link_url, { method: 'HEAD', redirect: 'manual' });
+                const loc = headRes.headers.get('location');
+                if (loc && loc.includes('checkout.pymnt.app/')) {
+                    finalPaymentUrl = loc.replace('checkout.pymnt.app/', 'checkout.pymnt.app/id/');
+                }
+            } catch (_) {}
+
+            console.log(`[SUMOPOD SUCCESS (${result.mode})] Payment ID: ${data.payment_id}, Link: ${finalPaymentUrl}`);
 
             await InvoiceHistory.create({
                 invoice_id: invoice.id,
                 user_name: 'System',
                 action: 'SUMOPOD_LINK_CREATED',
-                details: `Tautan pembayaran QRIS (SumoPod - ${result.mode}) dibuat: ${data.payment_link_url}`
+                details: `Tautan pembayaran QRIS (SumoPod - ${result.mode}) dibuat: ${finalPaymentUrl}`
             }).catch(() => {});
 
             return res.json({
                 success: true,
                 payment_id: data.payment_id,
-                payment_link_url: data.payment_link_url,
+                payment_link_url: finalPaymentUrl,
                 order_id: data.order_id || orderId,
                 amount: data.amount || amount,
                 fee: data.fee,

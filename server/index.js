@@ -4231,7 +4231,7 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
         }
 
         const amount = Math.round(Number(invoice.amount));
-        const orderId = `INV-${invoice.id}`;
+        const orderId = `INV-${invoice.id}-${Date.now().toString().slice(-6)}`;
 
         const payload = {
             order_id: orderId,
@@ -4507,8 +4507,9 @@ const handleSumopodWebhook = async (req, res) => {
                 return res.status(200).send('OK');
             }
 
-            // Find Invoice by Primary Key or stripped INV- prefix
-            const cleanId = String(orderId).replace(/^INV-/, '');
+            // Find Invoice by Primary Key or stripped INV- prefix (handles UUID and timestamp suffix)
+            const uuidMatch = String(orderId).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+            const cleanId = uuidMatch ? uuidMatch[0] : String(orderId).replace(/^INV-/, '').replace(/-\d+$/, '');
             let invoice = await Invoice.findByPk(cleanId) || await Invoice.findByPk(orderId) || await Invoice.findOne({ where: { id: cleanId } });
 
             if (!invoice) {
@@ -4624,7 +4625,9 @@ const handleSumopodWebhook = async (req, res) => {
             const orderId = data.order_id;
             const paymentId = data.payment_id;
             if (orderId) {
-                const invoice = await Invoice.findByPk(orderId).catch(() => null);
+                const uuidMatch = String(orderId).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+                const cleanId = uuidMatch ? uuidMatch[0] : String(orderId).replace(/^INV-/, '').replace(/-\d+$/, '');
+                const invoice = await Invoice.findByPk(cleanId) || await Invoice.findByPk(orderId).catch(() => null);
                 if (invoice) {
                     await InvoiceHistory.create({
                         invoice_id: invoice.id,

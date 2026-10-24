@@ -4202,8 +4202,8 @@ app.get('/api/test-payments', async (req, res) => {
 // --- SumoPod Payment Gateway Integration ---
 
 const SUMOPOD_KEYS = {
-    prod: '4cbae0ec94eeb5435edca9d43bf2be874638f8a7f9fbb24933beb572a848a6ad',
-    dev: '493ace70dd0eaa77aaf8218334b67c0c84c128ede451d185879e050bdb675ce6'
+    prod: '1e44de55ca2cd390f706d9eaeee9bb65730bdbb508e541bc7de732ff29a35812',
+    dev: '1e44de55ca2cd390f706d9eaeee9bb65730bdbb508e541bc7de732ff29a35812'
 };
 
 const SUMOPOD_MODE = (process.env.SUMOPOD_MODE || 'prod').toLowerCase();

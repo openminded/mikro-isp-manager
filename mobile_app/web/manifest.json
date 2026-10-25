@@ -1,11 +1,11 @@
 {
-    "name": "TelajuApp ISP Management",
-    "short_name": "TelajuApp",
+    "name": "Giganusa Teknisi - Portal Lapangan",
+    "short_name": "Giganusa Teknisi",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "Professional ISP Management System",
+    "description": "Aplikasi Mobile Teknisi & Petugas Lapangan Giganusa",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

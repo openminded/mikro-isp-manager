@@ -311,8 +311,10 @@ class _PublicBillingScreenState extends State<PublicBillingScreen> {
 
   Widget _buildResultView(NumberFormat currencyFormatter) {
     final cust = _billingData!['customer'] as Map<String, dynamic>? ?? {};
+    final summary = _billingData!['summary'] as Map<String, dynamic>? ?? {};
     final invoices = (_billingData!['invoices'] as List?) ?? [];
-    final unpaidInvoices = invoices.where((i) => (i['status'] ?? '').toString().toUpperCase() == 'UNPAID').toList();
+    final unpaidInvoices = invoices.where((i) => (i['status'] ?? '').toString().toUpperCase() == 'UNPAID' && i['is_expired'] != true).toList();
+    final hasExpiredUnpaid = summary['has_expired_unpaid'] == true;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -368,20 +370,35 @@ class _PublicBillingScreenState extends State<PublicBillingScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: const Color(0xFFA7F3D0)),
             ),
-            child: const Column(
+            child: Column(
               children: [
-                Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 48),
-                SizedBox(height: 12),
-                Text(
-                  'Semua Tagihan Sudah Lunas!',
+                const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 48),
+                const SizedBox(height: 12),
+                const Text(
+                  'Semua Tagihan Aktif Lunas!',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF065F46)),
                 ),
-                SizedBox(height: 6),
-                Text(
-                  'Tidak ada tagihan tertunggak saat ini. Layanan internet Anda aktif lancar.',
+                const SizedBox(height: 6),
+                const Text(
+                  'Tidak ada tagihan tertunggak untuk periode bulan berjalan. Layanan internet aktif lancar.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12.5, color: Color(0xFF047857), height: 1.4),
                 ),
+                if (hasExpiredUnpaid) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFBEB),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFFDE68A)),
+                    ),
+                    child: const Text(
+                      'Catatan: Tagihan periode lampau (> 1 bulan) sudah tidak berlaku karena layanan menggunakan model prabayar.',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFF92400E)),
+                    ),
+                  ),
+                ],
               ],
             ),
           )

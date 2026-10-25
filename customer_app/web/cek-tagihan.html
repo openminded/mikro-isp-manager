@@ -763,19 +763,39 @@
       const unpaidList = invoices.filter(i => i.status === 'UNPAID');
 
       if (unpaidList.length === 0) {
+        let expiredNotice = '';
+        if (data.summary && data.summary.has_expired_unpaid) {
+          expiredNotice = `
+            <div style="margin-top: 14px; padding: 12px; background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 10px; font-size: 11.5px; color: #92400E; text-align: left; line-height: 1.4;">
+              ℹ️ <strong>Catatan Sistem Prabayar:</strong> Tagihan periode lampau (> 1 bulan lalu) sudah ditutup dan tidak dapat dibayar melalui portal ini. Jika layanan Anda terisolir dan ingin aktivasi kembali, silakan hubungi <a href="https://wa.me/6282288993664" target="_blank" style="color: #4F46E5; font-weight: bold;">Customer Service</a>.
+            </div>
+          `;
+        }
+
         listContainer.innerHTML = `
           <div class="all-paid-box">
             <div class="all-paid-icon">✓</div>
-            <div class="all-paid-title">Semua Tagihan Sudah Lunas!</div>
-            <p class="all-paid-desc">Tidak ada tagihan yang tertunggak saat ini. Terima kasih telah menggunakan layanan internet kami.</p>
+            <div class="all-paid-title">Semua Tagihan Aktif Lunas!</div>
+            <p class="all-paid-desc">Tidak ada tagihan tertunggak untuk periode bulan berjalan. Terima kasih telah menggunakan layanan internet kami.</p>
+            ${expiredNotice}
           </div>
         `;
       } else {
+        let expiredInfo = '';
+        if (data.summary && data.summary.has_expired_unpaid) {
+          expiredInfo = `
+            <div style="margin-bottom: 12px; padding: 10px 12px; background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 10px; font-size: 11.5px; color: #92400E; line-height: 1.4;">
+              ℹ️ <strong>Sistem Prabayar (Prepaid):</strong> Hanya tagihan periode bulan berjalan dan maksimal 1 bulan sebelumnya yang dapat dibayar.
+            </div>
+          `;
+        }
+
         let html = `
+          ${expiredInfo}
           <div style="background: #FEF3C7; border: 1px solid #FDE68A; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 16px;">📌</span>
             <span style="font-size: 12.5px; font-weight: 700; color: #92400E;">
-              Terdapat ${unpaidList.length} tagihan belum dibayar.
+              Terdapat ${unpaidList.length} tagihan aktif yang perlu dibayar.
             </span>
           </div>
         `;

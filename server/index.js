@@ -4210,6 +4210,40 @@ const SUMOPOD_MODE = (process.env.SUMOPOD_MODE || 'prod').toLowerCase();
 const SUMOPOD_API_KEY = process.env.SUMOPOD_API_KEY || SUMOPOD_KEYS.prod;
 const SUMOPOD_BASE_URL = process.env.SUMOPOD_BASE_URL || 'https://api-pay.sumopod.com/api/v1';
 
+// Helper to validate whether an invoice period is valid for Prepaid billing.
+// In prepaid model, older unpaid periods (> 1 month ago) are expired / obsolete.
+// e.g. If current month is October 2026:
+// - 2026-10 (current month) -> VALID (diff = 0)
+// - 2026-09 (month -1) -> VALID (diff = 1)
+// - 2026-11 (advance next month) -> VALID (diff = -1)
+// - 2026-08 or older (> 1 month ago) -> INVALID / EXPIRED (diff >= 2)
+function isPeriodValidForPrepaid(periodStr, dueDateStr) {
+    let invYear, invMonth;
+    if (periodStr && String(periodStr).includes('-')) {
+        const parts = String(periodStr).split('-');
+        invYear = parseInt(parts[0], 10);
+        invMonth = parseInt(parts[1], 10);
+    } else if (dueDateStr) {
+        const d = new Date(dueDateStr);
+        if (!isNaN(d.getTime())) {
+            invYear = d.getFullYear();
+            invMonth = d.getMonth() + 1;
+        }
+    }
+
+    if (!invYear || !invMonth || isNaN(invYear) || isNaN(invMonth)) {
+        return false;
+    }
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
+
+    const diffMonths = (currentYear - invYear) * 12 + (currentMonth - invMonth);
+    // Allow diffMonths <= 1 (current month, month -1, or upcoming month)
+    return diffMonths <= 1;
+}
+
 // 1. Create SumoPod Payment Link
 app.post('/api/billing/sumopod/create-payment', async (req, res) => {
     try {
@@ -4228,6 +4262,12 @@ app.post('/api/billing/sumopod/create-payment', async (req, res) => {
 
         if (invoice.status === 'PAID') {
             return res.status(400).json({ error: 'Invoice ini sudah lunas' });
+        }
+
+        if (!isPeriodValidForPrepaid(invoice.period, invoice.due_date)) {
+            return res.status(400).json({
+                error: `Tagihan periode ${invoice.period || 'lampau'} sudah kadaluarsa (> 1 bulan lewat) dan tidak dapat dibayar karena sistem prabayar (prepaid).`
+            });
         }
 
         const amount = Math.round(Number(invoice.amount));
@@ -4603,18 +4643,28 @@ app.post('/api/public/billing/check', async (req, res) => {
             if (inv.Payments && inv.Payments.length > 0) {
                 payDate = inv.Payments[0].transaction_date;
             }
+            const isPrepaidValid = isPeriodValidForPrepaid(inv.period, inv.due_date);
+            const statusUpper = inv.status ? inv.status.toUpperCase() : 'UNPAID';
+
             return {
                 id: inv.id,
                 period: inv.period || '-',
                 amount: Math.round(Number(inv.amount)),
-                status: inv.status ? inv.status.toUpperCase() : 'UNPAID',
+                status: statusUpper,
                 due_date: inv.due_date || '-',
-                payment_date: payDate
+                payment_date: payDate,
+                is_prepaid_valid: isPrepaidValid,
+                is_expired: !isPrepaidValid && statusUpper === 'UNPAID'
             };
         });
 
-        const unpaidInvoices = mappedInvoices.filter(i => i.status === 'UNPAID');
+        // Prepaid Rule: Hanya tagihan UNPAID yang masih dalam toleransi prabayar (bulan berjalan atau maksimal bulan -1)
+        const payableUnpaidInvoices = mappedInvoices.filter(i => i.status === 'UNPAID' && i.is_prepaid_valid);
+        const expiredUnpaidInvoices = mappedInvoices.filter(i => i.status === 'UNPAID' && !i.is_prepaid_valid);
         const paidInvoices = mappedInvoices.filter(i => i.status === 'PAID');
+
+        // Tagihan yang relevan untuk ditampilkan: Tagihan lunas (riwayat) dan tagihan aktif yang belum kadaluarsa
+        const visibleInvoices = mappedInvoices.filter(i => i.status === 'PAID' || i.is_prepaid_valid);
 
         return res.json({
             success: true,
@@ -4625,12 +4675,17 @@ app.post('/api/public/billing/check', async (req, res) => {
                 status: primaryCustomer.status || 'active'
             },
             summary: {
-                total_invoices: mappedInvoices.length,
-                unpaid_count: unpaidInvoices.length,
-                unpaid_total: unpaidInvoices.reduce((sum, inv) => sum + inv.amount, 0),
-                has_unpaid: unpaidInvoices.length > 0
+                total_invoices: visibleInvoices.length,
+                unpaid_count: payableUnpaidInvoices.length,
+                unpaid_total: payableUnpaidInvoices.reduce((sum, inv) => sum + inv.amount, 0),
+                has_unpaid: payableUnpaidInvoices.length > 0,
+                has_expired_unpaid: expiredUnpaidInvoices.length > 0,
+                expired_count: expiredUnpaidInvoices.length,
+                prepaid_note: expiredUnpaidInvoices.length > 0 
+                    ? 'Terdapat tagihan periode lampau (> 1 bulan lewat) yang sudah ditutup/tidak berlaku karena sistem prabayar (prepaid).'
+                    : null
             },
-            invoices: mappedInvoices
+            invoices: visibleInvoices
         });
     } catch (err) {
         console.error('[PUBLIC BILLING CHECK ERROR]', err);
@@ -4680,6 +4735,13 @@ app.post('/api/public/billing/create-qris', async (req, res) => {
 
         if (invoice.status === 'PAID') {
             return res.status(400).json({ success: false, error: 'Tagihan ini sudah lunas!' });
+        }
+
+        if (!isPeriodValidForPrepaid(invoice.period, invoice.due_date)) {
+            return res.status(400).json({
+                success: false,
+                error: `Tagihan periode ${invoice.period || 'lampau'} sudah kadaluarsa (> 1 bulan lewat) dan tidak dapat dibayar karena sistem prabayar (prepaid).`
+            });
         }
 
         const amount = Math.round(Number(invoice.amount));
@@ -6821,7 +6883,7 @@ app.get('/api/customer-portal/dashboard', async (req, res) => {
         const relatedCustomerIds = Array.from(new Set([targetId, ...relatedCustomers.map(c => c.id)]));
 
         // 2. Invoices & Payments History across all customer accounts
-        const invoices = await Invoice.findAll({
+        const rawInvoices = await Invoice.findAll({
             where: { customer_id: { [Op.in]: relatedCustomerIds } },
             include: [{
                 model: Payment,
@@ -6829,6 +6891,13 @@ app.get('/api/customer-portal/dashboard', async (req, res) => {
             }],
             order: [['due_date', 'DESC']],
             limit: 50
+        });
+
+        // Filter for prepaid model: only include PAID invoices (history) and UNPAID invoices within valid period (current month or month -1)
+        const invoices = rawInvoices.filter(inv => {
+            const statusUpper = (inv.status || '').toUpperCase();
+            if (statusUpper === 'PAID') return true;
+            return isPeriodValidForPrepaid(inv.period, inv.due_date);
         });
 
         console.log(`[DASHBOARD INVOICES QUERY] TargetID: ${targetId}, Customer: ${customer.name}/${customer.real_name}, RelatedIDs: ${relatedCustomerIds.join(',')}, FoundInvoices: ${invoices.length}`);

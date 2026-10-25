@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cek & Bayar Tagihan WiFi - Giganusa</title>
+  <meta name="description" content="Layanan resmi pengecekan dan pembayaran tagihan internet WiFi Giganusa tanpa perlu login. Cepat, aman, dan langsung lunas via QRIS.">
+  <link rel="icon" type="image/svg+xml" href="assets/assets/logo.svg">
+  <link rel="apple-touch-icon" href="assets/assets/logo.svg">
+  <meta name="theme-color" content="#4F46E5">
+
+  <style>
+    :root {
+      --primary: #4F46E5;
+      --primary-dark: #3730A3;
+      --primary-light: #EEF2FF;
+      --success: #10B981;
+      --success-light: #ECFDF5;
+      --warning: #F59E0B;
+      --warning-light: #FFFBEB;
+      --danger: #EF4444;
+      --danger-light: #FEF2F2;
+      --bg: #F8FAFC;
+      --card-bg: #FFFFFF;
+      --text: #0F172A;
+      --text-muted: #64748B;
+      --border: #E2E8F0;
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 16px 40px;
+    }
+
+    /* Top Gradient Banner */
+    .hero-banner {
+      width: 100vw;
+      background: linear-gradient(135deg, #4338CA 0%, #4F46E5 50%, #6366F1 100%);
+      color: white;
+      padding: 36px 20px 52px;
+      text-align: center;
+      border-radius: 0 0 28px 28px;
+      box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.3);
+      position: relative;
+    }
+
+    .hero-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .hero-title {
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.3;
+      margin-bottom: 6px;
+    }
+
+    .hero-sub {
+      font-size: 13.5px;
+      opacity: 0.9;
+      max-width: 380px;
+      margin: 0 auto;
+      line-height: 1.4;
+    }
+
+    /* Main Container */
+    .container {
+      width: 100%;
+      max-width: 480px;
+      margin-top: -30px;
+      z-index: 10;
+    }
+
+    /* Card Box */
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+      border: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    /* Input Form */
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-icon {
+      position: absolute;
+      left: 14px;
+      color: #94A3B8;
+      width: 20px;
+      height: 20px;
+    }
+
+    .input-field {
+      width: 100%;
+      padding: 14px 14px 14px 44px;
+      border-radius: 12px;
+      border: 1.5px solid var(--border);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      outline: none;
+      transition: all 0.2s ease;
+      background: #F8FAFC;
+    }
+
+    .input-field:focus {
+      border-color: var(--primary);
+      background: #FFFFFF;
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+    }
+
+    .btn-submit {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, #4F46E5 0%, #4338CA 100%);
+      color: white;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+      transition: all 0.2s ease;
+    }
+
+    .btn-submit:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(79, 70, 229, 0.4);
+    }
+
+    .btn-submit:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    .form-note {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 10px;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    /* Result Area */
+    #resultArea {
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Customer Info Header */
+    .cust-card {
+      background: #F1F5F9;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .cust-name {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .cust-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .badge-success { background: var(--success-light); color: var(--success); }
+    .badge-danger { background: var(--danger-light); color: var(--danger); }
+    .badge-warning { background: var(--warning-light); color: var(--warning); }
+
+    /* Invoice List Item */
+    .invoice-item {
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 12px;
+      background: white;
+      transition: all 0.2s ease;
+    }
+
+    .invoice-item.unpaid {
+      border-color: #FECACA;
+      background: #FFFBFB;
+    }
+
+    .invoice-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+
+    .inv-period {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .inv-due {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .inv-amount {
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .btn-pay-qris {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      background: var(--success);
+      color: white;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+      transition: all 0.2s;
+    }
+
+    .btn-pay-qris:hover {
+      background: #059669;
+    }
+
+    /* Green All Paid Celebration */
+    .all-paid-box {
+      text-align: center;
+      padding: 24px 16px;
+      background: var(--success-light);
+      border-radius: 14px;
+      border: 1.5px solid #A7F3D0;
+    }
+
+    .all-paid-icon {
+      width: 56px;
+      height: 56px;
+      background: #10B981;
+      color: white;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin-bottom: 12px;
+    }
+
+    .all-paid-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #065F46;
+      margin-bottom: 6px;
+    }
+
+    .all-paid-desc {
+      font-size: 12.5px;
+      color: #047857;
+      line-height: 1.4;
+    }
+
+    /* Modal QRIS Sheet */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-sheet {
+      background: white;
+      width: 100%;
+      max-width: 480px;
+      max-height: 92vh;
+      border-radius: 24px 24px 0 0;
+      overflow-y: auto;
+      padding: 20px 20px 32px;
+      animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+
+    .modal-handle {
+      width: 40px;
+      height: 4px;
+      background: #CBD5E1;
+      border-radius: 999px;
+      margin: 0 auto 16px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    .modal-close {
+      background: #F1F5F9;
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .qr-container {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      text-align: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+      margin-bottom: 16px;
+    }
+
+    .qr-svg-wrap {
+      max-width: 240px;
+      margin: 12px auto;
+    }
+
+    .qr-svg-wrap svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* Amber Notice */
+    .notice-box {
+      background: var(--warning-light);
+      border: 1px solid #FDE68A;
+      color: #92400E;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    /* Guide Box */
+    .guide-box {
+      background: #F8FAFC;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .guide-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .step-item {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: #334155;
+    }
+
+    .step-num {
+      width: 18px;
+      height: 18px;
+      background: var(--primary);
+      color: white;
+      border-radius: 50%;
+      font-size: 10px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    /* Spinner */
+    .spinner {
+      border: 2.5px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 24px;
+    }
+
+    .footer a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero Header -->
+  <header class="hero-banner">
+    <div class="hero-brand">
+      <span>GIGANUSA</span> • <span>PORTAL RESMI</span>
+    </div>
+    <h1 class="hero-title">Cek & Bayar Tagihan WiFi</h1>
+    <p class="hero-sub">Masukkan nomor WhatsApp / HP yang terdaftar untuk memeriksa tagihan dan membayar via QRIS seketika.</p>
+  </header>
+
+  <!-- Container -->
+  <main class="container">
+    <!-- Form Card -->
+    <div class="card">
+      <form id="checkForm" onsubmit="handleCheckBilling(event)">
+        <div class="form-group">
+          <label class="form-label" for="phoneInput">Nomor WhatsApp / HP Pelanggan</label>
+          <div class="input-wrap">
+            <svg class="input-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+            </svg>
+            <input 
+              type="tel" 
+              id="phoneInput" 
+              class="input-field" 
+              placeholder="Contoh: 081234567890" 
+              required 
+              autocomplete="tel"
+              autofocus
+            />
+          </div>
+        </div>
+
+        <button type="submit" id="btnCheck" class="btn-submit">
+          <span id="btnText">Periksa Tagihan</span>
+          <div id="btnSpinner" class="spinner" style="display: none;"></div>
+        </button>
+
+        <p class="form-note">🔒 Layanan publik aman & terenkripsi. Data identitas pelanggan disamarkan (*masked*) untuk menjaga privasi Anda.</p>
+      </form>
+    </div>
+
+    <!-- Error Alert Box -->
+    <div id="errorCard" class="card" style="display: none; background: #FEF2F2; border-color: #FECACA; color: #991B1B;">
+      <div style="display: flex; gap: 10px; align-items: flex-start;">
+        <span style="font-size: 20px;">⚠️</span>
+        <div>
+          <h4 style="font-size: 14px; font-weight: 800; margin-bottom: 4px;">Informasi</h4>
+          <p id="errorText" style="font-size: 12.5px; line-height: 1.4; color: #7F1D1D;"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result Area -->
+    <div id="resultArea">
+      <!-- Customer Info -->
+      <div class="card" style="padding: 16px;">
+        <div class="cust-card">
+          <div>
+            <div id="custName" class="cust-name">Pelanggan</div>
+            <div id="custPhone" class="cust-meta">0812****789</div>
+          </div>
+          <div style="text-align: right;">
+            <span id="custBadge" class="badge badge-success">Aktif</span>
+            <div id="custPackage" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; font-weight: 600;">Paket WiFi</div>
+          </div>
+        </div>
+
+        <!-- Invoices List Container -->
+        <div id="invoicesList"></div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <p>&copy; 2026 Giganusa • Solusi Internet Cepat & Stabil</p>
+      <p style="margin-top: 4px;"><a href="https://wa.me/6282288993664" target="_blank">Butuh Bantuan CS? WhatsApp Kami</a></p>
+    </footer>
+  </main>
+
+  <!-- Modal QRIS Sheet -->
+  <div id="qrisModal" class="modal-overlay" onclick="closeQrisModal(event)">
+    <div class="modal-sheet" onclick="event.stopPropagation()">
+      <div class="modal-handle"></div>
+      
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 800; color: var(--text);">Pembayaran QRIS Resmi</h3>
+          <p style="font-size: 11px; color: var(--text-muted);">Kanal Resmi QRIS Nasional • SumoPod Pay</p>
+        </div>
+        <button class="modal-close" onclick="closeQrisModal()">&times;</button>
+      </div>
+
+      <!-- Live Payment View -->
+      <div id="modalPayView">
+        <div class="qr-container">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <img src="https://static.xenithpay.com/images/qris.png?v=3" alt="QRIS Logo" style="height: 24px;">
+            <span style="font-size: 10px; background: #FEF3C7; color: #B45309; padding: 2px 8px; border-radius: 4px; font-weight: 800;">24 Jam</span>
+          </div>
+
+          <div id="modalQrSvg" class="qr-svg-wrap">
+            <!-- Injected SVG QR -->
+          </div>
+
+          <p style="font-size: 10px; color: #94A3B8; font-weight: 600;">Standar QRIS Nasional • Bank Indonesia & ASPI</p>
+        </div>
+
+        <!-- Nominal Box -->
+        <div class="card" style="padding: 14px; margin-bottom: 14px; background: white; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 11.5px; color: var(--text-muted); font-weight: 600;">Total Pembayaran</div>
+            <div id="modalAmount" style="font-size: 20px; font-weight: 900; color: var(--text);">Rp 0</div>
+          </div>
+          <button onclick="copyModalAmount()" style="background: #F1F5F9; border: 1px solid #CBD5E1; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; color: #334155;">
+            Salin Nominal
+          </button>
+        </div>
+
+        <!-- Amber Notice -->
+        <div class="notice-box">
+          <span style="font-size: 16px;">⚠️</span>
+          <span><strong>PENTING:</strong> Mohon bayar tepat sesuai nominal di atas hingga 3 digit terakhir. Tiga digit terakhir adalah kode pembayaran unik untuk verifikasi otomatis sistem.</span>
+        </div>
+
+        <!-- Formal Guide -->
+        <div class="guide-box">
+          <div class="guide-title">
+            <span>📖</span> Petunjuk Pembayaran (Satu Perangkat):
+          </div>
+          <div class="step-item">
+            <span class="step-num">1</span>
+            <span>Ambil tangkapan layar (screenshot) kode QRIS di atas dan simpan di Galeri foto perangkat Anda.</span>
+          </div>
+          <div class="step-item">
+            <span class="step-num">2</span>
+            <span>Buka aplikasi m-Banking (BCA, Mandiri, BRI, BNI) atau e-Wallet (DANA, GoPay, OVO, ShopeePay).</span>
+          </div>
+          <div class="step-item">
+            <span class="step-num">3</span>
+            <span>Pilih menu Pembayaran / Scan QRIS, lalu pilih opsi unggah gambar dari Galeri foto.</span>
+          </div>
+          <div class="step-item">
+            <span class="step-num">4</span>
+            <span>Periksa nominal (termasuk 3 digit kode pembayaran) dan masukkan PIN Anda untuk menyelesaikan transaksi.</span>
+          </div>
+        </div>
+
+        <!-- Manual Check Button -->
+        <button id="btnCheckStatus" onclick="manualCheckStatus()" class="btn-submit" style="background: var(--success); margin-bottom: 10px;">
+          <span>Cek Status Pembayaran</span>
+        </button>
+
+        <div style="text-align: center;">
+          <a id="modalWebLink" href="#" target="_blank" style="font-size: 11.5px; color: var(--text-muted); text-decoration: underline;">
+            Buka halaman web pembayaran di peramban
+          </a>
+        </div>
+      </div>
+
+      <!-- Success Paid View -->
+      <div id="modalSuccessView" style="display: none; text-align: center; padding: 30px 10px;">
+        <div style="width: 72px; height: 72px; background: #ECFDF5; border: 3px solid #A7F3D0; color: #10B981; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 16px;">
+          ✓
+        </div>
+        <h3 style="font-size: 20px; font-weight: 900; color: #065F46; margin-bottom: 8px;">Alhamdulillah, Pembayaran Berhasil!</h3>
+        <p style="font-size: 13px; color: #64748B; line-height: 1.4; margin-bottom: 24px;">Tagihan Anda telah lunas dan layanan internet Anda telah aktif kembali.</p>
+        <button onclick="closeQrisModal(); handleCheckBilling();" class="btn-submit" style="background: var(--success);">
+          Selesai & Tutup
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'https://app.telaju.com/api';
+
+    let currentPhone = '';
+    let currentInvoiceId = '';
+    let currentRawAmount = 0;
+    let pollTimer = null;
+
+    function formatRupiah(num) {
+      return 'Rp ' + Number(num || 0).toLocaleString('id-ID');
+    }
+
+    async function handleCheckBilling(e) {
+      if (e) e.preventDefault();
+
+      const phoneInput = document.getElementById('phoneInput');
+      const phone = phoneInput.value.trim();
+      if (!phone) return;
+
+      currentPhone = phone;
+
+      const btn = document.getElementById('btnCheck');
+      const btnText = document.getElementById('btnText');
+      const btnSpinner = document.getElementById('btnSpinner');
+      const errorCard = document.getElementById('errorCard');
+      const errorText = document.getElementById('errorText');
+      const resultArea = document.getElementById('resultArea');
+
+      errorCard.style.display = 'none';
+      btn.disabled = true;
+      btnText.style.display = 'none';
+      btnSpinner.style.display = 'inline-block';
+
+      try {
+        const res = await fetch(`${API_BASE}/public/billing/check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          resultArea.style.display = 'none';
+          errorText.innerText = data.error || 'Gagal memeriksa tagihan. Pastikan nomor HP Anda sesuai.';
+          errorCard.style.display = 'block';
+          return;
+        }
+
+        renderResult(data);
+      } catch (err) {
+        resultArea.style.display = 'none';
+        errorText.innerText = 'Gagal terhubung ke server. Periksa koneksi internet Anda atau coba beberapa saat lagi.';
+        errorCard.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btnText.style.display = 'inline';
+        btnSpinner.style.display = 'none';
+      }
+    }
+
+    function renderResult(data) {
+      const cust = data.customer || {};
+      const invoices = data.invoices || [];
+
+      document.getElementById('custName').innerText = cust.masked_name || 'Pelanggan';
+      document.getElementById('custPhone').innerText = cust.masked_phone || currentPhone;
+      document.getElementById('custPackage').innerText = cust.package_profile || 'Paket WiFi';
+      
+      const statusBadge = document.getElementById('custBadge');
+      if (cust.status === 'active') {
+        statusBadge.className = 'badge badge-success';
+        statusBadge.innerText = 'Aktif';
+      } else {
+        statusBadge.className = 'badge badge-danger';
+        statusBadge.innerText = cust.status || 'Nonaktif';
+      }
+
+      const listContainer = document.getElementById('invoicesList');
+      listContainer.innerHTML = '';
+
+      const unpaidList = invoices.filter(i => i.status === 'UNPAID');
+
+      if (unpaidList.length === 0) {
+        listContainer.innerHTML = `
+          <div class="all-paid-box">
+            <div class="all-paid-icon">✓</div>
+            <div class="all-paid-title">Semua Tagihan Sudah Lunas!</div>
+            <p class="all-paid-desc">Tidak ada tagihan yang tertunggak saat ini. Terima kasih telah menggunakan layanan internet kami.</p>
+          </div>
+        `;
+      } else {
+        let html = `
+          <div style="background: #FEF3C7; border: 1px solid #FDE68A; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">📌</span>
+            <span style="font-size: 12.5px; font-weight: 700; color: #92400E;">
+              Terdapat ${unpaidList.length} tagihan belum dibayar.
+            </span>
+          </div>
+        `;
+
+        unpaidList.forEach(inv => {
+          html += `
+            <div class="invoice-item unpaid">
+              <div class="invoice-header">
+                <div>
+                  <div class="inv-period">Tagihan Periode: ${inv.period}</div>
+                  <div class="inv-due">Jatuh Tempo: ${inv.due_date}</div>
+                </div>
+                <span class="badge badge-danger">BELUM LUNAS</span>
+              </div>
+              <div class="inv-amount">${formatRupiah(inv.amount)}</div>
+              <button onclick="requestQrisPayment('${inv.id}')" class="btn-pay-qris">
+                <span>📱</span>
+                <span>Bayar via QRIS Sekarang</span>
+              </button>
+            </div>
+          `;
+        });
+
+        listContainer.innerHTML = html;
+      }
+
+      // History of paid invoices if any
+      const paidList = invoices.filter(i => i.status === 'PAID');
+      if (paidList.length > 0) {
+        let historyHtml = `
+          <div style="margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--border);">
+            <div style="font-size: 12.5px; font-weight: 800; color: var(--text-muted); margin-bottom: 10px;">
+              RIWAYAT TAGIHAN SELESAI
+            </div>
+        `;
+
+        paidList.slice(0, 3).forEach(inv => {
+          historyHtml += `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #F1F5F9; font-size: 12.5px;">
+              <div>
+                <span style="font-weight: 700;">Periode ${inv.period}</span>
+                <div style="font-size: 11px; color: var(--text-muted);">${inv.payment_date ? 'Dibayar: ' + inv.payment_date : 'Lunas'}</div>
+              </div>
+              <span class="badge badge-success" style="font-size: 10px;">LUNAS</span>
+            </div>
+          `;
+        });
+
+        historyHtml += '</div>';
+        listContainer.innerHTML += historyHtml;
+      }
+
+      document.getElementById('resultArea').style.display = 'block';
+      document.getElementById('resultArea').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function requestQrisPayment(invoiceId) {
+      currentInvoiceId = invoiceId;
+
+      const modal = document.getElementById('qrisModal');
+      const payView = document.getElementById('modalPayView');
+      const successView = document.getElementById('modalSuccessView');
+      const qrSvgWrap = document.getElementById('modalQrSvg');
+      const amountEl = document.getElementById('modalAmount');
+      const webLink = document.getElementById('modalWebLink');
+
+      payView.style.display = 'block';
+      successView.style.display = 'none';
+      qrSvgWrap.innerHTML = `
+        <div style="padding: 40px 0; text-align: center;">
+          <div class="spinner" style="border-color: #CBD5E1; border-top-color: var(--primary); width: 28px; height: 28px; margin: 0 auto 10px;"></div>
+          <p style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Menyiapkan QRIS Resmi...</p>
+        </div>
+      `;
+
+      modal.style.display = 'flex';
+
+      try {
+        const res = await fetch(`${API_BASE}/public/billing/create-qris`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            invoiceId: invoiceId,
+            phone: currentPhone
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          alert(data.error || 'Gagal membuat QRIS.');
+          closeQrisModal();
+          return;
+        }
+
+        currentRawAmount = data.amount;
+        amountEl.innerText = formatRupiah(data.amount);
+        webLink.href = data.payment_link_url || '#';
+
+        if (data.qr_svg) {
+          qrSvgWrap.innerHTML = data.qr_svg;
+        } else if (data.payment_link_url) {
+          qrSvgWrap.innerHTML = `
+            <div style="padding: 20px;">
+              <p style="font-size: 13px; color: var(--text); margin-bottom: 12px;">Silakan selesaikan pembayaran melalui tautan resmi SumoPod:</p>
+              <a href="${data.payment_link_url}" target="_blank" class="btn-submit" style="text-decoration: none;">Buka Pembayaran</a>
+            </div>
+          `;
+        }
+
+        startPolling();
+      } catch (err) {
+        alert('Terjadi kesalahan saat memproses pembayaran.');
+        closeQrisModal();
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      pollTimer = setInterval(async () => {
+        if (!currentInvoiceId || !currentPhone) return;
+        try {
+          const res = await fetch(`${API_BASE}/public/billing/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              invoiceId: currentInvoiceId,
+              phone: currentPhone
+            })
+          });
+          const data = await res.json();
+          if (data && data.is_paid) {
+            stopPolling();
+            showModalSuccess();
+          }
+        } catch (_) {}
+      }, 4000);
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    async function manualCheckStatus() {
+      const btn = document.getElementById('btnCheckStatus');
+      btn.disabled = true;
+      btn.innerText = 'Memeriksa...';
+
+      try {
+        const res = await fetch(`${API_BASE}/public/billing/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            invoiceId: currentInvoiceId,
+            phone: currentPhone
+          })
+        });
+        const data = await res.json();
+        if (data && data.is_paid) {
+          stopPolling();
+          showModalSuccess();
+        } else {
+          alert('Pembayaran belum terdeteksi. Silakan selesaikan transaksi pada m-Banking / e-Wallet Anda.');
+        }
+      } catch (e) {
+        alert('Gagal mengecek status.');
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Cek Status Pembayaran';
+      }
+    }
+
+    function showModalSuccess() {
+      document.getElementById('modalPayView').style.display = 'none';
+      document.getElementById('modalSuccessView').style.display = 'block';
+    }
+
+    function copyModalAmount() {
+      if (!currentRawAmount) return;
+      navigator.clipboard.writeText(currentRawAmount.toString()).then(() => {
+        alert('Nominal ' + formatRupiah(currentRawAmount) + ' berhasil disalin!');
+      }).catch(() => {
+        prompt('Salin nominal di bawah ini:', currentRawAmount);
+      });
+    }
+
+    function closeQrisModal(e) {
+      stopPolling();
+      document.getElementById('qrisModal').style.display = 'none';
+    }
+  </script>
+</body>
+</html>

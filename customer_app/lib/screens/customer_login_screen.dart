@@ -8,6 +8,7 @@ import '../widgets/giga_logo_widget.dart';
 import '../widgets/whatsapp_support_button.dart';
 import 'main_navigation_screen.dart';
 import 'force_change_password_screen.dart';
+import 'public_billing_screen.dart';
 
 class CustomerLoginScreen extends StatefulWidget {
   const CustomerLoginScreen({super.key});
@@ -553,6 +554,36 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                 ),
                               ],
                             ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Cek & Bayar Tagihan (Tanpa Login)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => PublicBillingScreen(
+                              initialPhone: _phoneController.text.trim(),
+                            ),
+                          ),
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFFC7D2FE), width: 1.5),
+                        backgroundColor: const Color(0xFFEEF2FF),
+                        foregroundColor: const Color(0xFF4F46E5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                      label: const Text(
+                        'Cek & Bayar Tagihan (Tanpa Login)',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                      ),
                     ),
                   ),
 

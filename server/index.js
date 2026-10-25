@@ -4463,6 +4463,364 @@ app.get('/api/billing/sumopod/demo-checkout/:invoiceId', async (req, res) => {
     }
 });
 
+// ==========================================
+// SECURE PUBLIC BILLING & QRIS PAYMENT APIS
+// (No login required - verified by phone number)
+// ==========================================
+
+// In-memory Rate Limiter to prevent phone enumeration / brute-force scraping
+const publicBillingRateLimitMap = new Map();
+function checkPublicBillingRateLimit(ip) {
+    const now = Date.now();
+    const windowMs = 60 * 1000; // 1 minute window
+    const maxRequests = 15;     // max 15 requests per minute per IP
+
+    let record = publicBillingRateLimitMap.get(ip);
+    if (!record || (now - record.startTime) > windowMs) {
+        record = { count: 1, startTime: now };
+        publicBillingRateLimitMap.set(ip, record);
+        return true;
+    }
+
+    if (record.count >= maxRequests) {
+        return false;
+    }
+
+    record.count++;
+    return true;
+}
+
+// Clean up old rate limit records every 10 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, record] of publicBillingRateLimitMap.entries()) {
+        if (now - record.startTime > 300000) {
+            publicBillingRateLimitMap.delete(ip);
+        }
+    }
+}, 600000);
+
+// Helper to mask customer name for privacy (e.g. "Budi Santoso" -> "Budi S******")
+function maskCustomerName(name) {
+    if (!name) return 'Pelanggan';
+    const words = name.trim().split(/\s+/);
+    return words.map((w, idx) => {
+        if (idx === 0) {
+            if (w.length <= 2) return w;
+            return w.slice(0, 2) + '*'.repeat(Math.max(1, w.length - 2));
+        }
+        return w[0] + '*'.repeat(Math.max(2, w.length - 1));
+    }).join(' ');
+}
+
+// Helper to mask phone number (e.g. "08123456789" -> "0812****789")
+function maskPhoneNumber(phone) {
+    if (!phone) return '';
+    const clean = phone.replace(/\D/g, '');
+    if (clean.length < 8) return clean;
+    const start = clean.slice(0, 4);
+    const end = clean.slice(-3);
+    return `${start}****${end}`;
+}
+
+// 1. Check Billing by Phone Number (Public, Secure & Masked)
+app.post('/api/public/billing/check', async (req, res) => {
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+    if (!checkPublicBillingRateLimit(clientIp)) {
+        return res.status(429).json({
+            success: false,
+            error: 'Terlalu banyak permintaan. Silakan tunggu 1 menit sebelum mencoba kembali.'
+        });
+    }
+
+    try {
+        let { phone } = req.body;
+        if (!phone) {
+            return res.status(400).json({ success: false, error: 'Nomor WhatsApp / HP wajib diisi' });
+        }
+
+        phone = String(phone).trim();
+        const cleanPhone = phone.replace(/\D/g, '');
+        if (cleanPhone.length < 8) {
+            return res.status(400).json({ success: false, error: 'Nomor HP tidak valid (minimal 8 digit angka)' });
+        }
+
+        const phoneSuffix = cleanPhone.slice(-8);
+
+        const whereConditions = [
+            { phone_number: phone },
+            { phone_number: cleanPhone },
+            { phone_number: { [Op.like]: `%${phoneSuffix}` } },
+            { mikrotik_name: phone },
+            { mikrotik_name: cleanPhone }
+        ];
+
+        let customers = await Customer.findAll({
+            where: { [Op.or]: whereConditions },
+            attributes: ['id', 'name', 'real_name', 'phone_number', 'profile', 'status', 'activationDate']
+        });
+
+        // Fallback: check CACHE.customers for whatsapp number
+        if (!customers || customers.length === 0) {
+            for (const [key, meta] of Object.entries(CACHE.customers || {})) {
+                const metaWa = meta.whatsapp ? String(meta.whatsapp).replace(/\D/g, '') : '';
+                if (metaWa && (metaWa === cleanPhone || metaWa.endsWith(phoneSuffix) || cleanPhone.endsWith(metaWa))) {
+                    const serverId = key.slice(0, 36);
+                    const mikrotikName = key.slice(37);
+                    const match = await Customer.findOne({
+                        where: { server_id: serverId, mikrotik_name: mikrotikName },
+                        attributes: ['id', 'name', 'real_name', 'phone_number', 'profile', 'status', 'activationDate']
+                    });
+                    if (match && !customers.some(c => c.id === match.id)) {
+                        customers.push(match);
+                    }
+                }
+            }
+        }
+
+        if (!customers || customers.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Nomor WhatsApp / HP tidak terdaftar sebagai pelanggan kami. Pastikan nomor yang dimasukkan sesuai saat registrasi.'
+            });
+        }
+
+        const customerIds = customers.map(c => c.id);
+
+        // Fetch Invoices across all accounts matching this phone
+        const invoices = await Invoice.findAll({
+            where: { customer_id: { [Op.in]: customerIds } },
+            include: [{ model: Payment, required: false }],
+            order: [['due_date', 'DESC']],
+            limit: 12
+        });
+
+        const primaryCustomer = customers[0];
+        const rawName = primaryCustomer.real_name || primaryCustomer.name;
+
+        const mappedInvoices = invoices.map(inv => {
+            let payDate = null;
+            if (inv.Payments && inv.Payments.length > 0) {
+                payDate = inv.Payments[0].transaction_date;
+            }
+            return {
+                id: inv.id,
+                period: inv.period || '-',
+                amount: Math.round(Number(inv.amount)),
+                status: inv.status ? inv.status.toUpperCase() : 'UNPAID',
+                due_date: inv.due_date || '-',
+                payment_date: payDate
+            };
+        });
+
+        const unpaidInvoices = mappedInvoices.filter(i => i.status === 'UNPAID');
+        const paidInvoices = mappedInvoices.filter(i => i.status === 'PAID');
+
+        return res.json({
+            success: true,
+            customer: {
+                masked_name: maskCustomerName(rawName),
+                masked_phone: maskPhoneNumber(primaryCustomer.phone_number || cleanPhone),
+                package_profile: primaryCustomer.profile || 'Internet WiFi',
+                status: primaryCustomer.status || 'active'
+            },
+            summary: {
+                total_invoices: mappedInvoices.length,
+                unpaid_count: unpaidInvoices.length,
+                unpaid_total: unpaidInvoices.reduce((sum, inv) => sum + inv.amount, 0),
+                has_unpaid: unpaidInvoices.length > 0
+            },
+            invoices: mappedInvoices
+        });
+    } catch (err) {
+        console.error('[PUBLIC BILLING CHECK ERROR]', err);
+        return res.status(500).json({ success: false, error: 'Terjadi kesalahan sistem saat mengecek tagihan.' });
+    }
+});
+
+// 2. Create QRIS Payment for Public User (Strict Phone Ownership Verification)
+app.post('/api/public/billing/create-qris', async (req, res) => {
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+    if (!checkPublicBillingRateLimit(clientIp)) {
+        return res.status(429).json({
+            success: false,
+            error: 'Terlalu banyak permintaan. Silakan tunggu 1 menit.'
+        });
+    }
+
+    try {
+        const { invoiceId, phone } = req.body;
+        if (!invoiceId || !phone) {
+            return res.status(400).json({ success: false, error: 'invoiceId dan nomor telepon wajib disertakan' });
+        }
+
+        const cleanPhone = String(phone).replace(/\D/g, '');
+        if (cleanPhone.length < 8) {
+            return res.status(400).json({ success: false, error: 'Nomor telepon tidak valid' });
+        }
+        const phoneSuffix = cleanPhone.slice(-8);
+
+        // Fetch invoice with customer
+        const invoice = await Invoice.findByPk(invoiceId, {
+            include: [{ model: Customer }]
+        });
+
+        if (!invoice) {
+            return res.status(404).json({ success: false, error: 'Tagihan tidak ditemukan' });
+        }
+
+        // Verify phone matches the invoice's customer phone or suffix
+        const custPhone = invoice.Customer ? (invoice.Customer.phone_number || '').replace(/\D/g, '') : '';
+        const custUsername = invoice.Customer ? (invoice.Customer.mikrotik_name || '').toLowerCase() : '';
+        const phoneMatches = custPhone.endsWith(phoneSuffix) || cleanPhone.endsWith(custPhone.slice(-8)) || custUsername === cleanPhone;
+
+        if (!phoneMatches) {
+            return res.status(403).json({ success: false, error: 'Otorisasi gagal: Tagihan ini bukan milik nomor telepon yang dimasukkan.' });
+        }
+
+        if (invoice.status === 'PAID') {
+            return res.status(400).json({ success: false, error: 'Tagihan ini sudah lunas!' });
+        }
+
+        const amount = Math.round(Number(invoice.amount));
+        const orderId = `INV-${invoice.id}-${Date.now().toString().slice(-6)}`;
+
+        const payload = {
+            order_id: orderId,
+            amount: amount,
+            currency: 'IDR',
+            expires_in_hours: 24,
+            payment_method_type_code: 'QRIS'
+        };
+
+        const activeKey = '1e44de55ca2cd390f706d9eaeee9bb65730bdbb508e541bc7de732ff29a35812';
+        const envKey = process.env.SUMOPOD_API_KEY;
+        const primaryKey = (envKey && envKey.length > 20 && !envKey.includes('4cbae0ec')) ? envKey : activeKey;
+        const fallbackKey = activeKey;
+
+        const makeSumopodRequest = async (apiKey) => {
+            try {
+                const sRes = await fetch(`${SUMOPOD_BASE_URL}/payments`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Api-Key': apiKey
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const resData = await sRes.json().catch(() => null);
+                return { status: sRes.status, ok: sRes.ok, data: resData };
+            } catch (err) {
+                return { status: 500, ok: false, data: { error: err.message } };
+            }
+        };
+
+        let result = await makeSumopodRequest(primaryKey);
+        if ((result.status === 401 || result.status === 403) && primaryKey !== fallbackKey) {
+            result = await makeSumopodRequest(fallbackKey);
+        }
+
+        if (result.ok && result.data && result.data.payment_link_url) {
+            const data = result.data;
+            let finalPaymentUrl = data.payment_link_url;
+            let qrSvg = null;
+
+            try {
+                const headRes = await fetch(data.payment_link_url, { redirect: 'manual' });
+                const loc = headRes.headers.get('location');
+                const checkoutUrl = loc || data.payment_link_url;
+
+                if (loc && loc.includes('checkout.pymnt.app/')) {
+                    finalPaymentUrl = loc.replace('checkout.pymnt.app/', 'checkout.pymnt.app/id/');
+                }
+
+                const pageRes = await fetch(checkoutUrl);
+                const html = await pageRes.text();
+                const svgMatch = html.match(/<svg id="qrcode"[^>]*>[\s\S]*?<\/svg>/i);
+                if (svgMatch) {
+                    qrSvg = svgMatch[0];
+                }
+            } catch (err) {
+                console.warn('[PUBLIC SUMOPOD QR SVG EXTRACT WARNING]', err.message);
+            }
+
+            console.log(`[PUBLIC SUMOPOD SUCCESS] Inv: ${invoice.id}, Payment ID: ${data.payment_id}`);
+
+            await InvoiceHistory.create({
+                invoice_id: invoice.id,
+                user_name: 'Public Portal',
+                action: 'SUMOPOD_QRIS_CREATED',
+                details: `Tautan QRIS SumoPod dibuat oleh publik (No HP: ${maskPhoneNumber(cleanPhone)}): ${finalPaymentUrl}`
+            }).catch(() => {});
+
+            return res.json({
+                success: true,
+                invoice_id: invoice.id,
+                payment_id: data.payment_id,
+                payment_link_url: finalPaymentUrl,
+                qr_svg: qrSvg,
+                merchant_name: data.merchant_name || '',
+                order_id: data.order_id || orderId,
+                amount: data.amount || amount,
+                status: data.status || 'PENDING'
+            });
+        }
+
+        return res.status(502).json({
+            success: false,
+            error: 'Gateway pembayaran sedang sibuk. Silakan coba beberapa saat lagi.'
+        });
+    } catch (err) {
+        console.error('[PUBLIC CREATE QRIS ERROR]', err);
+        return res.status(500).json({ success: false, error: 'Gagal membuat QRIS pembayaran: ' + err.message });
+    }
+});
+
+// 3. Polling Invoice Status (Public, Validates Phone Ownership)
+app.post('/api/public/billing/status', async (req, res) => {
+    try {
+        const { invoiceId, phone } = req.body;
+        if (!invoiceId || !phone) {
+            return res.status(400).json({ success: false, error: 'invoiceId dan phone wajib disertakan' });
+        }
+
+        const cleanPhone = String(phone).replace(/\D/g, '');
+        const phoneSuffix = cleanPhone.slice(-8);
+
+        const invoice = await Invoice.findByPk(invoiceId, {
+            include: [{ model: Customer }, { model: Payment, required: false }]
+        });
+
+        if (!invoice) {
+            return res.status(404).json({ success: false, error: 'Invoice not found' });
+        }
+
+        const custPhone = invoice.Customer ? (invoice.Customer.phone_number || '').replace(/\D/g, '') : '';
+        const custUsername = invoice.Customer ? (invoice.Customer.mikrotik_name || '').toLowerCase() : '';
+        const phoneMatches = custPhone.endsWith(phoneSuffix) || cleanPhone.endsWith(custPhone.slice(-8)) || custUsername === cleanPhone;
+
+        if (!phoneMatches) {
+            return res.status(403).json({ success: false, error: 'Unauthorized' });
+        }
+
+        const isPaid = invoice.status ? invoice.status.toUpperCase() === 'PAID' : false;
+        let payDate = null;
+        if (invoice.Payments && invoice.Payments.length > 0) {
+            payDate = invoice.Payments[0].transaction_date;
+        }
+
+        return res.json({
+            success: true,
+            invoice_id: invoice.id,
+            status: invoice.status ? invoice.status.toUpperCase() : 'UNPAID',
+            is_paid: isPaid,
+            payment_date: payDate
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // Helper to verify Svix HMAC Signatures for SumoPod Webhooks
 function verifySumopodSvixSignature(secret, svixId, svixTimestamp, svixSignature, rawBodyStr) {
     if (!secret || !svixId || !svixTimestamp || !svixSignature) return true;

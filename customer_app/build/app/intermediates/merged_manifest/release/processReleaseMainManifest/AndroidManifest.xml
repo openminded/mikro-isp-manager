@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.ayd.giganusa"
-    android:versionCode="4"
-    android:versionName="1.0.3" >
+    android:versionCode="5"
+    android:versionName="1.0.4" >
 
     <uses-sdk
         android:minSdkVersion="24"
@@ -35,7 +35,7 @@
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
         android:extractNativeLibs="false"
         android:icon="@drawable/ic_launcher"
-        android:label="GigaNusa"
+        android:label="Giganusa"
         android:usesCleartextTraffic="true" >
         <activity
             android:name="com.ayd.giganusa.MainActivity"
